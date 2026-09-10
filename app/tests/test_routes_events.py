@@ -166,3 +166,64 @@ class TestPreview:
                 "Monday","Tuesday","Wednesday","Thursday",
                 "Friday","Saturday","Sunday"
             ]
+
+
+class TestAllianceField:
+
+    async def test_create_defaults_to_server(self, client: AsyncClient):
+        r = await client.post("/admin/api/events", json=VALID_EVENT)
+        assert r.json()["alliance"] == "Server"
+
+    async def test_create_accepts_m0d(self, client: AsyncClient):
+        data = {**VALID_EVENT, "alliance": "M0D"}
+        r = await client.post("/admin/api/events", json=data)
+        assert r.status_code == 201
+        assert r.json()["alliance"] == "M0D"
+
+    async def test_create_accepts_nsr(self, client: AsyncClient):
+        data = {**VALID_EVENT, "alliance": "NSR"}
+        r = await client.post("/admin/api/events", json=data)
+        assert r.status_code == 201
+        assert r.json()["alliance"] == "NSR"
+
+    async def test_create_rejects_invalid_alliance(self, client: AsyncClient):
+        data = {**VALID_EVENT, "alliance": "PvE"}
+        r = await client.post("/admin/api/events", json=data)
+        assert r.status_code == 422
+        assert "alliance" in r.json()["detail"].lower()
+
+    async def test_patch_alliance(self, client: AsyncClient):
+        event = await create_event(client)
+        r = await client.patch(f"/admin/api/events/{event['id']}", json={"alliance": "M0D"})
+        assert r.status_code == 200
+        assert r.json()["alliance"] == "M0D"
+
+    async def test_patch_rejects_invalid_alliance(self, client: AsyncClient):
+        event = await create_event(client)
+        r = await client.patch(f"/admin/api/events/{event['id']}", json={"alliance": "Cycle"})
+        assert r.status_code == 422
+
+
+class TestLeadershipOnlyField:
+
+    async def test_create_defaults_to_false(self, client: AsyncClient):
+        r = await client.post("/admin/api/events", json=VALID_EVENT)
+        assert r.json()["leadership_only"] is False
+
+    async def test_create_accepts_true(self, client: AsyncClient):
+        data = {**VALID_EVENT, "leadership_only": True}
+        r = await client.post("/admin/api/events", json=data)
+        assert r.status_code == 201
+        assert r.json()["leadership_only"] is True
+
+    async def test_patch_leadership_only(self, client: AsyncClient):
+        event = await create_event(client)
+        r = await client.patch(f"/admin/api/events/{event['id']}", json={"leadership_only": True})
+        assert r.status_code == 200
+        assert r.json()["leadership_only"] is True
+
+    async def test_patch_leadership_only_false_explicitly(self, client: AsyncClient):
+        event = await create_event(client, {"leadership_only": True})
+        r = await client.patch(f"/admin/api/events/{event['id']}", json={"leadership_only": False})
+        assert r.status_code == 200
+        assert r.json()["leadership_only"] is False

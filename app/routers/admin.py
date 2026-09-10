@@ -14,6 +14,7 @@ from models.db import (
 )
 from services.discord_api import (
     cancel_discord_event, create_discord_event,
+    get_guild_channels, get_guild_roles,
     send_channel_message, verify_token
 )
 from services.recurrence import next_occurrences, build_start_datetime
@@ -32,6 +33,8 @@ class EventIn(BaseModel):
     discord_channel:         str = ""
     description:             str = ""
     category:                str = "Other"
+    alliance:                str = "Server"
+    leadership_only:         bool = False
     anchor_date:             str
     notification_channel_id: str = ""
     notification_role_id:    str = ""
@@ -58,6 +61,14 @@ class EventIn(BaseModel):
         if val <= 0:
             raise ValueError("Duration must be greater than 0 hours")
         return val
+
+    @field_validator("alliance", mode="before")
+    @classmethod
+    def validate_alliance(cls, v):
+        v = str(v).strip()
+        if v not in ("M0D", "NSR", "Server"):
+            raise ValueError("Alliance must be one of: M0D, NSR, Server")
+        return v
 
     @field_validator("start_time_utc", mode="before")
     @classmethod
@@ -105,6 +116,8 @@ class EventPatch(BaseModel):
     discord_channel:         Optional[str]  = None
     description:             Optional[str]  = None
     category:                Optional[str]  = None
+    alliance:                Optional[str]  = None
+    leadership_only:         Optional[bool] = None
     active:                  Optional[bool] = None
     anchor_date:             Optional[str]  = None
     notification_channel_id: Optional[str]  = None
@@ -136,6 +149,16 @@ class EventPatch(BaseModel):
         if val <= 0:
             raise ValueError("Duration must be greater than 0 hours")
         return val
+
+    @field_validator("alliance", mode="before")
+    @classmethod
+    def validate_alliance(cls, v):
+        if v is None:
+            return v
+        v = str(v).strip()
+        if v not in ("M0D", "NSR", "Server"):
+            raise ValueError("Alliance must be one of: M0D, NSR, Server")
+        return v
 
     @field_validator("start_time_utc", mode="before")
     @classmethod
@@ -258,6 +281,8 @@ async def create_event(payload: EventIn, db: AsyncSession = Depends(get_db)):
         discord_channel         = payload.discord_channel,
         description             = payload.description,
         category                = payload.category,
+        alliance                = payload.alliance,
+        leadership_only         = payload.leadership_only,
         anchor_date             = date.fromisoformat(str(payload.anchor_date)),
         active                  = True,
         notification_channel_id = payload.notification_channel_id,
@@ -295,6 +320,8 @@ async def update_event(event_id: int, payload: EventPatch, db: AsyncSession = De
     if payload.discord_channel is not None:         event.discord_channel         = payload.discord_channel
     if payload.description is not None:             event.description             = payload.description
     if payload.category is not None:                event.category                = payload.category
+    if payload.alliance is not None:                event.alliance                = payload.alliance
+    if payload.leadership_only is not None:         event.leadership_only         = payload.leadership_only
     if payload.active is not None:                  event.active                  = payload.active
     if payload.anchor_date is not None:             event.anchor_date             = date.fromisoformat(payload.anchor_date)
     if payload.notification_channel_id is not None: event.notification_channel_id = payload.notification_channel_id
@@ -558,6 +585,32 @@ async def update_discord_config(payload: DiscordConfigIn, db: AsyncSession = Dep
     await db.commit()
     return {"status": "ok", "bot_username": result}
 
+
+
+# ── Discord metadata (channels/roles) ──────────────────────────
+
+@router.get("/api/discord/channels")
+async def list_discord_channels(db: AsyncSession = Depends(get_db)):
+    cfg_result = await db.execute(select(DiscordConfig))
+    cfg = cfg_result.scalar_one_or_none()
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Discord not configured")
+    channels, error = await get_guild_channels(cfg.bot_token, cfg.guild_id)
+    if error:
+        raise HTTPException(status_code=502, detail=error)
+    return channels
+
+
+@router.get("/api/discord/roles")
+async def list_discord_roles(db: AsyncSession = Depends(get_db)):
+    cfg_result = await db.execute(select(DiscordConfig))
+    cfg = cfg_result.scalar_one_or_none()
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Discord not configured")
+    roles, error = await get_guild_roles(cfg.bot_token, cfg.guild_id)
+    if error:
+        raise HTTPException(status_code=502, detail=error)
+    return roles
 
 
 # ── Discord Sync ──────────────────────────────────────────────
@@ -852,6 +905,8 @@ def _event_dict(e: EventDefinition) -> dict:
         "discord_channel":          e.discord_channel,
         "description":              e.description,
         "category":                 e.category,
+        "alliance":                 e.alliance,
+        "leadership_only":          e.leadership_only,
         "active":                   e.active,
         "anchor_date":              str(e.anchor_date),
         "notification_channel_id":  e.notification_channel_id,

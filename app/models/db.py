@@ -21,6 +21,8 @@ class EventDefinition(Base):
     discord_channel          = Column(Text, nullable=False, default="")
     description              = Column(Text, nullable=False, default="")
     category                 = Column(Text, nullable=False, default="Other")
+    alliance                 = Column(Text, nullable=False, default="Server")
+    leadership_only          = Column(Boolean, nullable=False, default=False)
     active                   = Column(Boolean, nullable=False, default=True)
     anchor_date              = Column(Date, nullable=False)
     notification_channel_id  = Column(Text, nullable=False, default="")

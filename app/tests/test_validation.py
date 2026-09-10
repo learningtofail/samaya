@@ -178,3 +178,38 @@ class TestMultipleErrors:
         # Both errors should appear in the detail string
         detail = r.json()["detail"]
         assert "interval" in detail.lower() or "duration" in detail.lower()
+
+
+# ── alliance ──────────────────────────────────────────────────
+
+class TestAllianceValidation:
+
+    async def test_m0d_accepted(self, client: AsyncClient):
+        data = {**VALID_EVENT, "alliance": "M0D"}
+        r = await client.post("/admin/api/events", json=data)
+        assert r.status_code == 201
+
+    async def test_nsr_accepted(self, client: AsyncClient):
+        data = {**VALID_EVENT, "alliance": "NSR"}
+        r = await client.post("/admin/api/events", json=data)
+        assert r.status_code == 201
+
+    async def test_server_accepted(self, client: AsyncClient):
+        data = {**VALID_EVENT, "alliance": "Server"}
+        r = await client.post("/admin/api/events", json=data)
+        assert r.status_code == 201
+
+    async def test_default_when_omitted(self, client: AsyncClient):
+        r = await client.post("/admin/api/events", json=VALID_EVENT)
+        assert r.json()["alliance"] == "Server"
+
+    async def test_unknown_alliance_rejected(self, client: AsyncClient):
+        data = {**VALID_EVENT, "alliance": "Everyone"}
+        r = await client.post("/admin/api/events", json=data)
+        assert r.status_code == 422
+        assert "alliance" in r.json()["detail"].lower()
+
+    async def test_lowercase_rejected(self, client: AsyncClient):
+        data = {**VALID_EVENT, "alliance": "m0d"}
+        r = await client.post("/admin/api/events", json=data)
+        assert r.status_code == 422

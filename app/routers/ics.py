@@ -1,12 +1,13 @@
 import hashlib
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 from icalendar import Calendar, Event as ICalEvent
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import AsyncSessionLocal
+from models import get_db
 from models.db import EventDefinition, Occurrence
 
 router = APIRouter()
@@ -16,22 +17,22 @@ LOOKAHEAD    = 7   # extra days beyond the window for subscribers
 
 
 @router.get("/ics/events.ics")
-async def ics_feed():
+async def ics_feed(db: AsyncSession = Depends(get_db)):
     today = date.today()
     end   = today + timedelta(days=WINDOW_DAYS + LOOKAHEAD)
 
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Occurrence, EventDefinition)
-            .join(EventDefinition)
-            .where(
-                Occurrence.occurrence_date >= today,
-                Occurrence.occurrence_date <= end,
-                EventDefinition.active == True,
-            )
-            .order_by(Occurrence.occurrence_date, EventDefinition.name)
+    result = await db.execute(
+        select(Occurrence, EventDefinition)
+        .join(EventDefinition)
+        .where(
+            Occurrence.occurrence_date >= today,
+            Occurrence.occurrence_date <= end,
+            EventDefinition.active == True,
+            EventDefinition.leadership_only == False,
         )
-        rows = result.all()
+        .order_by(Occurrence.occurrence_date, EventDefinition.name)
+    )
+    rows = result.all()
 
     cal = Calendar()
     cal.add("version",  "2.0")

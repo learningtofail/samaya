@@ -125,6 +125,51 @@ async def get_guild_events(token: str, guild_id: str) -> list[dict]:
     return []
 
 
+async def get_guild_channels(token: str, guild_id: str) -> tuple[list[dict], str]:
+    """
+    Fetches text channels (type=0) for the guild, sorted by position.
+    Returns (channels, error_message). channels is [] on failure.
+    """
+    url = f"{DISCORD_API_BASE}/guilds/{guild_id}/channels"
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, headers=_auth_headers(token))
+        except httpx.RequestError as e:
+            return [], f"Network error: {e}"
+
+    if response.status_code == 200:
+        channels = [c for c in response.json() if c.get("type") == 0]
+        channels.sort(key=lambda c: c.get("position", 0))
+        return [{"id": c["id"], "name": c["name"]} for c in channels], ""
+    if response.status_code == 401:
+        return [], "401 Unauthorized — token invalid or bot removed"
+    if response.status_code == 403:
+        return [], "403 Forbidden — bot missing access to channels"
+    return [], f"HTTP {response.status_code}"
+
+
+async def get_guild_roles(token: str, guild_id: str) -> tuple[list[dict], str]:
+    """
+    Fetches roles for the guild.
+    Returns (roles, error_message). roles is [] on failure.
+    """
+    url = f"{DISCORD_API_BASE}/guilds/{guild_id}/roles"
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, headers=_auth_headers(token))
+        except httpx.RequestError as e:
+            return [], f"Network error: {e}"
+
+    if response.status_code == 200:
+        roles = response.json()
+        return [{"id": r["id"], "name": r["name"], "color": r.get("color", 0)} for r in roles], ""
+    if response.status_code == 401:
+        return [], "401 Unauthorized — token invalid or bot removed"
+    if response.status_code == 403:
+        return [], "403 Forbidden — bot missing access to roles"
+    return [], f"HTTP {response.status_code}"
+
+
 async def verify_token(token: str) -> tuple[bool, str]:
     """Calls GET /users/@me to confirm the token is valid."""
     async with httpx.AsyncClient() as client:
