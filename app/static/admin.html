@@ -237,10 +237,11 @@
         <input type="text" id="mName" placeholder="Tri-Alliance Clash">
       </div>
       <div>
-        <label>Category</label>
-        <select id="mCategory">
-          <option>PvE</option><option>PvP</option>
-          <option>Alliance</option><option>Cycle</option><option>Other</option>
+        <label>Alliance</label>
+        <select id="mAlliance">
+          <option value="M0D">M0D</option>
+          <option value="NSR">NSR</option>
+          <option value="Server">Server</option>
         </select>
       </div>
       <div>
@@ -249,7 +250,25 @@
       </div>
       <div>
         <label>Start Time (UTC) HH:MM</label>
-        <input type="time" id="mStartTime">
+        <input type="text" id="mStartTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;text-transform:none;letter-spacing:0">Your detected timezone: <span id="mDetectedTz">—</span></div>
+      </div>
+      <div>
+        <label>Display Timezone (admin UI)</label>
+        <select id="mTimezone" onchange="applyDisplayTzChange()">
+          <option value="UTC">UTC</option>
+          <option value="America/Toronto">America/Toronto</option>
+          <option value="America/New_York">America/New_York</option>
+          <option value="America/Chicago">America/Chicago</option>
+          <option value="America/Denver">America/Denver</option>
+          <option value="America/Los_Angeles">America/Los_Angeles</option>
+          <option value="Europe/London">Europe/London</option>
+          <option value="Europe/Paris">Europe/Paris</option>
+          <option value="Asia/Singapore">Asia/Singapore</option>
+          <option value="Asia/Tokyo">Asia/Tokyo</option>
+          <option value="Australia/Sydney">Australia/Sydney</option>
+        </select>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;text-transform:none;letter-spacing:0">Controls how times display across the admin UI. Times are always entered and stored above in UTC.</div>
       </div>
       <div>
         <label>Duration (hours)</label>
@@ -261,23 +280,35 @@
       </div>
       <div>
         <label>Discord Channel</label>
-        <input type="text" id="mChannel" placeholder="#alliance-war">
+        <select id="mChannel" style="display:none"></select>
+        <input type="text" id="mChannelFallback" placeholder="#alliance-war" style="display:none">
       </div>
       <div class="full">
         <label>Description</label>
         <textarea id="mDescription" rows="3" placeholder="Event description sent to Discord"></textarea>
       </div>
       <div>
-        <label>Notification Channel ID</label>
-        <input type="text" id="mNotifChannel" placeholder="Discord channel ID (digits only)">
+        <label>Notification Channel</label>
+        <select id="mNotifChannel" style="display:none"></select>
+        <input type="text" id="mNotifChannelFallback" placeholder="Discord channel ID (digits only)" style="display:none">
       </div>
       <div>
-        <label>Notification Role ID</label>
-        <input type="text" id="mNotifRole" placeholder="Discord role ID (digits only)">
+        <label>Notification Role</label>
+        <select id="mNotifRole" style="display:none"></select>
+        <input type="text" id="mNotifRoleFallback" placeholder="Discord role ID (digits only)" style="display:none">
       </div>
       <div>
         <label>Notify X Minutes Before (leave blank to disable)</label>
         <input type="number" id="mNotifMinutes" min="1" placeholder="e.g. 60">
+      </div>
+      <div class="full">
+        <label style="text-transform:none;letter-spacing:0;font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:16px">
+          <input type="checkbox" id="mLeadershipOnly" style="width:auto" onchange="toggleLeadershipNote()">
+          Leadership Only (🔒 — channel notification only, not posted to Discord Scheduled Events or public calendar)
+        </label>
+        <div id="leadershipNote" style="display:none;font-size:11px;color:var(--muted);margin-top:6px;padding:8px;background:var(--bg2);border-radius:4px">
+          This event still recurs normally and appears in the admin views, but it only sends a channel message to the notification channel — no Discord Scheduled Event is created and it will not appear on the public calendar.
+        </div>
       </div>
     </div>
     <div style="margin-top:12px">
@@ -363,7 +394,7 @@ async function loadDashboard() {
       <div class="card" style="margin-bottom:8px;padding:12px;display:flex;align-items:center;gap:12px">
         <span class="cat-dot" style="background:${CAT_COLORS[o.category]||CAT_COLORS.Other}"></span>
         <strong>${o.event_name}</strong>
-        <span style="color:var(--muted)">${o.start_datetime_utc.slice(11,16)} UTC</span>
+        <span style="color:var(--muted)">${fmtTime(o.start_datetime_utc)}</span>
         <span style="color:var(--muted)">${o.discord_channel}</span>
         <span class="badge badge-${o.post_status}">${o.post_status}</span>
       </div>
@@ -451,6 +482,7 @@ async function loadEvents() {
         + '<td><span class="badge ' + badgeCls + '">' + badgeTxt + '</span></td>'
         + '<td>'
         + '<button class="btn btn-ghost btn-sm" title="Edit this event definition." onclick="openEventModal(' + editData + ')">Edit</button> '
+        + '<button class="btn btn-ghost btn-sm" title="Create a new event pre-filled with these settings." onclick="duplicateEvent(' + editData + ')">Duplicate</button> '
         + '<button class="btn ' + btnCls + ' btn-sm" title="' + btnTitle + '" onclick="toggleActive(' + e.id + ',' + e.active + ')">' + btnTxt + '</button> '
         + deleteBtn
         + '</td>'
@@ -462,20 +494,138 @@ async function loadEvents() {
 
 function openEventModal(event) {
   document.getElementById('modalTitle').textContent = event ? 'Edit Event' : 'Add Event';
-  document.getElementById('modalEventId').value = event ? event.id : '';
+  document.getElementById('modalEventId').value = event && event.id ? event.id : '';
   document.getElementById('mName').value        = event?.name || '';
-  document.getElementById('mCategory').value    = event?.category || 'Other';
+  document.getElementById('mAlliance').value    = event?.alliance || 'Server';
   document.getElementById('mInterval').value    = event?.interval_days || '';
   document.getElementById('mStartTime').value   = event?.start_time_utc || '';
   document.getElementById('mDuration').value    = event?.duration_hours || '';
   document.getElementById('mAnchor').value      = event?.anchor_date || '';
-  document.getElementById('mChannel').value     = event?.discord_channel || '';
   document.getElementById('mDescription').value       = event?.description || '';
-  document.getElementById('mNotifChannel').value      = event?.notification_channel_id || '';
-  document.getElementById('mNotifRole').value         = event?.notification_role_id || '';
   document.getElementById('mNotifMinutes').value      = event?.notify_minutes_before || '';
+  document.getElementById('mLeadershipOnly').checked  = !!event?.leadership_only;
+  toggleLeadershipNote();
+  document.getElementById('mDetectedTz').textContent = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  document.getElementById('mTimezone').value = getDisplayTz();
   document.getElementById('previewResult').textContent = '';
+  populateDiscordFields(event);
   document.getElementById('eventModal').classList.add('open');
+}
+
+function duplicateEvent(event) {
+  const copy = Object.assign({}, event);
+  delete copy.id;
+  copy.name = event.name + ' (Copy)';
+  openEventModal(copy);
+  document.getElementById('modalTitle').textContent = 'Duplicate Event';
+}
+
+function toggleLeadershipNote() {
+  const checked = document.getElementById('mLeadershipOnly').checked;
+  document.getElementById('leadershipNote').style.display = checked ? 'block' : 'none';
+}
+
+// ── Display timezone (persists across the admin UI via localStorage) ──
+
+function getDisplayTz() {
+  return localStorage.getItem('samaya_display_tz') || 'UTC';
+}
+
+function applyDisplayTzChange() {
+  localStorage.setItem('samaya_display_tz', document.getElementById('mTimezone').value);
+  if (document.getElementById('v-dashboard').classList.contains('active')) loadDashboard();
+  if (document.getElementById('v-schedule').classList.contains('active')) renderSchedule();
+  if (document.getElementById('v-gantt').classList.contains('active')) loadGantt();
+  if (document.getElementById('v-postlog').classList.contains('active')) loadPostLog();
+}
+
+function toUtcDate(isoStr) {
+  const hasTz = /Z$|[+-]\d{2}:\d{2}$/.test(isoStr);
+  return new Date(hasTz ? isoStr : isoStr + 'Z');
+}
+
+function fmtTime(utcIso) {
+  const d = toUtcDate(utcIso);
+  const tz = getDisplayTz();
+  const t = new Intl.DateTimeFormat('en-GB', { hour:'2-digit', minute:'2-digit', hour12:false, timeZone: tz }).format(d);
+  return tz === 'UTC' ? t + ' UTC' : t + ' ' + tz;
+}
+
+function fmtTimeShort(utcIso) {
+  const d = toUtcDate(utcIso);
+  return new Intl.DateTimeFormat('en-GB', { hour:'2-digit', minute:'2-digit', hour12:false, timeZone: getDisplayTz() }).format(d);
+}
+
+function fmtDateTime(utcIso) {
+  const d = toUtcDate(utcIso);
+  const tz = getDisplayTz();
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false, timeZone: tz
+  }).formatToParts(d).reduce((a,p) => (a[p.type]=p.value, a), {});
+  const s = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+  return tz === 'UTC' ? s + ' UTC' : s + ' ' + tz;
+}
+
+// ── Discord channel/role dropdowns ─────────────────────────────
+
+async function populateDiscordFields(event) {
+  const chanSelect = document.getElementById('mChannel');
+  const chanFallback = document.getElementById('mChannelFallback');
+  const notifChanSelect = document.getElementById('mNotifChannel');
+  const notifChanFallback = document.getElementById('mNotifChannelFallback');
+  const roleSelect = document.getElementById('mNotifRole');
+  const roleFallback = document.getElementById('mNotifRoleFallback');
+
+  [chanSelect, notifChanSelect, roleSelect].forEach(s => {
+    s.innerHTML = '<option>Loading…</option>';
+    s.disabled = true;
+    s.style.display = '';
+  });
+  [chanFallback, notifChanFallback, roleFallback].forEach(f => f.style.display = 'none');
+
+  try {
+    const [channels, roles] = await Promise.all([
+      api('GET', '/api/discord/channels'),
+      api('GET', '/api/discord/roles'),
+    ]);
+
+    fillSelect(chanSelect, channels.map(c => ({ value: c.name, label: '#' + c.name })), event?.discord_channel);
+    fillSelect(notifChanSelect, channels.map(c => ({ value: c.id, label: '#' + c.name })), event?.notification_channel_id);
+    fillSelect(roleSelect, roles.map(r => ({ value: r.id, label: '@' + r.name })), event?.notification_role_id);
+
+    [chanSelect, notifChanSelect, roleSelect].forEach(s => s.disabled = false);
+  } catch (e) {
+    [chanSelect, notifChanSelect, roleSelect].forEach(s => s.style.display = 'none');
+    chanFallback.style.display = '';
+    notifChanFallback.style.display = '';
+    roleFallback.style.display = '';
+    chanFallback.value = event?.discord_channel || '';
+    notifChanFallback.value = event?.notification_channel_id || '';
+    roleFallback.value = event?.notification_role_id || '';
+    toast('Could not load Discord channels/roles — enter values manually', true);
+  }
+}
+
+function fillSelect(selectEl, options, currentValue) {
+  let matched = false;
+  let optionsHtml = options.map(o => {
+    const isSelected = currentValue != null && String(o.value) === String(currentValue);
+    if (isSelected) matched = true;
+    return `<option value="${o.value}" ${isSelected ? 'selected' : ''}>${o.label}</option>`;
+  }).join('');
+  if (currentValue && !matched) {
+    optionsHtml = `<option value="${currentValue}" selected>${currentValue} (not found — kept as-is)</option>` + optionsHtml;
+  }
+  if (!currentValue) {
+    optionsHtml = `<option value="">— none —</option>` + optionsHtml;
+  }
+  selectEl.innerHTML = optionsHtml;
+}
+
+function fieldValue(selectId, fallbackId) {
+  const sel = document.getElementById(selectId);
+  const fb = document.getElementById(fallbackId);
+  return sel.style.display !== 'none' ? sel.value : fb.value;
 }
 
 function closeModal() {
@@ -484,16 +634,22 @@ function closeModal() {
 
 async function saveEvent() {
   const id = document.getElementById('modalEventId').value;
+  const startTime = document.getElementById('mStartTime').value.trim();
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime)) {
+    toast('Start time must be 24-hour HH:MM (e.g. 19:00)', true);
+    return;
+  }
   const payload = {
     name:            document.getElementById('mName').value,
-    category:        document.getElementById('mCategory').value,
+    alliance:        document.getElementById('mAlliance').value,
+    leadership_only: document.getElementById('mLeadershipOnly').checked,
     interval_days:   parseInt(document.getElementById('mInterval').value),
-    start_time_utc:  document.getElementById('mStartTime').value,
+    start_time_utc:  startTime,
     duration_hours:  parseFloat(document.getElementById('mDuration').value),
     anchor_date:     document.getElementById('mAnchor').value,
-    discord_channel:         document.getElementById('mChannel').value,
-    notification_channel_id: document.getElementById('mNotifChannel').value,
-    notification_role_id:    document.getElementById('mNotifRole').value,
+    discord_channel:         fieldValue('mChannel', 'mChannelFallback'),
+    notification_channel_id: fieldValue('mNotifChannel', 'mNotifChannelFallback'),
+    notification_role_id:    fieldValue('mNotifRole', 'mNotifRoleFallback'),
     notify_minutes_before:   document.getElementById('mNotifMinutes').value
                              ? parseInt(document.getElementById('mNotifMinutes').value)
                              : null,
@@ -566,7 +722,7 @@ function renderSchedule() {
       <td style="${isToday?'font-weight:600':''}">${o.occurrence_date}</td>
       <td>${DOW3[new Date(o.occurrence_date+'T12:00:00Z').getUTCDay()]}</td>
       <td><span class="cat-dot" style="background:${CAT_COLORS[o.category]||CAT_COLORS.Other}"></span>${o.event_name}</td>
-      <td>${o.start_datetime_utc.slice(11,16)} UTC</td>
+      <td>${fmtTime(o.start_datetime_utc)}</td>
       <td>${o.duration_hours}h</td>
       <td style="color:var(--muted);font-size:12px">${o.discord_channel}</td>
       <td style="text-align:center">
@@ -720,7 +876,7 @@ function renderGantt(occs) {
       html += `<td class="gantt-cell ${occ?'gantt-occ':''}" style="background:${bg};${border}" title="${name} — ${ds}">`;
       if (occ) {
         const occObj = occs.find(o => o.event_name===name && o.occurrence_date===ds);
-        html += occObj ? occObj.start_datetime_utc.slice(11,16) : '';
+        html += occObj ? fmtTimeShort(occObj.start_datetime_utc) : '';
       }
       html += '</td>';
     });
@@ -759,7 +915,7 @@ async function loadPostLog() {
         <td>${l.event_name}</td>
         <td>${l.occurrence_date}</td>
         <td style="color:var(--muted);font-size:12px">${l.timing}</td>
-        <td style="font-size:12px">${l.posted_at_utc ? l.posted_at_utc.slice(0,16).replace('T',' ')+' UTC' : '—'}</td>
+        <td style="font-size:12px">${l.posted_at_utc ? fmtDateTime(l.posted_at_utc) : '—'}</td>
         <td style="font-size:12px;color:var(--muted)">${l.posted_by}</td>
         <td><span class="badge badge-${l.status}">${l.status}</span></td>
         <td style="font-size:11px;color:var(--muted);font-family:monospace">${l.discord_event_id ? l.discord_event_id.slice(0,20)+'…' : '—'}</td>
@@ -915,13 +1071,8 @@ function updateSyncBadge(issueCount) {
 }
 
 async function syncPush(postLogId) {
-  // Find occurrence id from post log id — look up in occurrences
   if (!confirm('Push Samaya values to Discord? This will update the Discord event name and description to match the current event definition.')) return;
   try {
-    // We need the occurrence id — get it via the occurrences API
-    const occs = await api('GET', '/api/occurrences');
-    // Match by finding which occurrence corresponds to this postlog entry
-    // Use the sync data we already have — pass post_log_id and resolve server-side
     const res = await fetch('/admin/api/sync/push-by-log/' + postLogId, { method: 'POST' });
     if (!res.ok) {
       const err = await res.json().catch(() => ({detail: res.statusText}));
