@@ -543,11 +543,12 @@ async def manual_regenerate():
 @router.get("/api/post-log")
 async def get_post_log(limit: int = 50, offset: int = 0, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(PostLog)
+        select(PostLog, EventDefinition)
+        .outerjoin(EventDefinition, PostLog.event_id == EventDefinition.id)
         .order_by(PostLog.occurrence_date.desc(), PostLog.posted_at_utc.desc())
         .limit(limit).offset(offset)
     )
-    return [_log_dict(l) for l in result.scalars().all()]
+    return [_log_dict(l, ev) for l, ev in result.all()]
 
 
 @router.get("/api/post-log/export.csv")
@@ -929,9 +930,11 @@ def _occurrence_dict(occ: Occurrence, ev: EventDefinition) -> dict:
         "discord_channel":    ev.discord_channel,
         "duration_hours":     float(ev.duration_hours),
         "reminder_sent":      occ.reminder_sent,
+        "alliance":           ev.alliance,
+        "leadership_only":    ev.leadership_only,
     }
 
-def _log_dict(l: PostLog) -> dict:
+def _log_dict(l: PostLog, ev: EventDefinition | None = None) -> dict:
     today = date.today()
     diff  = (l.occurrence_date - today).days
     timing = "Today" if diff == 0 else (f"In {diff} days" if diff > 0 else f"{abs(diff)} days ago")
@@ -945,4 +948,6 @@ def _log_dict(l: PostLog) -> dict:
         "status":           l.status,
         "status_detail":    l.status_detail,
         "timing":           timing,
+        "alliance":         ev.alliance if ev else None,
+        "leadership_only":  ev.leadership_only if ev else False,
     }

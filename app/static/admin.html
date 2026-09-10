@@ -103,8 +103,9 @@
   <button onclick="showView('schedule',this)">Schedule</button>
   <button onclick="showView('gantt',this)">Gantt</button>
   <button onclick="showView('postlog',this)">Post Log</button>
-  <button onclick="showView('config',this)">Config</button>
   <button id="syncTabBtn" onclick="showView('sync',this)">Sync <span id="syncBadge" style="display:none;background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px">0</span></button>
+  <div style="flex:1"></div>
+  <button onclick="showView('config',this)">Config</button>
 </nav>
 
 <main>
@@ -134,14 +135,26 @@
   <div class="flex mb-16">
     <h2 style="margin:0">Event Definitions</h2>
     <button class="btn btn-accent" onclick="openEventModal()" title="Create a new recurring event definition.">+ Add Event</button>
+    <button class="btn btn-ghost" onclick="openEventModal(null, true)" title="Create a new leadership-only event (channel notification only, not posted to Discord Scheduled Events or the public calendar).">+ Add Leadership Event</button>
   </div>
-  <div class="card" style="padding:0;overflow:hidden">
+  <h2 style="font-size:13px;margin-bottom:8px">Community Events</h2>
+  <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px">
     <table id="eventsTable">
       <thead><tr>
-        <th>Name</th><th>Category</th><th>Interval</th><th>Start (UTC)</th>
+        <th>Name</th><th>Alliance</th><th>Interval</th><th>Start (UTC)</th>
         <th>Duration</th><th>Anchor</th><th>Status</th><th>Actions</th>
       </tr></thead>
       <tbody id="eventsBody"><tr><td colspan="8" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    </table>
+  </div>
+  <h2 style="font-size:13px;margin-bottom:8px;background:var(--bg3);padding:8px 10px;border-radius:4px">🔒 Leadership Events</h2>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table id="eventsTableLeadership">
+      <thead><tr>
+        <th>Name</th><th>Alliance</th><th>Interval</th><th>Start (UTC)</th>
+        <th>Duration</th><th>Anchor</th><th>Status</th><th>Actions</th>
+      </tr></thead>
+      <tbody id="eventsBodyLeadership"><tr><td colspan="8" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -150,10 +163,13 @@
 <div id="v-schedule" class="view">
   <div class="flex mb-16">
     <h2 style="margin:0">28-Day Schedule</h2>
-    <button class="btn btn-accent" onclick="postSelected()" title="Post all checked occurrences to Discord Scheduled Events sequentially.">▶ Post Selected to Discord</button>
     <button class="btn btn-ghost" onclick="loadSchedule()" title="Reload the 28-day occurrence list from the database.">Refresh</button>
   </div>
-  <div class="card" style="padding:0;overflow:hidden">
+  <div class="flex mb-16">
+    <h2 style="margin:0;font-size:13px">Community Events</h2>
+    <button class="btn btn-accent" onclick="postSelected('Community')" title="Post all checked community occurrences to Discord Scheduled Events sequentially.">▶ Post Selected to Discord</button>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px">
     <table id="schedTable">
       <thead><tr>
         <th>Date</th><th>Day</th><th>Event</th><th>Start (UTC)</th>
@@ -161,6 +177,22 @@
       </tr></thead>
       <tbody id="schedBody"><tr><td colspan="9" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
     </table>
+  </div>
+  <div id="schedLeadershipWrap" style="display:none">
+    <div class="flex mb-16">
+      <h2 style="margin:0;font-size:13px;background:var(--amber);padding:6px 10px;border-radius:4px">🔒 Leadership Events</h2>
+      <button class="btn btn-accent" onclick="postSelected('Leadership')" title="Send all checked leadership occurrences as channel notifications.">▶ Post Selected to Discord</button>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:10px">These events post to the leadership channel only — not visible on Discord Scheduled Events or the public calendar.</p>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table id="schedTableLeadership">
+        <thead><tr>
+          <th>Date</th><th>Day</th><th>Event</th><th>Start (UTC)</th>
+          <th>Duration</th><th>Channel</th><th>Post?</th><th>Status</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="schedBodyLeadership"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -170,10 +202,17 @@
     <h2 style="margin:0">Gantt View</h2>
     <button class="btn btn-ghost" onclick="loadGantt()" title="Reload and redraw the Gantt chart from current occurrence data.">Refresh</button>
   </div>
+  <h2 style="font-size:13px;margin-bottom:8px">Community Events Gantt</h2>
   <div class="card gantt-wrap" id="ganttWrap">
     <p style="color:var(--muted)">Loading…</p>
   </div>
-  <div id="ganttLegend" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px"></div>
+  <div id="ganttLegend" style="margin-top:12px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:10px"></div>
+  <div id="ganttLeadershipWrap" style="display:none">
+    <div style="border-top:2px solid var(--border);margin-bottom:16px"></div>
+    <h2 style="font-size:13px;margin-bottom:8px">🔒 Leadership Events Gantt</h2>
+    <div class="card gantt-wrap" id="ganttWrapLeadership" style="background:#F1F5F9"></div>
+    <div id="ganttLegendLeadership" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px"></div>
+  </div>
 </div>
 
 <!-- POST LOG -->
@@ -198,11 +237,11 @@
   <h2>Discord Configuration</h2>
   <div class="card" id="configForm">
     <label>Bot Token</label>
-    <input type="password" id="cfgToken" placeholder="Discord bot token">
+    <input type="password" id="cfgToken" placeholder="Discord bot token" oninput="markConfigDirty()">
     <label>Guild ID</label>
-    <input type="text" id="cfgGuild" placeholder="Numeric guild ID">
+    <input type="text" id="cfgGuild" placeholder="Numeric guild ID" oninput="markConfigDirty()">
     <label>Public Key (for webhook validation)</label>
-    <input type="text" id="cfgPublicKey" placeholder="Ed25519 public key from Discord Developer Portal">
+    <input type="text" id="cfgPublicKey" placeholder="Ed25519 public key from Discord Developer Portal" oninput="markConfigDirty()">
     <div style="margin-top:16px">
       <button class="btn btn-accent" onclick="saveDiscordConfig()" title="Save Discord credentials and verify the bot token against Discord's API before saving. Will not save if the token is invalid.">Save & Verify</button>
     </div>
@@ -326,11 +365,21 @@
 
 <script>
 const CAT_COLORS = {PvE:'#22c55e',PvP:'#ef4444',Alliance:'#3b82f6',Cycle:'#f59e0b',Other:'#94a3b8'};
+const ALLIANCE_COLORS = {M0D:'#1d4ed8', NSR:'#15803d', Server:'#475569'};
 const GANTT_PALETTE = ['#bbf7d0','#bfdbfe','#fed7aa','#fde68a','#e9d5ff','#99f6e4','#fecaca','#d9f99d','#fbcfe8','#a5f3fc','#c7d2fe','#fef08a'];
 const DOW3 = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 let occurrenceData = [];
+let configDirty = false;
+
+function markConfigDirty() { configDirty = true; }
 
 function showView(id, btn) {
+  const activeView = document.querySelector('.view.active');
+  const current = activeView ? activeView.id.replace('v-', '') : null;
+  if (current === 'config' && id !== 'config' && configDirty) {
+    if (!confirm('You have unsaved Discord config changes. Leave anyway?')) return;
+    configDirty = false;
+  }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
   document.getElementById('v-' + id).classList.add('active');
@@ -393,7 +442,7 @@ async function loadDashboard() {
     el.innerHTML = todayOccs.map(o => `
       <div class="card" style="margin-bottom:8px;padding:12px;display:flex;align-items:center;gap:12px">
         <span class="cat-dot" style="background:${CAT_COLORS[o.category]||CAT_COLORS.Other}"></span>
-        <strong>${o.event_name}</strong>
+        <strong>${o.event_name}</strong>${o.leadership_only ? ' <span title="Leadership only">🔒</span>' : ''}
         <span style="color:var(--muted)">${fmtTime(o.start_datetime_utc)}</span>
         <span style="color:var(--muted)">${o.discord_channel}</span>
         <span class="badge badge-${o.post_status}">${o.post_status}</span>
@@ -441,8 +490,10 @@ async function loadEvents() {
   try {
     const events = await api('GET', '/api/events');
     const tbody = document.getElementById('eventsBody');
+    const tbodyLead = document.getElementById('eventsBodyLeadership');
     if (!events.length) {
       tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);padding:20px">No events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
+      tbodyLead.innerHTML = '<tr><td colspan="8" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
       return;
     }
     function intervalLabel(i) {
@@ -453,9 +504,8 @@ async function loadEvents() {
       if (i===28) return 'Every 4 weeks';
       return 'Every ' + i + ' days';
     }
-    var rows = '';
-    events.forEach(function(e) {
-      var catColor  = CAT_COLORS[e.category] || CAT_COLORS.Other;
+    function buildRow(e) {
+      var allyColor = ALLIANCE_COLORS[e.alliance] || ALLIANCE_COLORS.Server;
       var badgeCls  = e.active ? 'badge-ok' : 'badge-pending';
       var badgeTxt  = e.active ? 'Active' : 'Inactive';
       var btnCls    = e.active ? 'btn-danger' : 'btn-ghost';
@@ -472,9 +522,9 @@ async function loadEvents() {
           + 'data-id="' + e.id + '" data-name="' + safeName + '" '
           + 'onclick="permanentDelete(this)">Delete</button>';
       }
-      rows += '<tr>'
-        + '<td><span class="cat-dot" style="background:' + catColor + '"></span>' + e.name + '</td>'
-        + '<td>' + e.category + '</td>'
+      return '<tr style="border-left:3px solid ' + allyColor + '">'
+        + '<td><span class="cat-dot" style="background:' + allyColor + '"></span>' + e.name + '</td>'
+        + '<td>' + (e.alliance || 'Server') + '</td>'
         + '<td>' + intervalLabel(e.interval_days) + '</td>'
         + '<td>' + e.start_time_utc + ' UTC</td>'
         + '<td>' + e.duration_hours + 'h</td>'
@@ -487,13 +537,20 @@ async function loadEvents() {
         + deleteBtn
         + '</td>'
         + '</tr>';
-    });
-    tbody.innerHTML = rows;
+    }
+    const community = events.filter(e => !e.leadership_only);
+    const leadership = events.filter(e => e.leadership_only);
+    tbody.innerHTML = community.length
+      ? community.map(buildRow).join('')
+      : '<tr><td colspan="8" style="color:var(--muted);padding:20px">No community events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
+    tbodyLead.innerHTML = leadership.length
+      ? leadership.map(buildRow).join('')
+      : '<tr><td colspan="8" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
   } catch(e) { toast(e.message, true); }
 }
 
-function openEventModal(event) {
-  document.getElementById('modalTitle').textContent = event ? 'Edit Event' : 'Add Event';
+function openEventModal(event, presetLeadership) {
+  document.getElementById('modalTitle').textContent = event ? 'Edit Event' : (presetLeadership ? 'Add Leadership Event' : 'Add Event');
   document.getElementById('modalEventId').value = event && event.id ? event.id : '';
   document.getElementById('mName').value        = event?.name || '';
   document.getElementById('mAlliance').value    = event?.alliance || 'Server';
@@ -503,7 +560,7 @@ function openEventModal(event) {
   document.getElementById('mAnchor').value      = event?.anchor_date || '';
   document.getElementById('mDescription').value       = event?.description || '';
   document.getElementById('mNotifMinutes').value      = event?.notify_minutes_before || '';
-  document.getElementById('mLeadershipOnly').checked  = !!event?.leadership_only;
+  document.getElementById('mLeadershipOnly').checked  = event ? !!event.leadership_only : !!presetLeadership;
   toggleLeadershipNote();
   document.getElementById('mDetectedTz').textContent = Intl.DateTimeFormat().resolvedOptions().timeZone;
   document.getElementById('mTimezone').value = getDisplayTz();
@@ -710,23 +767,28 @@ async function loadSchedule() {
 function renderSchedule() {
   const today = new Date().toISOString().slice(0,10);
   const tbody = document.getElementById('schedBody');
+  const tbodyLead = document.getElementById('schedBodyLeadership');
+  const leadWrap = document.getElementById('schedLeadershipWrap');
   if (!occurrenceData.length) {
     tbody.innerHTML = '<tr><td colspan="9" style="color:var(--muted);padding:20px">No occurrences. Run "Regenerate Now" from the Dashboard.</td></tr>';
+    leadWrap.style.display = 'none';
     return;
   }
-  tbody.innerHTML = occurrenceData.map(o => {
+
+  function buildRow(o, scope) {
     const isToday = o.occurrence_date === today;
-    const rowStyle = isToday ? 'border-left:3px solid #f59e0b' : '';
+    const allyColor = ALLIANCE_COLORS[o.alliance] || ALLIANCE_COLORS.Server;
+    const rowStyle = 'border-left:3px solid ' + allyColor + (isToday ? ';background:#fffbeb' : '');
     const badgeClass = `badge-${o.post_status}`;
     return `<tr style="${rowStyle}">
       <td style="${isToday?'font-weight:600':''}">${o.occurrence_date}</td>
       <td>${DOW3[new Date(o.occurrence_date+'T12:00:00Z').getUTCDay()]}</td>
-      <td><span class="cat-dot" style="background:${CAT_COLORS[o.category]||CAT_COLORS.Other}"></span>${o.event_name}</td>
+      <td><span class="cat-dot" style="background:${allyColor}"></span>${o.event_name}${o.leadership_only ? ' 🔒' : ''}</td>
       <td>${fmtTime(o.start_datetime_utc)}</td>
       <td>${o.duration_hours}h</td>
       <td style="color:var(--muted);font-size:12px">${o.discord_channel}</td>
       <td style="text-align:center">
-        <input type="checkbox" data-occ-id="${o.id}"
+        <input type="checkbox" data-occ-id="${o.id}" data-scope="${scope}"
           ${o.post_to_discord?'checked':''}
           ${['posted','cancelled'].includes(o.post_status)?'disabled':''}
           onchange="togglePostFlag(${o.id},this.checked)">
@@ -742,7 +804,22 @@ function renderSchedule() {
         }
       </td>
     </tr>`;
-  }).join('');
+  }
+
+  const community = occurrenceData.filter(o => !o.leadership_only);
+  const leadership = occurrenceData.filter(o => o.leadership_only);
+
+  tbody.innerHTML = community.length
+    ? community.map(o => buildRow(o, 'Community')).join('')
+    : '<tr><td colspan="9" style="color:var(--muted);padding:20px">No community occurrences in this window.</td></tr>';
+
+  if (leadership.length) {
+    leadWrap.style.display = 'block';
+    tbodyLead.innerHTML = leadership.map(o => buildRow(o, 'Leadership')).join('');
+  } else {
+    leadWrap.style.display = 'none';
+    tbodyLead.innerHTML = '';
+  }
 }
 
 async function togglePostFlag(id, checked) {
@@ -770,8 +847,8 @@ async function cancelOccurrence(id) {
   } catch(e) { toast(e.message, true); }
 }
 
-async function postSelected() {
-  const checked = document.querySelectorAll('input[data-occ-id]:checked:not(:disabled)');
+async function postSelected(scope) {
+  const checked = document.querySelectorAll(`input[data-occ-id][data-scope="${scope}"]:checked:not(:disabled)`);
   if (!checked.length) { toast('No events checked for posting'); return; }
   let posted = 0, errors = 0;
   for (const cb of checked) {
@@ -794,6 +871,32 @@ async function loadGantt() {
 }
 
 function renderGantt(occs) {
+  const community = occs.filter(o => !o.leadership_only);
+  const leadership = occs.filter(o => o.leadership_only);
+
+  buildGanttGrid(community, 'ganttWrap', 'ganttLegend', 'No community occurrences in this window.');
+
+  const leadWrap = document.getElementById('ganttLeadershipWrap');
+  if (leadership.length) {
+    leadWrap.style.display = 'block';
+    buildGanttGrid(leadership, 'ganttWrapLeadership', 'ganttLegendLeadership', 'No leadership occurrences in this window.');
+  } else {
+    leadWrap.style.display = 'none';
+    document.getElementById('ganttWrapLeadership').innerHTML = '';
+    document.getElementById('ganttLegendLeadership').innerHTML = '';
+  }
+}
+
+function buildGanttGrid(occs, wrapId, legendId, emptyMsg) {
+  const wrapEl = document.getElementById(wrapId);
+  const legendEl = document.getElementById(legendId);
+
+  if (!occs.length) {
+    wrapEl.innerHTML = `<p style="color:var(--muted)">${emptyMsg}</p>`;
+    legendEl.innerHTML = '';
+    return;
+  }
+
   const today = new Date();
   today.setHours(0,0,0,0);
   const days = Array.from({length:28}, (_,i) => {
@@ -805,7 +908,7 @@ function renderGantt(occs) {
   // Group by event name
   const eventMap = new Map();
   occs.forEach(o => {
-    if (!eventMap.has(o.event_name)) eventMap.set(o.event_name, { category: o.category, occs: new Set() });
+    if (!eventMap.has(o.event_name)) eventMap.set(o.event_name, { alliance: o.alliance, occs: new Set() });
     eventMap.get(o.event_name).occs.add(o.occurrence_date);
   });
 
@@ -852,17 +955,17 @@ function renderGantt(occs) {
   html += '</tr>';
 
   // Event rows
-  events.forEach(([name, {category, occs: occDates}], idx) => {
+  events.forEach(([name, {alliance, occs: occDates}], idx) => {
     const color = palette[idx % palette.length];
-    const catColor = CAT_COLORS[category] || CAT_COLORS.Other;
+    const allyColor = ALLIANCE_COLORS[alliance] || ALLIANCE_COLORS.Server;
     const count = [...occDates].filter(d => {
       const dd = new Date(d+'T12:00:00Z');
       return dd >= today;
     }).length;
 
     html += `<tr>`;
-    html += `<td class="gantt-name" style="border-left:3px solid ${catColor}">`;
-    html += `<span class="cat-dot" style="background:${catColor}"></span>${name}</td>`;
+    html += `<td class="gantt-name" style="border-left:3px solid ${allyColor}">`;
+    html += `<span class="cat-dot" style="background:${color}"></span>${name}</td>`;
     html += `<td style="text-align:center;font-size:11px;color:var(--muted);background:#f0ece4">${count}</td>`;
 
     days.forEach(d => {
@@ -884,11 +987,12 @@ function renderGantt(occs) {
   });
 
   html += '</table>';
-  document.getElementById('ganttWrap').innerHTML = html;
+  wrapEl.innerHTML = html;
 
-  // Legend
-  const legend = document.getElementById('ganttLegend');
-  legend.innerHTML = events.map(([name, {category}], idx) => {
+  // Legend — swatches match the per-event cell-fill colours above so they stay
+  // usable for identifying overlapping events; the alliance colour is shown as
+  // the name-cell border accent instead (consistent with Schedule/Events tables).
+  legendEl.innerHTML = events.map(([name], idx) => {
     const color = palette[idx % palette.length];
     return `<div style="display:flex;align-items:center;gap:5px;font-size:11px">
       <div style="width:10px;height:10px;border-radius:2px;background:${color}"></div>
@@ -908,11 +1012,10 @@ async function loadPostLog() {
       return;
     }
     tbody.innerHTML = logs.map(l => {
-      const isPast = new Date(l.occurrence_date) < new Date();
-      const rowStyle = isPast && l.status !== 'cancelled' ? '' : '';
-      const dimStyle = l.status === 'cancelled' ? 'opacity:.5' : '';
-      return `<tr style="${rowStyle};${dimStyle}">
-        <td>${l.event_name}</td>
+      const dimStyle = l.status === 'cancelled' ? 'opacity:.5;' : '';
+      const leadStyle = l.leadership_only ? 'background:var(--bg3);' : '';
+      return `<tr style="${dimStyle}${leadStyle}">
+        <td>${l.event_name}${l.leadership_only ? ' 🔒' : ''}</td>
         <td>${l.occurrence_date}</td>
         <td style="color:var(--muted);font-size:12px">${l.timing}</td>
         <td style="font-size:12px">${l.posted_at_utc ? fmtDateTime(l.posted_at_utc) : '—'}</td>
@@ -938,6 +1041,7 @@ async function saveDiscordConfig() {
     const res = await api('PUT', '/api/config/discord', payload);
     result.textContent = `✓ Saved. Bot: ${res.bot_username}`;
     result.style.color = '#166534';
+    configDirty = false;
     toast('Discord config saved');
   } catch(e) {
     result.textContent = `✗ ${e.message}`;
