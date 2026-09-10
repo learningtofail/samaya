@@ -257,6 +257,35 @@ async def deactivate_event(event_id: int, db: AsyncSession = Depends(get_db)):
 
 # ── Preview ───────────────────────────────────────────────────
 
+
+@router.delete("/api/events/{event_id}/permanent", status_code=200)
+async def permanent_delete_event(event_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(EventDefinition).where(EventDefinition.id == event_id))
+    event  = result.scalar_one_or_none()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Count PostLog entries for this event
+    log_result = await db.execute(
+        select(PostLog).where(PostLog.event_id == event_id)
+    )
+    log_entries = log_result.scalars().all()
+
+    # Null out event_id on PostLog entries before deleting
+    # so audit history is preserved with event_name still readable
+    for log in log_entries:
+        log.event_id = None
+
+    # Delete the event — cascades to occurrences
+    await db.delete(event)
+    await db.commit()
+
+    return {
+        "status": "deleted",
+        "event_name": event.name,
+        "post_log_entries_preserved": len(log_entries),
+    }
+
 @router.post("/api/scheduler/preview")
 async def preview_occurrences(payload: EventIn):
     anchor = date.fromisoformat(payload.anchor_date)

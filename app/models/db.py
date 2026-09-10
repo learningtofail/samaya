@@ -62,7 +62,7 @@ class PostLog(Base):
     __tablename__ = "post_log"
 
     id               = Column(Integer, primary_key=True)
-    event_id         = Column(Integer, ForeignKey("event_definitions.id"), nullable=False)
+    event_id         = Column(Integer, ForeignKey("event_definitions.id"), nullable=True)
     event_name       = Column(Text, nullable=False)
     occurrence_date  = Column(Date, nullable=False)
     discord_event_id = Column(Text)

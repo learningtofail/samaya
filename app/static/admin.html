@@ -118,8 +118,8 @@
     <div class="stat"><div class="stat-label">Regen Result</div><div class="stat-value" id="st-result">—</div></div>
   </div>
   <div class="flex mb-16">
-    <button class="btn btn-accent" onclick="triggerRegen()">↻ Regenerate Now</button>
-    <button class="btn btn-ghost" onclick="loadDashboard()">Refresh</button>
+    <button class="btn btn-accent" onclick="triggerRegen()" title="Immediately regenerate the 28-day occurrence window. Use after adding or editing events — normally runs automatically at UTC 00:00.">↻ Regenerate Now</button>
+    <button class="btn btn-ghost" onclick="loadDashboard()" title="Reload dashboard status from the API.">Refresh</button>
   </div>
   <h2>Today's Events</h2>
   <div id="todayEvents"><p style="color:var(--muted)">Loading…</p></div>
@@ -129,7 +129,7 @@
 <div id="v-events" class="view">
   <div class="flex mb-16">
     <h2 style="margin:0">Event Definitions</h2>
-    <button class="btn btn-accent" onclick="openEventModal()">+ Add Event</button>
+    <button class="btn btn-accent" onclick="openEventModal()" title="Create a new recurring event definition.">+ Add Event</button>
   </div>
   <div class="card" style="padding:0;overflow:hidden">
     <table id="eventsTable">
@@ -146,8 +146,8 @@
 <div id="v-schedule" class="view">
   <div class="flex mb-16">
     <h2 style="margin:0">28-Day Schedule</h2>
-    <button class="btn btn-accent" onclick="postSelected()">▶ Post Selected to Discord</button>
-    <button class="btn btn-ghost" onclick="loadSchedule()">Refresh</button>
+    <button class="btn btn-accent" onclick="postSelected()" title="Post all checked occurrences to Discord Scheduled Events sequentially.">▶ Post Selected to Discord</button>
+    <button class="btn btn-ghost" onclick="loadSchedule()" title="Reload the 28-day occurrence list from the database.">Refresh</button>
   </div>
   <div class="card" style="padding:0;overflow:hidden">
     <table id="schedTable">
@@ -164,7 +164,7 @@
 <div id="v-gantt" class="view">
   <div class="flex mb-16">
     <h2 style="margin:0">Gantt View</h2>
-    <button class="btn btn-ghost" onclick="loadGantt()">Refresh</button>
+    <button class="btn btn-ghost" onclick="loadGantt()" title="Reload and redraw the Gantt chart from current occurrence data.">Refresh</button>
   </div>
   <div class="card gantt-wrap" id="ganttWrap">
     <p style="color:var(--muted)">Loading…</p>
@@ -176,7 +176,7 @@
 <div id="v-postlog" class="view">
   <div class="flex mb-16">
     <h2 style="margin:0">Post Log</h2>
-    <a href="/admin/api/post-log/export.csv" class="btn btn-ghost btn-sm" style="text-decoration:none">⬇ Export CSV</a>
+    <a href="/admin/api/post-log/export.csv" title="Download all PostLog entries as a CSV file." class="btn btn-ghost btn-sm" style="text-decoration:none">⬇ Export CSV</a>
   </div>
   <div class="card" style="padding:0;overflow:hidden">
     <table id="logTable">
@@ -200,7 +200,7 @@
     <label>Public Key (for webhook validation)</label>
     <input type="text" id="cfgPublicKey" placeholder="Ed25519 public key from Discord Developer Portal">
     <div style="margin-top:16px">
-      <button class="btn btn-accent" onclick="saveDiscordConfig()">Save & Verify</button>
+      <button class="btn btn-accent" onclick="saveDiscordConfig()" title="Save Discord credentials and verify the bot token against Discord's API before saving. Will not save if the token is invalid.">Save & Verify</button>
     </div>
     <p id="cfgResult" style="margin-top:10px;font-size:12px;color:var(--muted)"></p>
   </div>
@@ -362,30 +362,82 @@ async function triggerRegen() {
 
 // ── Events ──────────────────────────────────────────────────
 
+
+async function permanentDelete(btn) {
+  var id   = btn.getAttribute('data-id');
+  var name = btn.getAttribute('data-name');
+
+  if (!confirm('Permanently delete "' + name + '"?\n\nThis will:\n- Remove the event definition\n- Delete all future occurrences\n- Preserve PostLog history\n\nThis cannot be undone.')) return;
+
+  var input = prompt('Type the event name to confirm:\n\n' + name);
+  if (input === null) return;
+  if (input.trim() !== name.trim()) {
+    alert('Name did not match. Deletion cancelled.');
+    return;
+  }
+
+  try {
+    var res = await fetch('/admin/api/events/' + id + '/permanent', { method: 'DELETE' });
+    if (!res.ok) {
+      var err = await res.json().catch(function() { return {detail: res.statusText}; });
+      throw new Error(err.detail || res.statusText);
+    }
+    var data = await res.json();
+    toast('Deleted "' + data.event_name + '". ' + data.post_log_entries_preserved + ' PostLog entries preserved.');
+    loadEvents();
+  } catch(e) { toast(e.message, true); }
+}
 async function loadEvents() {
   try {
     const events = await api('GET', '/api/events');
     const tbody = document.getElementById('eventsBody');
     if (!events.length) {
-      tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);padding:20px">No events defined yet. Click "+ Add Event" to get started.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);padding:20px">No events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
       return;
     }
-    const intervalLabel = i => i===1?'Daily':i===2?'Every 2 days':i===7?'Weekly':i===14?'Biweekly':i===28?'Every 4 weeks':`Every ${i} days`;
-    tbody.innerHTML = events.map(e => `
-      <tr>
-        <td><span class="cat-dot" style="background:${CAT_COLORS[e.category]||CAT_COLORS.Other}"></span>${e.name}</td>
-        <td>${e.category}</td>
-        <td>${intervalLabel(e.interval_days)}</td>
-        <td>${e.start_time_utc} UTC</td>
-        <td>${e.duration_hours}h</td>
-        <td>${e.anchor_date}</td>
-        <td><span class="badge badge-${e.active?'ok':'pending'}">${e.active?'Active':'Inactive'}</span></td>
-        <td>
-          <button class="btn btn-ghost btn-sm" onclick="openEventModal(${JSON.stringify(e).replace(/"/g,'&quot;')})">Edit</button>
-          <button class="btn btn-${e.active?'danger':'ghost'} btn-sm" onclick="toggleActive(${e.id},${e.active})">${e.active?'Deactivate':'Activate'}</button>
-        </td>
-      </tr>
-    `).join('');
+    function intervalLabel(i) {
+      if (i===1)  return 'Daily';
+      if (i===2)  return 'Every 2 days';
+      if (i===7)  return 'Weekly';
+      if (i===14) return 'Biweekly';
+      if (i===28) return 'Every 4 weeks';
+      return 'Every ' + i + ' days';
+    }
+    var rows = '';
+    events.forEach(function(e) {
+      var catColor  = CAT_COLORS[e.category] || CAT_COLORS.Other;
+      var badgeCls  = e.active ? 'badge-ok' : 'badge-pending';
+      var badgeTxt  = e.active ? 'Active' : 'Inactive';
+      var btnCls    = e.active ? 'btn-danger' : 'btn-ghost';
+      var btnTxt    = e.active ? 'Deactivate' : 'Activate';
+      var btnTitle  = e.active
+        ? 'Remove this event from schedule generation and Discord posting. The event remains in the database.'
+        : 'Re-enable this event for schedule generation and Discord posting.';
+      var editData  = JSON.stringify(e).replace(/"/g, '&quot;');
+      var deleteBtn = '';
+      if (!e.active) {
+        var safeName = e.name.replace(/"/g, '&quot;');
+        deleteBtn = '<button class="btn btn-danger btn-sm" '
+          + 'title="Permanently delete this event. PostLog entries are preserved." '
+          + 'data-id="' + e.id + '" data-name="' + safeName + '" '
+          + 'onclick="permanentDelete(this)">Delete</button>';
+      }
+      rows += '<tr>'
+        + '<td><span class="cat-dot" style="background:' + catColor + '"></span>' + e.name + '</td>'
+        + '<td>' + e.category + '</td>'
+        + '<td>' + intervalLabel(e.interval_days) + '</td>'
+        + '<td>' + e.start_time_utc + ' UTC</td>'
+        + '<td>' + e.duration_hours + 'h</td>'
+        + '<td>' + e.anchor_date + '</td>'
+        + '<td><span class="badge ' + badgeCls + '">' + badgeTxt + '</span></td>'
+        + '<td>'
+        + '<button class="btn btn-ghost btn-sm" title="Edit this event definition." onclick="openEventModal(' + editData + ')">Edit</button> '
+        + '<button class="btn ' + btnCls + ' btn-sm" title="' + btnTitle + '" onclick="toggleActive(' + e.id + ',' + e.active + ')">' + btnTxt + '</button> '
+        + deleteBtn
+        + '</td>'
+        + '</tr>';
+    });
+    tbody.innerHTML = rows;
   } catch(e) { toast(e.message, true); }
 }
 
