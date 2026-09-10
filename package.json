@@ -1,0 +1,26 @@
+{
+  "name": "taraka",
+  "version": "1.0.0",
+  "description": "Kingshot Community Event Scheduler — self-hosted FastAPI + PostgreSQL + Discord integration.",
+  "main": "index.js",
+  "scripts": {
+    "lint": "eslint app/static/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/learningtofail/samaya.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/learningtofail/samaya/issues"
+  },
+  "homepage": "https://github.com/learningtofail/samaya#readme",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "eslint-plugin-html": "^8.2.0"
+  },
+  "type": "module"
+}
