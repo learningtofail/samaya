@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KS138 — Kingshot Event Schedule</title>
+<style>
+  :root {
+    --bg:      #fafaf7;
+    --bg2:     #f5f3ef;
+    --bg3:     #ede8e0;
+    --border:  #e0dbd2;
+    --banner:  #1c1917;
+    --text:    #1c1917;
+    --muted:   #78716c;
+    --accent:  #f59e0b;
+    --green:   #bbf7d0;
+    --red:     #fecaca;
+    --blue:    #bfdbfe;
+    --purple:  #e9d5ff;
+    --cat-pve: #22c55e;
+    --cat-pvp: #ef4444;
+    --cat-all: #3b82f6;
+    --cat-cyc: #f59e0b;
+    --cat-oth: #94a3b8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 15px;
+    min-height: 100vh;
+  }
+  header {
+    background: var(--banner);
+    color: #fafaf7;
+    padding: 18px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  header h1 { font-size: 20px; font-weight: 600; letter-spacing: .02em; }
+  header p  { font-size: 13px; opacity: .6; }
+  .ics-btn {
+    background: var(--accent);
+    color: var(--banner);
+    padding: 8px 16px;
+    border-radius: 5px;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: opacity .15s;
+  }
+  .ics-btn:hover { opacity: .85; }
+  main { max-width: 860px; margin: 0 auto; padding: 28px 20px; }
+  .week-header {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--muted);
+    margin: 28px 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .week-header:first-of-type { margin-top: 0; }
+  .event-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    transition: box-shadow .15s;
+  }
+  .event-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.07); }
+  .event-card.today { border-left: 3px solid var(--accent); }
+  .cat-bar {
+    width: 4px;
+    min-width: 4px;
+    height: 100%;
+    border-radius: 2px;
+    align-self: stretch;
+    min-height: 40px;
+  }
+  .event-body { flex: 1; min-width: 0; }
+  .event-name {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .event-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .event-meta span { display: flex; align-items: center; gap: 4px; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .badge-posted    { background: var(--green);  color: #166534; }
+  .badge-tentative { background: var(--bg3);    color: var(--muted); }
+  .badge-cancelled { background: var(--red);    color: #991b1b; }
+  .date-col {
+    text-align: right;
+    min-width: 72px;
+    flex-shrink: 0;
+  }
+  .date-day  { font-size: 22px; font-weight: 700; line-height: 1; }
+  .date-dow  { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .date-col.today .date-day { color: #b45309; }
+  .empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+  .empty p { font-size: 16px; margin-bottom: 8px; }
+  .loading { text-align: center; padding: 60px; color: var(--muted); }
+  footer {
+    text-align: center;
+    padding: 32px 20px;
+    color: var(--muted);
+    font-size: 13px;
+    border-top: 1px solid var(--border);
+    margin-top: 32px;
+  }
+  footer a { color: var(--muted); }
+  .subscribe-box {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .subscribe-box p { font-size: 13px; color: var(--muted); }
+  .subscribe-box strong { color: var(--text); }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  @media (max-width: 600px) {
+    .date-col { min-width: 50px; }
+    .date-day  { font-size: 18px; }
+    .event-name { font-size: 14px; }
+    .subscribe-box { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>⏱ KS138 Event Schedule</h1>
+    <p>Kingshot Community — upcoming events, all times UTC</p>
+  </div>
+  <a class="ics-btn" href="/ics/events.ics">📅 Subscribe to Calendar</a>
+</header>
+
+<main>
+  <div class="subscribe-box">
+    <p>
+      <strong>Subscribe to stay up to date.</strong>
+      Add our calendar to Google Calendar, Apple Calendar, or any app that supports ICS.
+      It updates automatically — no manual refresh needed.
+    </p>
+    <a class="ics-btn" href="/ics/events.ics">📅 Get ICS Feed</a>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>PvE</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>PvP</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>Alliance</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>Cycle</div>
+  </div>
+
+  <div id="content"><div class="loading">Loading events…</div></div>
+</main>
+
+<footer>
+  <p>All times are UTC · <a href="/ics/events.ics">ICS Calendar Feed</a> · Powered by Samaya</p>
+</footer>
+
+<script>
+const CAT_COLORS = {
+  PvE:     '#22c55e',
+  PvP:     '#ef4444',
+  Alliance:'#3b82f6',
+  Cycle:   '#f59e0b',
+  Other:   '#94a3b8',
+};
+
+const DOW_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MONTH    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function formatTime(iso) {
+  return iso.slice(11, 16) + ' UTC';
+}
+
+function formatDuration(hours) {
+  if (hours === 24) return '24h (all day)';
+  if (hours < 1)   return `${Math.round(hours * 60)}min`;
+  if (hours === Math.floor(hours)) return `${hours}h`;
+  return `${hours}h`;
+}
+
+function statusBadge(status) {
+  if (status === 'posted' || status === 'active' || status === 'completed') {
+    return '<span class="badge badge-posted">Confirmed</span>';
+  }
+  if (status === 'cancelled') {
+    return '<span class="badge badge-cancelled">Cancelled</span>';
+  }
+  return '<span class="badge badge-tentative">Scheduled</span>';
+}
+
+function weekLabel(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  const today = new Date();
+  today.setUTCHours(12, 0, 0, 0);
+  const diff = Math.floor((d - today) / 86400000);
+
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+
+  // Get start of week (Monday)
+  const startOfWeek = new Date(today);
+  const dayOfWeek   = (today.getUTCDay() + 6) % 7; // 0=Mon
+  startOfWeek.setUTCDate(today.getUTCDate() - dayOfWeek);
+
+  const weekNum = Math.floor((d - startOfWeek) / (7 * 86400000));
+  if (weekNum === 0) return 'This Week';
+  if (weekNum === 1) return 'Next Week';
+
+  const monthName = MONTH[d.getUTCMonth()];
+  return `${monthName} ${d.getUTCDate()} week`;
+}
+
+async function loadEvents() {
+  const content = document.getElementById('content');
+  try {
+    const res    = await fetch('/api/events');
+    const events = await res.json();
+
+    if (!events.length) {
+      content.innerHTML = `
+        <div class="empty">
+          <p>No events scheduled in the next 28 days.</p>
+          <p style="font-size:13px">Check back soon or subscribe to the ICS feed to get notified automatically.</p>
+        </div>`;
+      return;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Group by week label
+    const groups = new Map();
+    events.forEach(ev => {
+      const label = weekLabel(ev.occurrence_date);
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push(ev);
+    });
+
+    let html = '';
+    groups.forEach((evs, label) => {
+      html += `<div class="week-header">${label}</div>`;
+      evs.forEach(ev => {
+        const d         = new Date(ev.occurrence_date + 'T12:00:00Z');
+        const isToday   = ev.occurrence_date === today;
+        const catColor  = CAT_COLORS[ev.category] || CAT_COLORS.Other;
+        const dayNum    = d.getUTCDate();
+        const dowLabel  = DOW_FULL[d.getUTCDay()].slice(0, 3);
+
+        html += `
+          <div class="event-card${isToday ? ' today' : ''}">
+            <div class="date-col${isToday ? ' today' : ''}">
+              <div class="date-day">${dayNum}</div>
+              <div class="date-dow">${dowLabel}</div>
+            </div>
+            <div class="cat-bar" style="background:${catColor}"></div>
+            <div class="event-body">
+              <div class="event-name">${ev.event_name}</div>
+              <div class="event-meta">
+                <span>🕐 ${formatTime(ev.start_datetime_utc)}</span>
+                <span>⏱ ${formatDuration(ev.duration_hours)}</span>
+                ${ev.discord_channel ? `<span>💬 ${ev.discord_channel}</span>` : ''}
+                <span>${statusBadge(ev.post_status)}</span>
+              </div>
+              ${ev.description ? `<p style="margin-top:6px;font-size:13px;color:var(--muted);line-height:1.4">${ev.description}</p>` : ''}
+            </div>
+          </div>`;
+      });
+    });
+
+    content.innerHTML = html;
+
+  } catch (e) {
+    content.innerHTML = `
+      <div class="empty">
+        <p>Could not load events.</p>
+        <p style="font-size:13px">${e.message}</p>
+      </div>`;
+  }
+}
+
+loadEvents();
+// Auto-refresh every 10 minutes
+setInterval(loadEvents, 600000);
+</script>
+</body>
+</html>

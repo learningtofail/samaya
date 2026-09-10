@@ -1,0 +1,17 @@
+.env
+.env.*
+postgres/
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+alembic/
+*.log
+.DS_Store
+Thumbs.db
+!.env.example
