@@ -16,3 +16,4 @@ alembic/
 Thumbs.db
 !.env.example
 *.bak*
+node_modules/
