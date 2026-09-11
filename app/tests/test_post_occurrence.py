@@ -69,7 +69,7 @@ class TestPostOccurrence:
 
         async def fake_create(**kwargs):
             return "discord-event-1", ""
-        monkeypatch.setattr("routers.admin.create_discord_event", fake_create)
+        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
 
         r = await client.post(f"/admin/api/occurrences/{occ.id}/post")
         assert r.status_code == 200, r.text
@@ -87,7 +87,7 @@ class TestPostOccurrence:
 
         async def fake_create(**kwargs):
             return "", "403 Forbidden — bot missing MANAGE_EVENTS permission"
-        monkeypatch.setattr("routers.admin.create_discord_event", fake_create)
+        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
 
         r = await client.post(f"/admin/api/occurrences/{occ.id}/post")
         assert r.status_code == 502
@@ -104,7 +104,7 @@ class TestPostOccurrence:
 
         async def fake_create(**kwargs):
             return "discord-event-1", ""
-        monkeypatch.setattr("routers.admin.create_discord_event", fake_create)
+        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
 
         r1 = await client.post(f"/admin/api/occurrences/{occ.id}/post")
         assert r1.status_code == 200
