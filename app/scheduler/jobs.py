@@ -99,7 +99,7 @@ async def regenerate_occurrences():
             await session.rollback()
             logger.error(f"regenerate_occurrences: failed — {e}")
             await _update_state(session, "regenerate_occurrences", "error", str(e))
-            send_notification(
+            await send_notification(
                 subject="[Samaya] Occurrence regeneration failed",
                 body=f"The daily regeneration job failed at {started_at.isoformat()}.\n\nError: {e}"
             )
@@ -178,19 +178,34 @@ async def send_pre_event_reminders():
                     + (f" · {event.discord_channel}" if event.discord_channel else "")
                 )
 
-                success, error = await send_channel_message(
-                    cfg.bot_token,
-                    event.notification_channel_id,
-                    message,
-                )
+                try:
+                    success, error = await send_channel_message(
+                        cfg.bot_token,
+                        event.notification_channel_id,
+                        message,
+                    )
+                except Exception as e:
+                    # A raised exception here (vs. the (success, error) tuple
+                    # send_channel_message normally returns) would otherwise
+                    # propagate out of the loop and roll back every
+                    # reminder_sent flag set so far this tick, including ones
+                    # for messages that were already delivered to Discord —
+                    # those would then be re-sent on the next tick.
+                    logger.error(f"Reminder failed for '{event.name}': {e}")
+                    continue
 
                 if success:
                     occ.reminder_sent = True
+                    # Commit immediately, per-occurrence, rather than once at
+                    # the end of the loop. If something goes wrong on a later
+                    # occurrence, only this one's already-committed flag is
+                    # safe — a single end-of-loop commit would have let a
+                    # later failure roll back every reminder_sent flag set so
+                    # far, even though those messages were already delivered.
+                    await session.commit()
                     logger.info(f"Reminder sent for '{event.name}' on {occ.occurrence_date}")
                 else:
                     logger.error(f"Reminder failed for '{event.name}': {error}")
-
-            await session.commit()
 
         except Exception as e:
             await session.rollback()

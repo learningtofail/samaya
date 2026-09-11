@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
@@ -13,14 +14,20 @@ from models.db import (
     PostLog, SchedulerState
 )
 from services.discord_api import (
-    cancel_discord_event, create_discord_event,
+    cancel_discord_event, create_discord_event, update_discord_event,
     get_guild_channels, get_guild_roles,
     send_channel_message, verify_token
 )
 from services.recurrence import next_occurrences, build_start_datetime
+from services.validators import (
+    parse_interval_days, parse_duration_hours, parse_alliance,
+    parse_start_time_utc, parse_anchor_date, parse_notify_minutes_before,
+)
 from scheduler.jobs import regenerate_occurrences
+from services.auth import require_admin_key
 
 router = APIRouter()
+api_router = APIRouter(dependencies=[Depends(require_admin_key)])
 
 
 # ── Pydantic schemas ──────────────────────────────────────────
@@ -40,72 +47,12 @@ class EventIn(BaseModel):
     notification_role_id:    str = ""
     notify_minutes_before:   Optional[int] = None
 
-    @field_validator("interval_days", mode="before")
-    @classmethod
-    def validate_interval(cls, v):
-        try:
-            val = int(v)
-        except (TypeError, ValueError):
-            raise ValueError("Interval must be a whole number")
-        if val < 1:
-            raise ValueError("Interval must be at least 1 day (1=daily, 7=weekly, 14=biweekly, 28=every 4 weeks)")
-        return val
-
-    @field_validator("duration_hours", mode="before")
-    @classmethod
-    def validate_duration(cls, v):
-        try:
-            val = float(v)
-        except (TypeError, ValueError):
-            raise ValueError("Duration must be a number")
-        if val <= 0:
-            raise ValueError("Duration must be greater than 0 hours")
-        return val
-
-    @field_validator("alliance", mode="before")
-    @classmethod
-    def validate_alliance(cls, v):
-        v = str(v).strip()
-        if v not in ("M0D", "NSR", "Server"):
-            raise ValueError("Alliance must be one of: M0D, NSR, Server")
-        return v
-
-    @field_validator("start_time_utc", mode="before")
-    @classmethod
-    def validate_time(cls, v):
-        import re
-        v = str(v).strip()
-        if not re.match(r"^\d{1,2}:\d{2}$", v):
-            raise ValueError("Start time must be in HH:MM format (e.g. 19:00)")
-        h, m = map(int, v.split(":"))
-        if not (0 <= h <= 23):
-            raise ValueError(f"Hour {h} is invalid — must be 00 to 23")
-        if not (0 <= m <= 59):
-            raise ValueError(f"Minute {m} is invalid — must be 00 to 59")
-        return f"{h:02d}:{m:02d}"
-
-    @field_validator("anchor_date", mode="before")
-    @classmethod
-    def validate_anchor(cls, v):
-        from datetime import date as d
-        try:
-            d.fromisoformat(str(v))
-        except (ValueError, TypeError):
-            raise ValueError("Anchor date must be in yyyy-mm-dd format (e.g. 2025-05-01)")
-        return str(v)
-
-    @field_validator("notify_minutes_before", mode="before")
-    @classmethod
-    def validate_notify_minutes(cls, v):
-        if v is None or v == "" or v == "null":
-            return None
-        try:
-            val = int(v)
-        except (TypeError, ValueError):
-            raise ValueError("Notify minutes must be a whole number")
-        if val < 1:
-            raise ValueError("Notify minutes must be at least 1")
-        return val
+    _validate_interval = field_validator("interval_days", mode="before")(parse_interval_days)
+    _validate_duration = field_validator("duration_hours", mode="before")(parse_duration_hours)
+    _validate_alliance = field_validator("alliance", mode="before")(parse_alliance)
+    _validate_time     = field_validator("start_time_utc", mode="before")(parse_start_time_utc)
+    _validate_anchor   = field_validator("anchor_date", mode="before")(parse_anchor_date)
+    _validate_notify   = field_validator("notify_minutes_before", mode="before")(parse_notify_minutes_before)
 
 
 class EventPatch(BaseModel):
@@ -124,82 +71,20 @@ class EventPatch(BaseModel):
     notification_role_id:    Optional[str]  = None
     notify_minutes_before:   Optional[int]  = None
 
-    @field_validator("interval_days", mode="before")
-    @classmethod
-    def validate_interval(cls, v):
-        if v is None:
-            return v
-        try:
-            val = int(v)
-        except (TypeError, ValueError):
-            raise ValueError("Interval must be a whole number")
-        if val < 1:
-            raise ValueError("Interval must be at least 1 day")
-        return val
-
-    @field_validator("duration_hours", mode="before")
-    @classmethod
-    def validate_duration(cls, v):
-        if v is None:
-            return v
-        try:
-            val = float(v)
-        except (TypeError, ValueError):
-            raise ValueError("Duration must be a number")
-        if val <= 0:
-            raise ValueError("Duration must be greater than 0 hours")
-        return val
-
-    @field_validator("alliance", mode="before")
-    @classmethod
-    def validate_alliance(cls, v):
-        if v is None:
-            return v
-        v = str(v).strip()
-        if v not in ("M0D", "NSR", "Server"):
-            raise ValueError("Alliance must be one of: M0D, NSR, Server")
-        return v
-
-    @field_validator("start_time_utc", mode="before")
-    @classmethod
-    def validate_time(cls, v):
-        if v is None:
-            return v
-        import re
-        v = str(v).strip()
-        if not re.match(r"^\d{1,2}:\d{2}$", v):
-            raise ValueError("Start time must be in HH:MM format")
-        h, m = map(int, v.split(":"))
-        if not (0 <= h <= 23):
-            raise ValueError(f"Hour {h} is invalid — must be 00 to 23")
-        if not (0 <= m <= 59):
-            raise ValueError(f"Minute {m} is invalid — must be 00 to 59")
-        return f"{h:02d}:{m:02d}"
-
-    @field_validator("anchor_date", mode="before")
-    @classmethod
-    def validate_anchor(cls, v):
-        if v is None:
-            return v
-        from datetime import date as d
-        try:
-            d.fromisoformat(str(v))
-        except (ValueError, TypeError):
-            raise ValueError("Anchor date must be in yyyy-mm-dd format")
-        return str(v)
-
-    @field_validator("notify_minutes_before", mode="before")
-    @classmethod
-    def validate_notify_minutes(cls, v):
-        if v is None or v == "" or v == "null":
-            return None
-        try:
-            val = int(v)
-        except (TypeError, ValueError):
-            raise ValueError("Notify minutes must be a whole number")
-        if val < 1:
-            raise ValueError("Notify minutes must be at least 1")
-        return val
+    # Same parsing rules as EventIn, but None means "leave this field
+    # unchanged" on a partial update rather than "invalid".
+    _validate_interval = field_validator("interval_days", mode="before")(
+        lambda cls, v: parse_interval_days(v, allow_none=True))
+    _validate_duration = field_validator("duration_hours", mode="before")(
+        lambda cls, v: parse_duration_hours(v, allow_none=True))
+    _validate_alliance = field_validator("alliance", mode="before")(
+        lambda cls, v: parse_alliance(v, allow_none=True))
+    _validate_time     = field_validator("start_time_utc", mode="before")(
+        lambda cls, v: parse_start_time_utc(v, allow_none=True))
+    _validate_anchor   = field_validator("anchor_date", mode="before")(
+        lambda cls, v: parse_anchor_date(v, allow_none=True))
+    _validate_notify   = field_validator("notify_minutes_before", mode="before")(
+        lambda cls, v: parse_notify_minutes_before(v, allow_none=True))
 
 class DiscordConfigIn(BaseModel):
     bot_token:  str
@@ -221,7 +106,7 @@ async def admin_home():
 
 # ── System status ─────────────────────────────────────────────
 
-@router.get("/api/status")
+@api_router.get("/api/status")
 async def status(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(SchedulerState))
     states = {s.job_name: s for s in result.scalars().all()}
@@ -257,7 +142,7 @@ async def status(db: AsyncSession = Depends(get_db)):
 
 # ── Event definitions ─────────────────────────────────────────
 
-@router.get("/api/events")
+@api_router.get("/api/events")
 async def list_events(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(EventDefinition).order_by(EventDefinition.category, EventDefinition.name)
@@ -265,7 +150,7 @@ async def list_events(db: AsyncSession = Depends(get_db)):
     return [_event_dict(e) for e in result.scalars().all()]
 
 
-@router.post("/api/events", status_code=201)
+@api_router.post("/api/events", status_code=201)
 async def create_event(payload: EventIn, db: AsyncSession = Depends(get_db)):
     from datetime import time as dtime
     try:
@@ -306,7 +191,7 @@ async def create_event(payload: EventIn, db: AsyncSession = Depends(get_db)):
     return _event_dict(event)
 
 
-@router.patch("/api/events/{event_id}")
+@api_router.patch("/api/events/{event_id}")
 async def update_event(event_id: int, payload: EventPatch, db: AsyncSession = Depends(get_db)):
     from datetime import time as dtime
     result = await db.execute(select(EventDefinition).where(EventDefinition.id == event_id))
@@ -339,7 +224,7 @@ async def update_event(event_id: int, payload: EventPatch, db: AsyncSession = De
     return _event_dict(event)
 
 
-@router.delete("/api/events/{event_id}", status_code=204)
+@api_router.delete("/api/events/{event_id}", status_code=204)
 async def deactivate_event(event_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(EventDefinition).where(EventDefinition.id == event_id))
     event  = result.scalar_one_or_none()
@@ -352,7 +237,7 @@ async def deactivate_event(event_id: int, db: AsyncSession = Depends(get_db)):
 # ── Preview ───────────────────────────────────────────────────
 
 
-@router.delete("/api/events/{event_id}/permanent", status_code=200)
+@api_router.delete("/api/events/{event_id}/permanent", status_code=200)
 async def permanent_delete_event(event_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(EventDefinition).where(EventDefinition.id == event_id))
     event  = result.scalar_one_or_none()
@@ -380,7 +265,7 @@ async def permanent_delete_event(event_id: int, db: AsyncSession = Depends(get_d
         "post_log_entries_preserved": len(log_entries),
     }
 
-@router.post("/api/scheduler/preview")
+@api_router.post("/api/scheduler/preview")
 async def preview_occurrences(payload: EventIn):
     anchor = date.fromisoformat(payload.anchor_date)
     dates  = next_occurrences(anchor, payload.interval_days, date.today(), count=10)
@@ -389,7 +274,7 @@ async def preview_occurrences(payload: EventIn):
 
 # ── Occurrences ───────────────────────────────────────────────
 
-@router.get("/api/occurrences")
+@api_router.get("/api/occurrences")
 async def list_occurrences(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Occurrence, EventDefinition)
@@ -399,7 +284,7 @@ async def list_occurrences(db: AsyncSession = Depends(get_db)):
     return [_occurrence_dict(occ, ev) for occ, ev in result.all()]
 
 
-@router.patch("/api/occurrences/{occ_id}")
+@api_router.patch("/api/occurrences/{occ_id}")
 async def update_occurrence(occ_id: int, payload: OccurrencePatch, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Occurrence).where(Occurrence.id == occ_id))
     occ    = result.scalar_one_or_none()
@@ -411,7 +296,7 @@ async def update_occurrence(occ_id: int, payload: OccurrencePatch, db: AsyncSess
     return {"id": occ.id, "post_to_discord": occ.post_to_discord, "post_status": occ.post_status}
 
 
-@router.post("/api/occurrences/{occ_id}/post")
+@api_router.post("/api/occurrences/{occ_id}/post")
 async def post_occurrence(occ_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Occurrence, EventDefinition).join(EventDefinition).where(Occurrence.id == occ_id)
@@ -427,7 +312,14 @@ async def post_occurrence(occ_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Discord not configured")
 
     now = datetime.now(timezone.utc)
-    if (occ.start_datetime_utc - now).total_seconds() < 900:
+    start = occ.start_datetime_utc
+    if start.tzinfo is None:
+        # Not every driver round-trips tzinfo on a DateTime(timezone=True)
+        # column the same way — asyncpg (production/Postgres) does,
+        # aiosqlite doesn't. Every value in this column is UTC regardless
+        # of what the driver hands back, so normalise rather than assume.
+        start = start.replace(tzinfo=timezone.utc)
+    if (start - now).total_seconds() < 900:
         raise HTTPException(status_code=400, detail="Event starts in less than 15 minutes")
 
     existing = await db.execute(
@@ -437,6 +329,28 @@ async def post_occurrence(occ_id: int, db: AsyncSession = Depends(get_db)):
         )
     )
     if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Already posted — see PostLog")
+
+    # Reserve the PostLog row now, before calling Discord, instead of after.
+    # Two concurrent POSTs for the same occurrence could otherwise both pass
+    # the check above, both create a Discord event, and only then collide on
+    # uq_post_log — by which point the second request's Discord event has
+    # already been created with no PostLog row to record it. Inserting the
+    # reservation first means the race is caught by the unique constraint
+    # before any Discord call happens.
+    log = PostLog(
+        event_id         = event.id,
+        event_name       = event.name,
+        occurrence_date  = occ.occurrence_date,
+        discord_guild_id = cfg.guild_id,
+        posted_by        = "coordinator",
+        status           = "pending",
+    )
+    db.add(log)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
         raise HTTPException(status_code=409, detail="Already posted — see PostLog")
 
     occ.post_status = "queued"
@@ -455,23 +369,16 @@ async def post_occurrence(occ_id: int, db: AsyncSession = Depends(get_db)):
     if error:
         occ.post_status   = "error"
         occ.status_detail = error
+        log.status        = "error"
+        log.status_detail = error
         await db.commit()
         raise HTTPException(status_code=502, detail=error)
 
-    # Write PostLog
-    log = PostLog(
-        event_id         = event.id,
-        event_name       = event.name,
-        occurrence_date  = occ.occurrence_date,
-        discord_event_id = discord_id,
-        discord_guild_id = cfg.guild_id,
-        posted_at_utc    = datetime.now(timezone.utc),
-        posted_by        = "coordinator",
-        status           = "posted",
-    )
-    db.add(log)
-    occ.post_status   = "posted"
-    occ.status_detail = None
+    log.discord_event_id = discord_id
+    log.posted_at_utc    = datetime.now(timezone.utc)
+    log.status           = "posted"
+    occ.post_status       = "posted"
+    occ.status_detail     = None
 
     # Send creation announcement if notification channel configured
     if event.notification_channel_id and event.notification_role_id:
@@ -492,7 +399,7 @@ async def post_occurrence(occ_id: int, db: AsyncSession = Depends(get_db)):
     return {"discord_event_id": discord_id, "status": "posted"}
 
 
-@router.delete("/api/occurrences/{occ_id}/discord", status_code=200)
+@api_router.delete("/api/occurrences/{occ_id}/discord", status_code=200)
 async def cancel_occurrence_discord(occ_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Occurrence, EventDefinition).join(EventDefinition).where(Occurrence.id == occ_id)
@@ -519,20 +426,22 @@ async def cancel_occurrence_discord(occ_id: int, db: AsyncSession = Depends(get_
 
     success, error = await cancel_discord_event(cfg.bot_token, cfg.guild_id, log.discord_event_id)
 
-    old_id = log.discord_event_id
-    log.discord_event_id = f"CANCELLED — was {old_id}"
+    # discord_event_id keeps the real Discord ID rather than being
+    # overwritten with a "CANCELLED — was {id}" marker string — status
+    # already carries the cancelled state, and mangling the ID field broke
+    # any later webhook lookup by that same ID (see webhooks.py).
     log.status = "cancelled"
     occ.post_status = "cancelled"
     await db.commit()
 
     if not success and "404" not in error:
         raise HTTPException(status_code=502, detail=error)
-    return {"status": "cancelled", "discord_event_id": old_id}
+    return {"status": "cancelled", "discord_event_id": log.discord_event_id}
 
 
 # ── Manual regenerate ─────────────────────────────────────────
 
-@router.post("/api/scheduler/regenerate")
+@api_router.post("/api/scheduler/regenerate")
 async def manual_regenerate():
     await regenerate_occurrences()
     return {"status": "ok", "message": "Regeneration complete"}
@@ -540,7 +449,7 @@ async def manual_regenerate():
 
 # ── PostLog ───────────────────────────────────────────────────
 
-@router.get("/api/post-log")
+@api_router.get("/api/post-log")
 async def get_post_log(limit: int = 50, offset: int = 0, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(PostLog, EventDefinition)
@@ -551,7 +460,7 @@ async def get_post_log(limit: int = 50, offset: int = 0, db: AsyncSession = Depe
     return [_log_dict(l, ev) for l, ev in result.all()]
 
 
-@router.get("/api/post-log/export.csv")
+@api_router.get("/api/post-log/export.csv")
 async def export_post_log(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(PostLog).order_by(PostLog.occurrence_date.desc()))
     logs   = result.scalars().all()
@@ -568,7 +477,7 @@ async def export_post_log(db: AsyncSession = Depends(get_db)):
 
 # ── Discord config ────────────────────────────────────────────
 
-@router.put("/api/config/discord")
+@api_router.put("/api/config/discord")
 async def update_discord_config(payload: DiscordConfigIn, db: AsyncSession = Depends(get_db)):
     ok, result = await verify_token(payload.bot_token)
     if not ok:
@@ -590,7 +499,7 @@ async def update_discord_config(payload: DiscordConfigIn, db: AsyncSession = Dep
 
 # ── Discord metadata (channels/roles) ──────────────────────────
 
-@router.get("/api/discord/channels")
+@api_router.get("/api/discord/channels")
 async def list_discord_channels(db: AsyncSession = Depends(get_db)):
     cfg_result = await db.execute(select(DiscordConfig))
     cfg = cfg_result.scalar_one_or_none()
@@ -602,7 +511,7 @@ async def list_discord_channels(db: AsyncSession = Depends(get_db)):
     return channels
 
 
-@router.get("/api/discord/roles")
+@api_router.get("/api/discord/roles")
 async def list_discord_roles(db: AsyncSession = Depends(get_db)):
     cfg_result = await db.execute(select(DiscordConfig))
     cfg = cfg_result.scalar_one_or_none()
@@ -616,7 +525,7 @@ async def list_discord_roles(db: AsyncSession = Depends(get_db)):
 
 # ── Discord Sync ──────────────────────────────────────────────
 
-@router.get("/api/sync/discord")
+@api_router.get("/api/sync/discord")
 async def sync_discord(db: AsyncSession = Depends(get_db)):
     """
     Fetches all current Discord scheduled events and compares
@@ -654,7 +563,7 @@ async def sync_discord(db: AsyncSession = Depends(get_db)):
     postlog_discord_ids = set()
 
     for log in post_logs:
-        if not log.discord_event_id or log.discord_event_id.startswith("CANCELLED"):
+        if not log.discord_event_id:
             continue
 
         discord_id = str(log.discord_event_id)
@@ -740,7 +649,7 @@ async def sync_discord(db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.post("/api/sync/push/{occ_id}")
+@api_router.post("/api/sync/push/{occ_id}")
 async def sync_push_to_discord(occ_id: int, db: AsyncSession = Depends(get_db)):
     """
     Updates a Discord event to match the current event definition.
@@ -771,29 +680,21 @@ async def sync_push_to_discord(occ_id: int, db: AsyncSession = Depends(get_db)):
     if not cfg:
         raise HTTPException(status_code=400, detail="Discord not configured")
 
-    import httpx
-    url = f"https://discord.com/api/v10/guilds/{cfg.guild_id}/scheduled-events/{log.discord_event_id}"
-    payload = {
-        "name":        event.name,
-        "description": event.description or "",
-        "entity_metadata": {"location": event.discord_channel or "Community Server"},
-    }
+    success, error = await update_discord_event(
+        token             = cfg.bot_token,
+        guild_id          = cfg.guild_id,
+        discord_event_id  = log.discord_event_id,
+        name              = event.name,
+        description       = event.description,
+        location          = event.discord_channel,
+    )
 
-    async with httpx.AsyncClient() as client:
-        response = await client.patch(
-            url,
-            headers={"Authorization": f"Bot {cfg.bot_token}", "Content-Type": "application/json"},
-            json=payload,
-        )
-
-    if response.status_code in (200, 201):
+    if success:
         return {"status": "ok", "message": f"Discord event updated for {event.name} on {occ.occurrence_date}"}
-    else:
-        body = response.json()
-        raise HTTPException(status_code=502, detail=f"Discord PATCH failed: {body.get('message', response.status_code)}")
+    raise HTTPException(status_code=502, detail=f"Discord PATCH failed: {error}")
 
 
-@router.post("/api/sync/acknowledge/{discord_event_id}")
+@api_router.post("/api/sync/acknowledge/{discord_event_id}")
 async def acknowledge_discord_event(discord_event_id: str, db: AsyncSession = Depends(get_db)):
     """
     Adds a Discord-only event to PostLog as a manually-created record.
@@ -843,7 +744,7 @@ async def acknowledge_discord_event(discord_event_id: str, db: AsyncSession = De
     return {"status": "ok", "message": f"Event acknowledged and added to PostLog"}
 
 
-@router.post("/api/sync/push-by-log/{post_log_id}")
+@api_router.post("/api/sync/push-by-log/{post_log_id}")
 async def sync_push_by_log(post_log_id: int, db: AsyncSession = Depends(get_db)):
     """Push Samaya values to Discord using PostLog ID."""
     log_result = await db.execute(select(PostLog).where(PostLog.id == post_log_id))
@@ -863,26 +764,20 @@ async def sync_push_by_log(post_log_id: int, db: AsyncSession = Depends(get_db))
     if not cfg:
         raise HTTPException(status_code=400, detail="Discord not configured")
 
-    import httpx
-    url = f"https://discord.com/api/v10/guilds/{cfg.guild_id}/scheduled-events/{log.discord_event_id}"
-    payload = {
-        "name":            event.name,
-        "description":     event.description or "",
-        "entity_metadata": {"location": event.discord_channel or "Community Server"},
-    }
-    async with httpx.AsyncClient() as client:
-        response = await client.patch(
-            url,
-            headers={"Authorization": f"Bot {cfg.bot_token}", "Content-Type": "application/json"},
-            json=payload,
-        )
-    if response.status_code in (200, 201):
+    success, error = await update_discord_event(
+        token             = cfg.bot_token,
+        guild_id          = cfg.guild_id,
+        discord_event_id  = log.discord_event_id,
+        name              = event.name,
+        description       = event.description,
+        location          = event.discord_channel,
+    )
+    if success:
         return {"status": "ok"}
-    body = response.json()
-    raise HTTPException(status_code=502, detail=f"Discord PATCH failed: {body.get('message', response.status_code)}")
+    raise HTTPException(status_code=502, detail=f"Discord PATCH failed: {error}")
 
 
-@router.post("/api/sync/mark-cancelled/{post_log_id}")
+@api_router.post("/api/sync/mark-cancelled/{post_log_id}")
 async def sync_mark_cancelled(post_log_id: int, db: AsyncSession = Depends(get_db)):
     """Mark a PostLog entry as cancelled when Discord event no longer exists."""
     log_result = await db.execute(select(PostLog).where(PostLog.id == post_log_id))
@@ -951,3 +846,5 @@ def _log_dict(l: PostLog, ev: EventDefinition | None = None) -> dict:
         "alliance":         ev.alliance if ev else None,
         "leadership_only":  ev.leadership_only if ev else False,
     }
+
+router.include_router(api_router)

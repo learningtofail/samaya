@@ -20,6 +20,7 @@ export default [
         clearInterval: "readonly",
         localStorage:  "readonly",
         Intl:          "readonly",
+      URL:           "readonly",
         CAT_COLORS:    "readonly",
         GANTT_PALETTE: "readonly",
         DOW3:          "readonly",

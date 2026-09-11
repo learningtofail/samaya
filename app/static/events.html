@@ -249,6 +249,15 @@ const ALLIANCE_COLORS = {
 const DOW_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MONTH    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+// This page is public and unauthenticated — every field below comes from
+// the database (admin-editable event names/descriptions/channels), so it
+// must be escaped before going into innerHTML.
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
 function formatTime(iso) {
   return iso.slice(11, 16) + ' UTC';
 }
@@ -274,7 +283,7 @@ function statusBadge(status) {
 function allianceBadge(alliance) {
   const key   = alliance || 'Server';
   const color = ALLIANCE_COLORS[key] || ALLIANCE_COLORS.Server;
-  return `<span class="alliance-badge" style="background:${color};color:var(--bg)">${key}</span>`;
+  return `<span class="alliance-badge" style="background:${color};color:var(--bg)">${escapeHtml(key)}</span>`;
 }
 
 function weekLabel(dateStr) {
@@ -344,16 +353,16 @@ async function loadEvents() {
             <div class="alliance-bar" style="background:${barColor}"></div>
             <div class="event-body">
               <div class="event-name-row">
-                <span class="event-name">${ev.event_name}</span>
+                <span class="event-name">${escapeHtml(ev.event_name)}</span>
                 ${allianceBadge(ev.alliance)}
               </div>
               <div class="event-meta">
                 <span>🕐 ${formatTime(ev.start_datetime_utc)}</span>
                 <span>⏱ ${formatDuration(ev.duration_hours)}</span>
-                ${ev.discord_channel ? `<span>💬 ${ev.discord_channel}</span>` : ''}
+                ${ev.discord_channel ? `<span>💬 ${escapeHtml(ev.discord_channel)}</span>` : ''}
                 <span>${statusBadge(ev.post_status)}</span>
               </div>
-              ${ev.description ? `<p style="margin-top:6px;font-size:var(--fs-sm);color:var(--muted);line-height:1.4">${ev.description}</p>` : ''}
+              ${ev.description ? `<p style="margin-top:6px;font-size:var(--fs-sm);color:var(--muted);line-height:1.4">${escapeHtml(ev.description)}</p>` : ''}
             </div>
           </div>`;
       });
@@ -365,7 +374,7 @@ async function loadEvents() {
     content.innerHTML = `
       <div class="empty">
         <p>Could not load events.</p>
-        <p style="font-size:var(--fs-sm)">${e.message}</p>
+        <p style="font-size:var(--fs-sm)">${escapeHtml(e.message)}</p>
       </div>`;
   }
 }

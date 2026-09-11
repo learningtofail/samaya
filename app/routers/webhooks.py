@@ -107,7 +107,6 @@ async def handle_event_delete(event_data: dict):
         log = result.scalar_one_or_none()
         if log:
             log.status        = "cancelled"
-            log.discord_event_id = f"CANCELLED — was {discord_id}"
             log.status_detail = f"Deleted via Discord at {datetime.now(timezone.utc).isoformat()}"
             await session.commit()
             logger.info(f"PostLog marked cancelled for Discord ID {discord_id}")

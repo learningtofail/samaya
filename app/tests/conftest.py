@@ -4,6 +4,14 @@ Test configuration and shared fixtures for Samaya.
 Uses an in-memory SQLite database so tests never touch
 the production PostgreSQL instance.
 """
+import os
+
+# main.py refuses to start without ADMIN_API_KEY set (see main.py's startup
+# check), and admin routes now require it as the X-Admin-Key header — set
+# this before `main` is imported anywhere in the test session.
+os.environ.setdefault("ADMIN_API_KEY", "test-admin-key")
+TEST_ADMIN_KEY = os.environ["ADMIN_API_KEY"]
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -60,7 +68,8 @@ async def client(db_engine):
     app.dependency_overrides[get_db] = override_get_db
 
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app), base_url="http://test",
+        headers={"X-Admin-Key": TEST_ADMIN_KEY},
     ) as ac:
         yield ac
 

@@ -1,4 +1,6 @@
 import logging
+import os
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -20,6 +22,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler(timezone="UTC")
+
+# Admin routes previously had no application-level auth and relied
+# entirely on Cloudflare Access at the network edge. ADMIN_API_KEY adds
+# a second, independent layer (see services/auth.py). Refuse to boot
+# without it rather than silently running the admin API open.
+if not os.environ.get("ADMIN_API_KEY"):
+    sys.exit(
+        "ADMIN_API_KEY is not set. Generate one (e.g. `openssl rand -hex 32`) "
+        "and add it to .env before starting the app."
+    )
 
 
 @asynccontextmanager

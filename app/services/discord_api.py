@@ -84,6 +84,73 @@ async def create_discord_event(
     return "", "Max retries exceeded"
 
 
+async def update_discord_event(
+    token:      str,
+    guild_id:   str,
+    discord_event_id: str,
+    name:        str,
+    description: str,
+    location:    str,
+) -> tuple[bool, str]:
+    """
+    Updates a Discord Scheduled Event's name/description/location to match
+    the current event definition. Returns (success, error_message).
+
+    Shares create_discord_event's retry/backoff and error-code handling —
+    this used to be reimplemented ad hoc at each call site with a bare
+    single-attempt httpx.patch and no retry on 429/5xx.
+    """
+    payload = {
+        "name":            name,
+        "description":     description or "",
+        "entity_metadata": {"location": location or "Community Server"},
+    }
+    url = f"{DISCORD_API_BASE}/guilds/{guild_id}/scheduled-events/{discord_event_id}"
+
+    async with httpx.AsyncClient() as client:
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = await client.patch(url, headers=_auth_headers(token), json=payload)
+            except httpx.RequestError as e:
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                return False, f"Network error: {e}"
+
+            if response.status_code in (200, 201):
+                return True, ""
+
+            if response.status_code == 401:
+                return False, "401 Unauthorized — token invalid or bot removed"
+
+            if response.status_code == 403:
+                return False, "403 Forbidden — bot missing MANAGE_EVENTS permission"
+
+            if response.status_code == 404:
+                return False, "404 Event not found — may already be cancelled"
+
+            if response.status_code == 400:
+                detail = response.json().get("message", "Bad request")
+                return False, f"400 {detail}"
+
+            if response.status_code == 429:
+                retry_after = response.json().get("retry_after", 2 ** attempt)
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(float(retry_after))
+                    continue
+                return False, "429 Rate limited — retry later"
+
+            if response.status_code >= 500:
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(2)
+                    continue
+                return False, f"{response.status_code} Discord server error"
+
+            return False, f"Unexpected HTTP {response.status_code}"
+
+    return False, "Max retries exceeded"
+
+
 async def cancel_discord_event(
     token: str,
     guild_id: str,
