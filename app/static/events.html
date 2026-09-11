@@ -6,35 +6,39 @@
 <title>KS138 — Kingshot Event Schedule</title>
 <style>
   :root {
-    --bg:      #fafaf7;
-    --bg2:     #f5f3ef;
-    --bg3:     #ede8e0;
-    --border:  #e0dbd2;
-    --banner:  #1c1917;
-    --text:    #1c1917;
-    --muted:   #78716c;
-    --accent:  #f59e0b;
+    font-size: 16px;
+    --bg:      #F8FAFC;
+    --bg2:     #F1F5F9;
+    --bg3:     #E2E8F0;
+    --border:  #CBD5E1;
+    --banner:  #1E293B;
+    --text:    #1E293B;
+    --muted:   #475569;
+    --accent:  #334155;
     --green:   #bbf7d0;
     --red:     #fecaca;
-    --blue:    #bfdbfe;
-    --purple:  #e9d5ff;
-    --cat-pve: #22c55e;
-    --cat-pvp: #ef4444;
-    --cat-all: #3b82f6;
-    --cat-cyc: #f59e0b;
-    --cat-oth: #94a3b8;
+    --alliance-m0d: #1d4ed8;
+    --alliance-nsr: #15803d;
+    --alliance-server: #475569;
+    --fs-2xs:  0.625rem;
+    --fs-xs:   0.75rem;
+    --fs-sm:   0.8125rem;
+    --fs-base: 0.9375rem;
+    --fs-md:   1rem;
+    --fs-lg:   1.25rem;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: system-ui, -apple-system, sans-serif;
     background: var(--bg);
     color: var(--text);
-    font-size: 15px;
+    font-size: var(--fs-base);
+    line-height: 1.5;
     min-height: 100vh;
   }
   header {
     background: var(--banner);
-    color: #fafaf7;
+    color: var(--bg);
     padding: 18px 24px;
     display: flex;
     align-items: center;
@@ -42,15 +46,15 @@
     flex-wrap: wrap;
     gap: 10px;
   }
-  header h1 { font-size: 20px; font-weight: 600; letter-spacing: .02em; }
-  header p  { font-size: 13px; opacity: .6; }
+  header h1 { font-size: var(--fs-lg); font-weight: 600; letter-spacing: .02em; }
+  header p  { font-size: var(--fs-sm); opacity: .7; }
   .ics-btn {
     background: var(--accent);
-    color: var(--banner);
+    color: var(--bg);
     padding: 8px 16px;
     border-radius: 5px;
     text-decoration: none;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     white-space: nowrap;
     transition: opacity .15s;
@@ -58,7 +62,7 @@
   .ics-btn:hover { opacity: .85; }
   main { max-width: 860px; margin: 0 auto; padding: 28px 20px; }
   .week-header {
-    font-size: 12px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: .1em;
@@ -81,7 +85,7 @@
   }
   .event-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.07); }
   .event-card.today { border-left: 3px solid var(--accent); }
-  .cat-bar {
+  .alliance-bar {
     width: 4px;
     min-width: 4px;
     height: 100%;
@@ -90,19 +94,33 @@
     min-height: 40px;
   }
   .event-body { flex: 1; min-width: 0; }
-  .event-name {
-    font-size: 15px;
-    font-weight: 600;
+  .event-name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin-bottom: 4px;
+  }
+  .event-name {
+    font-size: var(--fs-base);
+    font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .alliance-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 3px;
+    font-size: var(--fs-2xs);
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
   .event-meta {
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     color: var(--muted);
   }
   .event-meta span { display: flex; align-items: center; gap: 4px; }
@@ -110,33 +128,35 @@
     display: inline-block;
     padding: 2px 8px;
     border-radius: 3px;
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     font-weight: 500;
     white-space: nowrap;
   }
   .badge-posted    { background: var(--green);  color: #166534; }
-  .badge-tentative { background: var(--bg3);    color: var(--muted); }
+  .badge-pending   { background: var(--bg3);    color: var(--muted); }
+  .badge-active    { background: var(--accent); color: var(--bg); }
+  .badge-completed { background: var(--bg2);    color: var(--muted); }
   .badge-cancelled { background: var(--red);    color: #991b1b; }
   .date-col {
     text-align: right;
     min-width: 72px;
     flex-shrink: 0;
   }
-  .date-day  { font-size: 22px; font-weight: 700; line-height: 1; }
-  .date-dow  { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-  .date-col.today .date-day { color: #b45309; }
+  .date-day  { font-size: 1.375rem; font-weight: 700; line-height: 1; }
+  .date-dow  { font-size: var(--fs-2xs); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .date-col.today .date-day { color: var(--accent); }
   .empty {
     text-align: center;
     padding: 60px 20px;
     color: var(--muted);
   }
-  .empty p { font-size: 16px; margin-bottom: 8px; }
+  .empty p { font-size: var(--fs-md); margin-bottom: 8px; }
   .loading { text-align: center; padding: 60px; color: var(--muted); }
   footer {
     text-align: center;
     padding: 32px 20px;
     color: var(--muted);
-    font-size: 13px;
+    font-size: var(--fs-sm);
     border-top: 1px solid var(--border);
     margin-top: 32px;
   }
@@ -153,8 +173,9 @@
     gap: 16px;
     flex-wrap: wrap;
   }
-  .subscribe-box p { font-size: 13px; color: var(--muted); }
+  .subscribe-box p { font-size: var(--fs-sm); color: var(--muted); }
   .subscribe-box strong { color: var(--text); }
+  .subscribe-box .scope-note { font-size: var(--fs-xs); margin-top: 6px; color: var(--muted); }
   .legend {
     display: flex;
     flex-wrap: wrap;
@@ -165,7 +186,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--fs-xs);
     color: var(--muted);
   }
   .legend-dot {
@@ -176,8 +197,8 @@
   }
   @media (max-width: 600px) {
     .date-col { min-width: 50px; }
-    .date-day  { font-size: 18px; }
-    .event-name { font-size: 14px; }
+    .date-day  { font-size: 1.125rem; }
+    .event-name { font-size: var(--fs-sm); }
     .subscribe-box { flex-direction: column; align-items: flex-start; }
   }
 </style>
@@ -186,27 +207,29 @@
 
 <header>
   <div>
-    <h1>⏱ KS138 Event Schedule</h1>
-    <p>Kingshot Community — upcoming events, all times UTC</p>
+    <h1>⏱ M0D & NSR Alliances — Server 138</h1>
+    <p>Upcoming events for M0D and NSR alliance members</p>
   </div>
   <a class="ics-btn" href="/ics/events.ics">📅 Subscribe to Calendar</a>
 </header>
 
 <main>
   <div class="subscribe-box">
-    <p>
-      <strong>Subscribe to stay up to date.</strong>
-      Add our calendar to Google Calendar, Apple Calendar, or any app that supports ICS.
-      It updates automatically — no manual refresh needed.
-    </p>
+    <div>
+      <p>
+        <strong>Subscribe to stay up to date.</strong>
+        Add our calendar to Google Calendar, Apple Calendar, or any app that supports ICS.
+        It updates automatically — no manual refresh needed.
+      </p>
+      <p class="scope-note">This calendar is for M0D and NSR alliance members in server 138. Events shown are not server-wide.</p>
+    </div>
     <a class="ics-btn" href="/ics/events.ics">📅 Get ICS Feed</a>
   </div>
 
   <div class="legend">
-    <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>PvE</div>
-    <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>PvP</div>
-    <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>Alliance</div>
-    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>Cycle</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--alliance-m0d)"></div>M0D</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--alliance-nsr)"></div>NSR</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--alliance-server)"></div>Server</div>
   </div>
 
   <div id="content"><div class="loading">Loading events…</div></div>
@@ -217,12 +240,10 @@
 </footer>
 
 <script>
-const CAT_COLORS = {
-  PvE:     '#22c55e',
-  PvP:     '#ef4444',
-  Alliance:'#3b82f6',
-  Cycle:   '#f59e0b',
-  Other:   '#94a3b8',
+const ALLIANCE_COLORS = {
+  M0D:    'var(--alliance-m0d)',
+  NSR:    'var(--alliance-nsr)',
+  Server: 'var(--alliance-server)',
 };
 
 const DOW_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -240,13 +261,20 @@ function formatDuration(hours) {
 }
 
 function statusBadge(status) {
-  if (status === 'posted' || status === 'active' || status === 'completed') {
-    return '<span class="badge badge-posted">Confirmed</span>';
+  switch (status) {
+    case 'posted':    return '<span class="badge badge-posted">Announced</span>';
+    case 'active':    return '<span class="badge badge-active">Live Now</span>';
+    case 'completed': return '<span class="badge badge-completed">Completed</span>';
+    case 'cancelled': return '<span class="badge badge-cancelled">Cancelled</span>';
+    case 'pending':
+    default:          return '<span class="badge badge-pending">Upcoming</span>';
   }
-  if (status === 'cancelled') {
-    return '<span class="badge badge-cancelled">Cancelled</span>';
-  }
-  return '<span class="badge badge-tentative">Scheduled</span>';
+}
+
+function allianceBadge(alliance) {
+  const key   = alliance || 'Server';
+  const color = ALLIANCE_COLORS[key] || ALLIANCE_COLORS.Server;
+  return `<span class="alliance-badge" style="background:${color};color:var(--bg)">${key}</span>`;
 }
 
 function weekLabel(dateStr) {
@@ -281,7 +309,7 @@ async function loadEvents() {
       content.innerHTML = `
         <div class="empty">
           <p>No events scheduled in the next 28 days.</p>
-          <p style="font-size:13px">Check back soon or subscribe to the ICS feed to get notified automatically.</p>
+          <p style="font-size:var(--fs-sm)">Check back soon or subscribe to the ICS feed to get notified automatically.</p>
         </div>`;
       return;
     }
@@ -300,11 +328,12 @@ async function loadEvents() {
     groups.forEach((evs, label) => {
       html += `<div class="week-header">${label}</div>`;
       evs.forEach(ev => {
-        const d         = new Date(ev.occurrence_date + 'T12:00:00Z');
-        const isToday   = ev.occurrence_date === today;
-        const catColor  = CAT_COLORS[ev.category] || CAT_COLORS.Other;
-        const dayNum    = d.getUTCDate();
-        const dowLabel  = DOW_FULL[d.getUTCDay()].slice(0, 3);
+        const d           = new Date(ev.occurrence_date + 'T12:00:00Z');
+        const isToday     = ev.occurrence_date === today;
+        const allianceKey = ev.alliance || 'Server';
+        const barColor    = ALLIANCE_COLORS[allianceKey] || ALLIANCE_COLORS.Server;
+        const dayNum      = d.getUTCDate();
+        const dowLabel    = DOW_FULL[d.getUTCDay()].slice(0, 3);
 
         html += `
           <div class="event-card${isToday ? ' today' : ''}">
@@ -312,16 +341,19 @@ async function loadEvents() {
               <div class="date-day">${dayNum}</div>
               <div class="date-dow">${dowLabel}</div>
             </div>
-            <div class="cat-bar" style="background:${catColor}"></div>
+            <div class="alliance-bar" style="background:${barColor}"></div>
             <div class="event-body">
-              <div class="event-name">${ev.event_name}</div>
+              <div class="event-name-row">
+                <span class="event-name">${ev.event_name}</span>
+                ${allianceBadge(ev.alliance)}
+              </div>
               <div class="event-meta">
                 <span>🕐 ${formatTime(ev.start_datetime_utc)}</span>
                 <span>⏱ ${formatDuration(ev.duration_hours)}</span>
                 ${ev.discord_channel ? `<span>💬 ${ev.discord_channel}</span>` : ''}
                 <span>${statusBadge(ev.post_status)}</span>
               </div>
-              ${ev.description ? `<p style="margin-top:6px;font-size:13px;color:var(--muted);line-height:1.4">${ev.description}</p>` : ''}
+              ${ev.description ? `<p style="margin-top:6px;font-size:var(--fs-sm);color:var(--muted);line-height:1.4">${ev.description}</p>` : ''}
             </div>
           </div>`;
       });
@@ -333,7 +365,7 @@ async function loadEvents() {
     content.innerHTML = `
       <div class="empty">
         <p>Could not load events.</p>
-        <p style="font-size:13px">${e.message}</p>
+        <p style="font-size:var(--fs-sm)">${e.message}</p>
       </div>`;
   }
 }
@@ -344,3 +376,4 @@ setInterval(loadEvents, 600000);
 </script>
 </body>
 </html>
+

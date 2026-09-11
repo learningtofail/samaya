@@ -6,42 +6,49 @@
 <title>Samaya — Admin</title>
 <style>
   :root {
-    --bg:       #fafaf7;
-    --bg2:      #f5f3ef;
-    --bg3:      #ede8e0;
-    --border:   #e0dbd2;
-    --banner:   #1c1917;
-    --text:     #1c1917;
-    --muted:    #78716c;
-    --accent:   #f59e0b;
-    --green:    #bbf7d0;
-    --red:      #fecaca;
+    --bg:       #F8FAFC;
+    --bg2:      #F1F5F9;
+    --bg3:      #E2E8F0;
+    --border:   #CBD5E1;
+    --banner:   #1E293B;
+    --text:     #1E293B;
+    --muted:    #475569;
+    --accent:   #334155;
+    --green:    #DCFCE7;
+    --red:      #FEE2E2;
     --orange:   #fed7aa;
-    --amber:    #fde68a;
-    --blue:     #bfdbfe;
+    --amber:    #FEF3C7;
+    --blue:     #DBEAFE;
     --cat-pve:  #22c55e;
     --cat-pvp:  #ef4444;
     --cat-all:  #3b82f6;
     --cat-cyc:  #f59e0b;
     --cat-oth:  #94a3b8;
+    --fs-2xs:   0.625rem;   /* ~10px - Gantt cells/legend, tiny counters */
+    --fs-xs:    0.75rem;    /* 12px  - micro labels, secondary/muted text */
+    --fs-sm:    0.875rem;   /* 14px  - compact body/data text, buttons, inputs */
+    --fs-base:  1rem;       /* 16px  - baseline body text */
+    --fs-md:    1.125rem;   /* 18px  - section headings, modal titles */
+    --fs-lg:    1.25rem;    /* 20px  - big emphasis numbers, page title */
+    font-size:  16px;       /* explicit rem root, independent of browser defaults */
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
-  header { background: var(--banner); color: #fafaf7; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
-  header h1 { font-size: 18px; font-weight: 600; letter-spacing: .02em; }
-  header span { font-size: 12px; opacity: .6; }
+  body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: var(--fs-base); line-height: 1.5; }
+  header { background: var(--banner); color: #F8FAFC; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: var(--fs-lg); font-weight: 600; letter-spacing: .02em; }
+  header span { font-size: var(--fs-sm); opacity: .6; }
   nav { display: flex; gap: 0; border-bottom: 1px solid var(--border); background: var(--bg); padding: 0 24px; }
-  nav button { background: none; border: none; border-bottom: 2px solid transparent; padding: 10px 16px; font-size: 13px; cursor: pointer; color: var(--muted); transition: all .15s; }
+  nav button { background: none; border: none; border-bottom: 2px solid transparent; padding: 10px 16px; font-size: var(--fs-sm); cursor: pointer; color: var(--muted); transition: all .15s; }
   nav button.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 500; }
   main { padding: 24px; max-width: 1400px; margin: 0 auto; }
   .view { display: none; } .view.active { display: block; }
-  h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+  h2 { font-size: var(--fs-md); font-weight: 600; margin-bottom: 16px; }
   .card { background: white; border: 1px solid var(--border); border-radius: 6px; padding: 16px; margin-bottom: 16px; }
   .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 20px; }
   .stat { background: white; border: 1px solid var(--border); border-radius: 6px; padding: 14px; }
-  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 4px; }
-  .stat-value { font-size: 20px; font-weight: 600; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 500; }
+  .stat-label { font-size: var(--fs-xs); color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 4px; }
+  .stat-value { font-size: var(--fs-lg); font-weight: 600; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: var(--fs-xs); font-weight: 500; }
   .badge-ok { background: var(--green); color: #166534; }
   .badge-err { background: var(--red); color: #991b1b; }
   .badge-pending { background: var(--bg3); color: var(--muted); }
@@ -49,52 +56,121 @@
   .badge-queued { background: var(--amber); color: #92400e; }
   .badge-error { background: var(--red); color: #991b1b; }
   .badge-timeout { background: var(--orange); color: #9a3412; }
-  .badge-cancelled { background: var(--bg3); color: var(--muted); }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { background: #e8e4dc; text-align: left; padding: 8px 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text); border-bottom: 1px solid var(--border); }
+  .badge-cancelled { background: var(--red); color: #991b1b; }
+  table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+  th { background: var(--bg3); text-align: left; padding: 8px 10px; font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text); border-bottom: 1px solid var(--border); }
   td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   tr:nth-child(even) td { background: var(--bg2); }
-  tr:hover td { background: #f0ece4; }
+  tr:hover td { background: #EAF0F5; }
   .cat-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; flex-shrink: 0; }
-  button.btn { padding: 6px 14px; border-radius: 4px; border: none; cursor: pointer; font-size: 12px; font-weight: 500; transition: all .15s; }
+  button.btn { padding: 6px 14px; border-radius: 4px; border: none; cursor: pointer; font-size: var(--fs-sm); font-weight: 500; transition: all .15s; }
   button.btn:hover { opacity: .85; }
   .btn-primary { background: var(--banner); color: white; }
-  .btn-accent { background: var(--accent); color: var(--banner); }
+  .btn-accent { background: var(--accent); color: var(--bg); }
   .btn-danger { background: #fee2e2; color: #991b1b; }
-  .btn-sm { padding: 3px 8px; font-size: 11px; }
+  .btn-sm { padding: 3px 8px; font-size: var(--fs-xs); }
   .btn-ghost { background: var(--bg3); color: var(--text); }
-  input, select, textarea { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px; background: white; color: var(--text); outline: none; }
+  input, select, textarea { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: var(--fs-sm); background: white; color: var(--text); outline: none; }
   input:focus, select:focus, textarea:focus { border-color: var(--accent); }
-  label { display: block; font-size: 11px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; margin-top: 10px; }
+  label { display: block; font-size: var(--fs-xs); font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; margin-top: 10px; }
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .form-grid .full { grid-column: 1/-1; }
   .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 100; align-items: center; justify-content: center; }
   .modal-backdrop.open { display: flex; }
   .modal { background: white; border-radius: 8px; padding: 24px; width: 520px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
-  .modal h3 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+  .modal h3 { font-size: var(--fs-md); font-weight: 600; margin-bottom: 16px; }
   .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
   .gantt-wrap { overflow-x: auto; }
-  .gantt-table { border-collapse: collapse; font-size: 11px; }
+  .gantt-table { border-collapse: collapse; font-size: var(--fs-xs); }
   .gantt-table th, .gantt-table td { border: 1px solid var(--border); padding: 0; text-align: center; }
   .gantt-name { text-align: left !important; padding: 4px 8px !important; font-weight: 500; white-space: nowrap; min-width: 160px; }
-  .gantt-header { background: #e8e4dc; font-size: 9px; font-weight: 600; padding: 3px 0; }
-  .gantt-cell { width: 32px; height: 24px; font-size: 8px; font-weight: 700; cursor: pointer; transition: opacity .1s; }
+  .gantt-header { background: var(--bg3); font-size: var(--fs-2xs); font-weight: 600; padding: 3px 0; }
+  .gantt-cell { width: 32px; height: 24px; font-size: var(--fs-2xs); font-weight: 700; cursor: pointer; transition: opacity .1s; }
   .gantt-cell:hover { opacity: .8; }
   .gantt-today { background: var(--amber) !important; }
   .gantt-weekend { background: var(--bg3); }
-  .gantt-occ { color: #1c1917; }
-  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--banner); color: white; padding: 10px 18px; border-radius: 6px; font-size: 13px; z-index: 200; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  .gantt-occ { color: var(--text); }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--banner); color: white; padding: 10px 18px; border-radius: 6px; font-size: var(--fs-sm); z-index: 200; opacity: 0; transition: opacity .3s; pointer-events: none; }
   .toast.show { opacity: 1; }
   .flex { display: flex; align-items: center; gap: 8px; }
   .mb-16 { margin-bottom: 16px; }
   #configForm { max-width: 480px; }
+  .theme-swatch { width: 32px; height: 32px; border-radius: 6px; border: 2px solid transparent; cursor: pointer; padding: 0; position: relative; overflow: hidden; }
+  .theme-swatch span { display: block; width: 100%; height: 45%; position: absolute; bottom: 0; left: 0; }
+  .theme-swatch.active { border-color: var(--text); }
+  .theme-grid { display: grid; grid-template-columns: repeat(6, 32px); gap: 10px; margin-top: 8px; }
 </style>
+<script>
+(function() {
+  var THEME_PALETTES = {
+    'autumn-harvest':    { name: 'Autumn Harvest',      text: '#2C1E11', header: '#A04000', bg: '#FAF6F0' },
+    'terracotta-sunset': { name: 'Terracotta Sunset',   text: '#242120', header: '#9E3216', bg: '#FDFBF7' },
+    'crimson-executive': { name: 'Crimson Executive',   text: '#2A0808', header: '#880808', bg: '#FFFFFF' },
+    'golden-orchard':    { name: 'Golden Orchard',      text: '#32292F', header: '#6E260E', bg: '#FFFFFF' },
+    'desert-sage-clay':  { name: 'Desert Sage & Clay',  text: '#1B1B1B', header: '#913E2B', bg: '#F9F6F0' },
+    'vintage-rose':      { name: 'Vintage Rose',        text: '#2E1A25', header: '#7D2254', bg: '#FFFDF9' },
+    'glacier-tech':      { name: 'Glacier Tech',        text: '#0B132B', header: '#1C2541', bg: '#FFFFFF' },
+    'nordic-spruce':     { name: 'Nordic Spruce',       text: '#111827', header: '#0F4C3A', bg: '#F4F7F6' },
+    'pacific-deep':      { name: 'Pacific Deep',        text: '#1A1A1A', header: '#0B4F93', bg: '#FFFFFF' },
+    'twilight-slate':    { name: 'Twilight Slate',      text: '#1E293B', header: '#334155', bg: '#F8FAFC',
+                            vars: { '--bg':'#F8FAFC', '--bg2':'#F1F5F9', '--bg3':'#E2E8F0', '--border':'#CBD5E1',
+                                    '--banner':'#1E293B', '--accent':'#334155', '--text':'#1E293B', '--muted':'#475569' } },
+    'emerald-city':      { name: 'Emerald City',        text: '#0A2F1D', header: '#145A32', bg: '#FFFFFF' },
+    'royal-velvet':      { name: 'Royal Velvet',        text: '#1A0F2E', header: '#4A148C', bg: '#FAF9FC' },
+  };
+
+  function hexToRgb(hex) {
+    hex = hex.replace('#', '');
+    if (hex.length === 3) hex = hex.split('').map(function(c) { return c + c; }).join('');
+    var n = parseInt(hex, 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+  function rgbToHex(r, g, b) {
+    return '#' + [r, g, b].map(function(v) {
+      return Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+    }).join('');
+  }
+  function mix(hexA, hexB, t) {
+    var a = hexToRgb(hexA), b = hexToRgb(hexB);
+    return rgbToHex(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t);
+  }
+  // Only Twilight Slate has fully spec'd secondary shades (see .vars above); the other 11
+  // palettes in the doc give just text/header/background, so bg2/bg3/border/muted are
+  // derived by mixing background toward text at increasing strength.
+  function deriveVars(p) {
+    return {
+      '--bg': p.bg, '--bg2': mix(p.bg, p.text, 0.04), '--bg3': mix(p.bg, p.text, 0.08),
+      '--border': mix(p.bg, p.text, 0.18), '--banner': p.header, '--accent': p.header,
+      '--text': p.text, '--muted': mix(p.text, p.bg, 0.35),
+    };
+  }
+  function getCookie(name) {
+    var m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+
+  window.SAMAYA_THEMES = THEME_PALETTES;
+  window.getSamayaThemeCookie = getCookie;
+  window.applyTheme = function(key) {
+    var p = THEME_PALETTES[key];
+    if (!p) return;
+    var vars = p.vars || deriveVars(p);
+    for (var k in vars) document.documentElement.style.setProperty(k, vars[k]);
+    var d = new Date();
+    d.setTime(d.getTime() + 30 * 24 * 60 * 60 * 1000);
+    document.cookie = 'samaya_theme=' + encodeURIComponent(key) + ';expires=' + d.toUTCString() + ';path=/;SameSite=Lax';
+  };
+
+  var saved = getCookie('samaya_theme');
+  if (saved && THEME_PALETTES[saved]) window.applyTheme(saved);
+})();
+</script>
 </head>
 <body>
 
 <header>
   <h1>⏱ Samaya</h1>
-  <span id="headerStatus">Kingshot Community Event Scheduler</span>
+  <span id="headerStatus">Kingshot Alliance Event Scheduler</span>
 </header>
 
 <nav>
@@ -103,7 +179,7 @@
   <button onclick="showView('schedule',this)">Schedule</button>
   <button onclick="showView('gantt',this)">Gantt</button>
   <button onclick="showView('postlog',this)">Post Log</button>
-  <button id="syncTabBtn" onclick="showView('sync',this)">Sync <span id="syncBadge" style="display:none;background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px">0</span></button>
+  <button id="syncTabBtn" onclick="showView('sync',this)">Sync <span id="syncBadge" style="display:none;background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:var(--fs-2xs);margin-left:4px">0</span></button>
   <div style="flex:1"></div>
   <button onclick="showView('config',this)">Config</button>
 </nav>
@@ -116,10 +192,10 @@
   <div class="status-grid" id="statusGrid">
     <div class="stat"><div class="stat-label">Service</div><div class="stat-value" id="st-service">—</div></div>
     <div class="stat"><div class="stat-label">Discord</div><div class="stat-value" id="st-discord">—</div></div>
-    <div class="stat"><div class="stat-label">Last Regeneration</div><div class="stat-value" style="font-size:13px" id="st-regen">—</div></div>
+    <div class="stat"><div class="stat-label">Last Regeneration</div><div class="stat-value" style="font-size:var(--fs-sm)" id="st-regen">—</div></div>
     <div class="stat"><div class="stat-label">Regen Result</div><div class="stat-value" id="st-result">—</div></div>
   </div>
-  <div id="syncSummaryCard" style="display:none;background:#fecaca;border:1px solid #f87171;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px;cursor:pointer" onclick="showView('sync',document.getElementById('syncTabBtn'))">
+  <div id="syncSummaryCard" style="display:none;background:#fecaca;border:1px solid #f87171;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:var(--fs-sm);cursor:pointer" onclick="showView('sync',document.getElementById('syncTabBtn'))">
     ⚠ <strong id="syncIssueCount">0</strong> sync issue(s) detected — click to review in Sync tab
   </div>
   <div class="flex mb-16">
@@ -137,7 +213,7 @@
     <button class="btn btn-accent" onclick="openEventModal()" title="Create a new recurring event definition.">+ Add Event</button>
     <button class="btn btn-ghost" onclick="openEventModal(null, true)" title="Create a new leadership-only event (channel notification only, not posted to Discord Scheduled Events or the public calendar).">+ Add Leadership Event</button>
   </div>
-  <h2 style="font-size:13px;margin-bottom:8px">Community Events</h2>
+  <h2 style="font-size:var(--fs-sm);margin-bottom:8px">🛡️ Alliance Events</h2>
   <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px">
     <table id="eventsTable">
       <thead><tr>
@@ -147,7 +223,7 @@
       <tbody id="eventsBody"><tr><td colspan="8" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
     </table>
   </div>
-  <h2 style="font-size:13px;margin-bottom:8px;background:var(--bg3);padding:8px 10px;border-radius:4px">🔒 Leadership Events</h2>
+  <h2 style="font-size:var(--fs-sm);margin-bottom:8px;background:var(--bg3);padding:8px 10px;border-radius:4px">👑 Leadership Notifications</h2>
   <div class="card" style="padding:0;overflow:hidden">
     <table id="eventsTableLeadership">
       <thead><tr>
@@ -166,8 +242,8 @@
     <button class="btn btn-ghost" onclick="loadSchedule()" title="Reload the 28-day occurrence list from the database.">Refresh</button>
   </div>
   <div class="flex mb-16">
-    <h2 style="margin:0;font-size:13px">Community Events</h2>
-    <button class="btn btn-accent" onclick="postSelected('Community')" title="Post all checked community occurrences to Discord Scheduled Events sequentially.">▶ Post Selected to Discord</button>
+    <h2 style="margin:0;font-size:var(--fs-sm)">🛡️ Alliance Events</h2>
+    <button class="btn btn-accent" onclick="postSelected('Alliance')" title="Post all checked alliance occurrences to Discord Scheduled Events sequentially.">▶ Post Selected to Discord</button>
   </div>
   <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px">
     <table id="schedTable">
@@ -180,10 +256,10 @@
   </div>
   <div id="schedLeadershipWrap" style="display:none">
     <div class="flex mb-16">
-      <h2 style="margin:0;font-size:13px;background:var(--amber);padding:6px 10px;border-radius:4px">🔒 Leadership Events</h2>
+      <h2 style="margin:0;font-size:var(--fs-sm);background:var(--amber);padding:6px 10px;border-radius:4px">👑 Leadership Notifications</h2>
       <button class="btn btn-accent" onclick="postSelected('Leadership')" title="Send all checked leadership occurrences as channel notifications.">▶ Post Selected to Discord</button>
     </div>
-    <p style="font-size:12px;color:var(--muted);margin-bottom:10px">These events post to the leadership channel only — not visible on Discord Scheduled Events or the public calendar.</p>
+    <p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:10px">These events post to the leadership channel only — not visible on Discord Scheduled Events or the public calendar.</p>
     <div class="card" style="padding:0;overflow:hidden">
       <table id="schedTableLeadership">
         <thead><tr>
@@ -202,15 +278,15 @@
     <h2 style="margin:0">Gantt View</h2>
     <button class="btn btn-ghost" onclick="loadGantt()" title="Reload and redraw the Gantt chart from current occurrence data.">Refresh</button>
   </div>
-  <h2 style="font-size:13px;margin-bottom:8px">Community Events Gantt</h2>
+  <h2 style="font-size:var(--fs-sm);margin-bottom:8px">🛡️ Alliance Events Gantt</h2>
   <div class="card gantt-wrap" id="ganttWrap">
     <p style="color:var(--muted)">Loading…</p>
   </div>
   <div id="ganttLegend" style="margin-top:12px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:10px"></div>
   <div id="ganttLeadershipWrap" style="display:none">
     <div style="border-top:2px solid var(--border);margin-bottom:16px"></div>
-    <h2 style="font-size:13px;margin-bottom:8px">🔒 Leadership Events Gantt</h2>
-    <div class="card gantt-wrap" id="ganttWrapLeadership" style="background:#F1F5F9"></div>
+    <h2 style="font-size:var(--fs-sm);margin-bottom:8px">👑 Leadership Notifications Gantt</h2>
+    <div class="card gantt-wrap" id="ganttWrapLeadership" style="background:var(--bg2)"></div>
     <div id="ganttLegendLeadership" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px"></div>
   </div>
 </div>
@@ -245,7 +321,11 @@
     <div style="margin-top:16px">
       <button class="btn btn-accent" onclick="saveDiscordConfig()" title="Save Discord credentials and verify the bot token against Discord's API before saving. Will not save if the token is invalid.">Save & Verify</button>
     </div>
-    <p id="cfgResult" style="margin-top:10px;font-size:12px;color:var(--muted)"></p>
+    <p id="cfgResult" style="margin-top:10px;font-size:var(--fs-sm);color:var(--muted)"></p>
+    <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border)">
+      <label>Theme</label>
+      <div class="theme-grid" id="themeSwatchGrid"></div>
+    </div>
   </div>
 </div>
 
@@ -256,7 +336,7 @@
     <h2 style="margin:0">Discord Sync</h2>
     <button class="btn btn-accent" onclick="loadSync()" title="Fetch all current Discord scheduled events and compare against PostLog.">↻ Run Sync Check</button>
   </div>
-  <p style="font-size:13px;color:var(--muted);margin-bottom:16px">
+  <p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:16px">
     Compares PostLog against live Discord events. Run manually whenever you suspect a mismatch.
     Field-level changes made directly in Discord are only visible here — they are not detected automatically.
   </p>
@@ -290,7 +370,7 @@
       <div>
         <label>Start Time (UTC) HH:MM</label>
         <input type="text" id="mStartTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric">
-        <div style="font-size:11px;color:var(--muted);margin-top:4px;text-transform:none;letter-spacing:0">Your detected timezone: <span id="mDetectedTz">—</span></div>
+        <div style="font-size:var(--fs-xs);color:var(--muted);margin-top:4px;text-transform:none;letter-spacing:0">Your detected timezone: <span id="mDetectedTz">—</span></div>
       </div>
       <div>
         <label>Display Timezone (admin UI)</label>
@@ -307,7 +387,7 @@
           <option value="Asia/Tokyo">Asia/Tokyo</option>
           <option value="Australia/Sydney">Australia/Sydney</option>
         </select>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px;text-transform:none;letter-spacing:0">Controls how times display across the admin UI. Times are always entered and stored above in UTC.</div>
+        <div style="font-size:var(--fs-xs);color:var(--muted);margin-top:4px;text-transform:none;letter-spacing:0">Controls how times display across the admin UI. Times are always entered and stored above in UTC.</div>
       </div>
       <div>
         <label>Duration (hours)</label>
@@ -341,18 +421,18 @@
         <input type="number" id="mNotifMinutes" min="1" placeholder="e.g. 60">
       </div>
       <div class="full">
-        <label style="text-transform:none;letter-spacing:0;font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:16px">
+        <label style="text-transform:none;letter-spacing:0;font-size:var(--fs-sm);display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:16px">
           <input type="checkbox" id="mLeadershipOnly" style="width:auto" onchange="toggleLeadershipNote()">
-          Leadership Only (🔒 — channel notification only, not posted to Discord Scheduled Events or public calendar)
+          Leadership Only (👑 — channel notification only, not posted to Discord Scheduled Events or public calendar)
         </label>
-        <div id="leadershipNote" style="display:none;font-size:11px;color:var(--muted);margin-top:6px;padding:8px;background:var(--bg2);border-radius:4px">
+        <div id="leadershipNote" style="display:none;font-size:var(--fs-xs);color:var(--muted);margin-top:6px;padding:8px;background:var(--bg2);border-radius:4px">
           This event still recurs normally and appears in the admin views, but it only sends a channel message to the notification channel — no Discord Scheduled Event is created and it will not appear on the public calendar.
         </div>
       </div>
     </div>
     <div style="margin-top:12px">
       <button class="btn btn-ghost btn-sm" onclick="previewOccurrences()">Preview next 10 occurrences</button>
-      <div id="previewResult" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
+      <div id="previewResult" style="margin-top:8px;font-size:var(--fs-sm);color:var(--muted)"></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
@@ -390,6 +470,7 @@ function showView(id, btn) {
   if (id === 'gantt')     loadGantt();
   if (id === 'postlog')   loadPostLog();
   if (id === 'sync')      loadSync();
+  if (id === 'config')    renderThemeSwatches();
 }
 
 async function api(method, path, body) {
@@ -406,7 +487,7 @@ async function api(method, path, body) {
 function toast(msg, err) {
   const t = document.getElementById('toast');
   t.textContent = msg;
-  t.style.background = err ? '#991b1b' : '#1c1917';
+  t.style.background = err ? '#991b1b' : 'var(--banner)';
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 3500);
 }
@@ -442,7 +523,7 @@ async function loadDashboard() {
     el.innerHTML = todayOccs.map(o => `
       <div class="card" style="margin-bottom:8px;padding:12px;display:flex;align-items:center;gap:12px">
         <span class="cat-dot" style="background:${CAT_COLORS[o.category]||CAT_COLORS.Other}"></span>
-        <strong>${o.event_name}</strong>${o.leadership_only ? ' <span title="Leadership only">🔒</span>' : ''}
+        <strong>${o.event_name}</strong>${o.leadership_only ? ' <span title="Leadership only">👑</span>' : ' <span title="Alliance">🛡️</span>'}
         <span style="color:var(--muted)">${fmtTime(o.start_datetime_utc)}</span>
         <span style="color:var(--muted)">${o.discord_channel}</span>
         <span class="badge badge-${o.post_status}">${o.post_status}</span>
@@ -542,7 +623,7 @@ async function loadEvents() {
     const leadership = events.filter(e => e.leadership_only);
     tbody.innerHTML = community.length
       ? community.map(buildRow).join('')
-      : '<tr><td colspan="8" style="color:var(--muted);padding:20px">No community events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
+      : '<tr><td colspan="8" style="color:var(--muted);padding:20px">No alliance events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
     tbodyLead.innerHTML = leadership.length
       ? leadership.map(buildRow).join('')
       : '<tr><td colspan="8" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
@@ -778,15 +859,15 @@ function renderSchedule() {
   function buildRow(o, scope) {
     const isToday = o.occurrence_date === today;
     const allyColor = ALLIANCE_COLORS[o.alliance] || ALLIANCE_COLORS.Server;
-    const rowStyle = 'border-left:3px solid ' + allyColor + (isToday ? ';background:#fffbeb' : '');
+    const rowStyle = 'border-left:3px solid ' + allyColor + (isToday ? ';background:var(--amber)' : '');
     const badgeClass = `badge-${o.post_status}`;
     return `<tr style="${rowStyle}">
       <td style="${isToday?'font-weight:600':''}">${o.occurrence_date}</td>
       <td>${DOW3[new Date(o.occurrence_date+'T12:00:00Z').getUTCDay()]}</td>
-      <td><span class="cat-dot" style="background:${allyColor}"></span>${o.event_name}${o.leadership_only ? ' 🔒' : ''}</td>
+      <td><span class="cat-dot" style="background:${allyColor}"></span>${o.event_name}${o.leadership_only ? ' 👑' : ' 🛡️'}</td>
       <td>${fmtTime(o.start_datetime_utc)}</td>
       <td>${o.duration_hours}h</td>
-      <td style="color:var(--muted);font-size:12px">${o.discord_channel}</td>
+      <td style="color:var(--muted);font-size:var(--fs-sm)">${o.discord_channel}</td>
       <td style="text-align:center">
         <input type="checkbox" data-occ-id="${o.id}" data-scope="${scope}"
           ${o.post_to_discord?'checked':''}
@@ -810,8 +891,8 @@ function renderSchedule() {
   const leadership = occurrenceData.filter(o => o.leadership_only);
 
   tbody.innerHTML = community.length
-    ? community.map(o => buildRow(o, 'Community')).join('')
-    : '<tr><td colspan="9" style="color:var(--muted);padding:20px">No community occurrences in this window.</td></tr>';
+    ? community.map(o => buildRow(o, 'Alliance')).join('')
+    : '<tr><td colspan="9" style="color:var(--muted);padding:20px">No alliance occurrences in this window.</td></tr>';
 
   if (leadership.length) {
     leadWrap.style.display = 'block';
@@ -874,7 +955,7 @@ function renderGantt(occs) {
   const community = occs.filter(o => !o.leadership_only);
   const leadership = occs.filter(o => o.leadership_only);
 
-  buildGanttGrid(community, 'ganttWrap', 'ganttLegend', 'No community occurrences in this window.');
+  buildGanttGrid(community, 'ganttWrap', 'ganttLegend', 'No alliance occurrences in this window.');
 
   const leadWrap = document.getElementById('ganttLeadershipWrap');
   if (leadership.length) {
@@ -966,7 +1047,7 @@ function buildGanttGrid(occs, wrapId, legendId, emptyMsg) {
     html += `<tr>`;
     html += `<td class="gantt-name" style="border-left:3px solid ${allyColor}">`;
     html += `<span class="cat-dot" style="background:${color}"></span>${name}</td>`;
-    html += `<td style="text-align:center;font-size:11px;color:var(--muted);background:#f0ece4">${count}</td>`;
+    html += `<td style="text-align:center;font-size:var(--fs-xs);color:var(--muted);background:var(--bg3)">${count}</td>`;
 
     days.forEach(d => {
       const ds = d.toISOString().slice(0,10);
@@ -974,8 +1055,8 @@ function buildGanttGrid(occs, wrapId, legendId, emptyMsg) {
       const isW = d.getDay()===0||d.getDay()===6;
       const isWeekSep = days.indexOf(d) > 0 && days.indexOf(d) % 7 === 0;
       const occ = occDates.has(ds);
-      let bg = occ ? color : isT ? '#fde68a' : isW ? '#ede8e0' : '#fafaf7';
-      const border = isWeekSep ? 'border-left:2px solid #b0a898' : '';
+      let bg = occ ? color : isT ? 'var(--amber)' : isW ? 'var(--bg3)' : 'var(--bg)';
+      const border = isWeekSep ? 'border-left:2px solid #94A3B8' : '';
       html += `<td class="gantt-cell ${occ?'gantt-occ':''}" style="background:${bg};${border}" title="${name} — ${ds}">`;
       if (occ) {
         const occObj = occs.find(o => o.event_name===name && o.occurrence_date===ds);
@@ -994,7 +1075,7 @@ function buildGanttGrid(occs, wrapId, legendId, emptyMsg) {
   // the name-cell border accent instead (consistent with Schedule/Events tables).
   legendEl.innerHTML = events.map(([name], idx) => {
     const color = palette[idx % palette.length];
-    return `<div style="display:flex;align-items:center;gap:5px;font-size:11px">
+    return `<div style="display:flex;align-items:center;gap:5px;font-size:var(--fs-xs)">
       <div style="width:10px;height:10px;border-radius:2px;background:${color}"></div>
       ${name}
     </div>`;
@@ -1015,19 +1096,37 @@ async function loadPostLog() {
       const dimStyle = l.status === 'cancelled' ? 'opacity:.5;' : '';
       const leadStyle = l.leadership_only ? 'background:var(--bg3);' : '';
       return `<tr style="${dimStyle}${leadStyle}">
-        <td>${l.event_name}${l.leadership_only ? ' 🔒' : ''}</td>
+        <td>${l.event_name}${l.leadership_only ? ' 👑' : ' 🛡️'}</td>
         <td>${l.occurrence_date}</td>
-        <td style="color:var(--muted);font-size:12px">${l.timing}</td>
-        <td style="font-size:12px">${l.posted_at_utc ? fmtDateTime(l.posted_at_utc) : '—'}</td>
-        <td style="font-size:12px;color:var(--muted)">${l.posted_by}</td>
+        <td style="color:var(--muted);font-size:var(--fs-sm)">${l.timing}</td>
+        <td style="font-size:var(--fs-sm)">${l.posted_at_utc ? fmtDateTime(l.posted_at_utc) : '—'}</td>
+        <td style="font-size:var(--fs-sm);color:var(--muted)">${l.posted_by}</td>
         <td><span class="badge badge-${l.status}">${l.status}</span></td>
-        <td style="font-size:11px;color:var(--muted);font-family:monospace">${l.discord_event_id ? l.discord_event_id.slice(0,20)+'…' : '—'}</td>
+        <td style="font-size:var(--fs-xs);color:var(--muted);font-family:monospace">${l.discord_event_id ? l.discord_event_id.slice(0,20)+'…' : '—'}</td>
       </tr>`;
     }).join('');
   } catch(e) { toast(e.message, true); }
 }
 
 // ── Config ──────────────────────────────────────────────────
+
+function renderThemeSwatches() {
+  const grid = document.getElementById('themeSwatchGrid');
+  if (!grid) return;
+  const current = window.getSamayaThemeCookie('samaya_theme') || 'twilight-slate';
+  grid.innerHTML = Object.entries(window.SAMAYA_THEMES).map(([key, p]) => {
+    const active = key === current;
+    return `<button type="button" class="theme-swatch${active ? ' active' : ''}" data-theme="${key}"
+      style="background:${p.bg}" title="${p.name}" onclick="selectTheme('${key}')">
+      <span style="background:${p.header}"></span>
+    </button>`;
+  }).join('');
+}
+
+function selectTheme(key) {
+  window.applyTheme(key);
+  renderThemeSwatches();
+}
 
 async function saveDiscordConfig() {
   const payload = {
@@ -1068,16 +1167,16 @@ async function loadSync() {
 
     // Summary bar
     html += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">';
-    html += '<div class="stat" style="padding:10px 16px"><div class="stat-label">Matched</div><div style="font-size:18px;font-weight:600;color:#166534">' + s.matched + '</div></div>';
-    html += '<div class="stat" style="padding:10px 16px"><div class="stat-label">Mismatched</div><div style="font-size:18px;font-weight:600;color:#b45309">' + s.mismatched + '</div></div>';
-    html += '<div class="stat" style="padding:10px 16px"><div class="stat-label">Discord Only</div><div style="font-size:18px;font-weight:600;color:#1d4ed8">' + s.discord_only + '</div></div>';
-    html += '<div class="stat" style="padding:10px 16px"><div class="stat-label">PostLog Only</div><div style="font-size:18px;font-weight:600;color:#991b1b">' + s.postlog_only + '</div></div>';
+    html += '<div class="stat" style="padding:10px 16px"><div class="stat-label">Matched</div><div style="font-size:var(--fs-lg);font-weight:600;color:#166534">' + s.matched + '</div></div>';
+    html += '<div class="stat" style="padding:10px 16px"><div class="stat-label">Mismatched</div><div style="font-size:var(--fs-lg);font-weight:600;color:#b45309">' + s.mismatched + '</div></div>';
+    html += '<div class="stat" style="padding:10px 16px"><div class="stat-label">Discord Only</div><div style="font-size:var(--fs-lg);font-weight:600;color:#1d4ed8">' + s.discord_only + '</div></div>';
+    html += '<div class="stat" style="padding:10px 16px"><div class="stat-label">PostLog Only</div><div style="font-size:var(--fs-lg);font-weight:600;color:#991b1b">' + s.postlog_only + '</div></div>';
     html += '</div>';
 
     // Mismatched section
     if (data.mismatched.length) {
       html += '<h2 style="margin-bottom:8px">⚠ Mismatched (' + data.mismatched.length + ')</h2>';
-      html += '<p style="font-size:12px;color:var(--muted);margin-bottom:10px">In both PostLog and Discord, but fields differ from the current event definition.</p>';
+      html += '<p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:10px">In both PostLog and Discord, but fields differ from the current event definition.</p>';
       html += '<div class="card" style="padding:0;overflow:hidden;margin-bottom:20px"><table>';
       html += '<thead><tr><th>Event</th><th>Date</th><th>Field</th><th>Samaya Value</th><th>Discord Value</th><th>Action</th></tr></thead><tbody>';
       data.mismatched.forEach(function(m) {
@@ -1088,8 +1187,8 @@ async function loadSync() {
             html += '<td rowspan="' + m.diffs.length + '">' + m.occurrence_date + '</td>';
           }
           html += '<td>' + d.field + '</td>';
-          html += '<td style="font-size:12px;color:var(--muted)">' + (d.samaya || '—') + '</td>';
-          html += '<td style="font-size:12px;color:#991b1b">' + (d.discord || '—') + '</td>';
+          html += '<td style="font-size:var(--fs-sm);color:var(--muted)">' + (d.samaya || '—') + '</td>';
+          html += '<td style="font-size:var(--fs-sm);color:#991b1b">' + (d.discord || '—') + '</td>';
           if (i === 0) {
             html += '<td rowspan="' + m.diffs.length + '">'
               + '<button class="btn btn-accent btn-sm" title="Push Samaya values to Discord — updates the Discord event to match the current event definition." onclick="syncPush(' + m.post_log_id + ')">Push to Discord</button>'
@@ -1104,15 +1203,15 @@ async function loadSync() {
     // PostLog only section
     if (data.postlog_only.length) {
       html += '<h2 style="margin-bottom:8px">🔴 PostLog Only (' + data.postlog_only.length + ')</h2>';
-      html += '<p style="font-size:12px;color:var(--muted);margin-bottom:10px">In PostLog as posted but not found on Discord — may have been deleted directly in Discord.</p>';
+      html += '<p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:10px">In PostLog as posted but not found on Discord — may have been deleted directly in Discord.</p>';
       html += '<div class="card" style="padding:0;overflow:hidden;margin-bottom:20px"><table>';
       html += '<thead><tr><th>Event</th><th>Date</th><th>Discord ID</th><th>Posted At</th><th>Action</th></tr></thead><tbody>';
       data.postlog_only.forEach(function(p) {
         html += '<tr>';
         html += '<td>' + p.event_name + '</td>';
         html += '<td>' + p.occurrence_date + '</td>';
-        html += '<td style="font-size:11px;font-family:monospace">' + p.discord_event_id.slice(0,18) + '…</td>';
-        html += '<td style="font-size:12px">' + (p.posted_at_utc ? p.posted_at_utc.slice(0,16).replace('T',' ') + ' UTC' : '—') + '</td>';
+        html += '<td style="font-size:var(--fs-xs);font-family:monospace">' + p.discord_event_id.slice(0,18) + '…</td>';
+        html += '<td style="font-size:var(--fs-sm)">' + (p.posted_at_utc ? p.posted_at_utc.slice(0,16).replace('T',' ') + ' UTC' : '—') + '</td>';
         html += '<td><button class="btn btn-ghost btn-sm" title="Mark this PostLog entry as cancelled — the Discord event no longer exists." onclick="syncMarkCancelled(' + p.post_log_id + ')">Mark Cancelled</button></td>';
         html += '</tr>';
       });
@@ -1122,14 +1221,14 @@ async function loadSync() {
     // Discord only section
     if (data.discord_only.length) {
       html += '<h2 style="margin-bottom:8px">🔵 Discord Only (' + data.discord_only.length + ')</h2>';
-      html += '<p style="font-size:12px;color:var(--muted);margin-bottom:10px">On Discord but not in PostLog — created manually or outside Samaya.</p>';
+      html += '<p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:10px">On Discord but not in PostLog — created manually or outside Samaya.</p>';
       html += '<div class="card" style="padding:0;overflow:hidden;margin-bottom:20px"><table>';
       html += '<thead><tr><th>Event Name</th><th>Status</th><th>Start Time</th><th>Action</th></tr></thead><tbody>';
       data.discord_only.forEach(function(d) {
         html += '<tr>';
         html += '<td>' + d.name + '</td>';
         html += '<td>' + (STATUS_LABELS[d.status] || d.status) + '</td>';
-        html += '<td style="font-size:12px">' + (d.scheduled_start ? d.scheduled_start.slice(0,16).replace('T',' ') + ' UTC' : '—') + '</td>';
+        html += '<td style="font-size:var(--fs-sm)">' + (d.scheduled_start ? d.scheduled_start.slice(0,16).replace('T',' ') + ' UTC' : '—') + '</td>';
         html += '<td><button class="btn btn-ghost btn-sm" title="Add this Discord event to PostLog." ' + 'data-discord-id="' + d.discord_event_id + '" onclick="syncAcknowledge(this)">Acknowledge</button></td>';
         html += '</tr>';
       });
@@ -1138,12 +1237,12 @@ async function loadSync() {
 
     // Matched section (collapsible)
     if (data.matched.length) {
-      html += '<details style="margin-bottom:16px"><summary style="cursor:pointer;font-size:14px;font-weight:500;padding:8px 0">✅ Matched (' + data.matched.length + ') — all good</summary>';
+      html += '<details style="margin-bottom:16px"><summary style="cursor:pointer;font-size:var(--fs-base);font-weight:500;padding:8px 0">✅ Matched (' + data.matched.length + ') — all good</summary>';
       html += '<div class="card" style="padding:0;overflow:hidden;margin-top:8px"><table>';
       html += '<thead><tr><th>Event</th><th>Date</th><th>Discord ID</th><th>Discord Status</th></tr></thead><tbody>';
       data.matched.forEach(function(m) {
         html += '<tr><td>' + m.event_name + '</td><td>' + m.occurrence_date + '</td>';
-        html += '<td style="font-size:11px;font-family:monospace">' + m.discord_event_id.slice(0,18) + '…</td>';
+        html += '<td style="font-size:var(--fs-xs);font-family:monospace">' + m.discord_event_id.slice(0,18) + '…</td>';
         html += '<td>' + (STATUS_LABELS[m.discord_status] || m.discord_status) + '</td></tr>';
       });
       html += '</tbody></table></div></details>';
@@ -1151,8 +1250,8 @@ async function loadSync() {
 
     if (!data.mismatched.length && !data.discord_only.length && !data.postlog_only.length) {
       html += '<div style="text-align:center;padding:40px;color:#166534;background:#f0fdf4;border-radius:8px;border:1px solid #86efac">';
-      html += '<p style="font-size:16px;font-weight:500">✅ Everything is in sync</p>';
-      html += '<p style="font-size:13px;margin-top:4px">All PostLog entries match their Discord counterparts.</p></div>';
+      html += '<p style="font-size:var(--fs-md);font-weight:500">✅ Everything is in sync</p>';
+      html += '<p style="font-size:var(--fs-sm);margin-top:4px">All PostLog entries match their Discord counterparts.</p></div>';
     }
 
     el.innerHTML = html;
@@ -1216,6 +1315,7 @@ async function syncAcknowledge(btn) {
 
 // Init
 loadDashboard();
+renderThemeSwatches();
 </script>
 </body>
 </html>
