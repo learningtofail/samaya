@@ -1,0 +1,8 @@
+-r requirements.txt
+
+# Test-only dependencies — not needed in the production image (see
+# Dockerfile, which installs requirements.txt only). aiosqlite backs the
+# in-memory SQLite database tests/conftest.py uses instead of Postgres.
+pytest>=9.1
+pytest-asyncio>=0.24
+aiosqlite>=0.19

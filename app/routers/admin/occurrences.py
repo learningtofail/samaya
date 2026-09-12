@@ -12,6 +12,7 @@ from services.discord_api import (
 )
 from services.auth import require_admin_key
 
+from .deps import find_post_log, get_discord_config, get_occurrence_with_event
 from .schemas import OccurrencePatch
 from .serializers import _occurrence_dict
 
@@ -41,19 +42,12 @@ async def update_occurrence(occ_id: int, payload: OccurrencePatch, db: AsyncSess
 
 
 @router.post("/api/occurrences/{occ_id}/post")
-async def post_occurrence(occ_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Occurrence, EventDefinition).join(EventDefinition).where(Occurrence.id == occ_id)
-    )
-    row = result.one_or_none()
-    if not row:
-        raise HTTPException(status_code=404, detail="Occurrence not found")
-    occ, event = row
-
-    cfg_result = await db.execute(select(DiscordConfig))
-    cfg = cfg_result.scalar_one_or_none()
-    if not cfg:
-        raise HTTPException(status_code=400, detail="Discord not configured")
+async def post_occurrence(
+    db: AsyncSession = Depends(get_db),
+    occ_and_event: tuple = Depends(get_occurrence_with_event),
+    cfg: DiscordConfig = Depends(get_discord_config),
+):
+    occ, event = occ_and_event
 
     now = datetime.now(timezone.utc)
     start = occ.start_datetime_utc
@@ -66,13 +60,7 @@ async def post_occurrence(occ_id: int, db: AsyncSession = Depends(get_db)):
     if (start - now).total_seconds() < 900:
         raise HTTPException(status_code=400, detail="Event starts in less than 15 minutes")
 
-    existing = await db.execute(
-        select(PostLog).where(
-            PostLog.event_name == event.name,
-            PostLog.occurrence_date == occ.occurrence_date,
-        )
-    )
-    if existing.scalar_one_or_none():
+    if await find_post_log(db, event.name, occ.occurrence_date):
         raise HTTPException(status_code=409, detail="Already posted — see PostLog")
 
     # Reserve the PostLog row now, before calling Discord, instead of after.
@@ -144,29 +132,16 @@ async def post_occurrence(occ_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/api/occurrences/{occ_id}/discord", status_code=200)
-async def cancel_occurrence_discord(occ_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Occurrence, EventDefinition).join(EventDefinition).where(Occurrence.id == occ_id)
-    )
-    row = result.one_or_none()
-    if not row:
-        raise HTTPException(status_code=404, detail="Occurrence not found")
-    occ, event = row
+async def cancel_occurrence_discord(
+    db: AsyncSession = Depends(get_db),
+    occ_and_event: tuple = Depends(get_occurrence_with_event),
+    cfg: DiscordConfig = Depends(get_discord_config),
+):
+    occ, event = occ_and_event
 
-    log_result = await db.execute(
-        select(PostLog).where(
-            PostLog.event_name == event.name,
-            PostLog.occurrence_date == occ.occurrence_date,
-        )
-    )
-    log = log_result.scalar_one_or_none()
+    log = await find_post_log(db, event.name, occ.occurrence_date)
     if not log or not log.discord_event_id:
         raise HTTPException(status_code=404, detail="No Discord event ID found in PostLog")
-
-    cfg_result = await db.execute(select(DiscordConfig))
-    cfg = cfg_result.scalar_one_or_none()
-    if not cfg:
-        raise HTTPException(status_code=400, detail="Discord not configured")
 
     success, error = await cancel_discord_event(cfg.bot_token, cfg.guild_id, log.discord_event_id)
 

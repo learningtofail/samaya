@@ -8,6 +8,3 @@ apscheduler>=3.10
 icalendar>=5.0
 pynacl>=1.5
 python-dotenv>=1.0
-pytest>=9.1
-pytest-asyncio>=0.24
-aiosqlite>=0.19

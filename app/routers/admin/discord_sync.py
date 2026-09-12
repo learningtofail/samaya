@@ -3,15 +3,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
-from models.db import DiscordConfig, EventDefinition, Occurrence, PostLog
+from models.db import DiscordConfig, EventDefinition, PostLog
 from services.discord_api import update_discord_event
 from services.auth import require_admin_key
+
+from .deps import find_post_log, get_discord_config, get_occurrence_with_event
 
 router = APIRouter(dependencies=[Depends(require_admin_key)])
 
 
 @router.get("/api/sync/discord")
-async def sync_discord(db: AsyncSession = Depends(get_db)):
+async def sync_discord(
+    db: AsyncSession = Depends(get_db),
+    cfg: DiscordConfig = Depends(get_discord_config),
+):
     """
     Fetches all current Discord scheduled events and compares
     against PostLog. Returns four categories:
@@ -20,11 +25,6 @@ async def sync_discord(db: AsyncSession = Depends(get_db)):
     - discord_only: on Discord but not in PostLog
     - postlog_only: in PostLog as posted but not found on Discord
     """
-    cfg_result = await db.execute(select(DiscordConfig))
-    cfg = cfg_result.scalar_one_or_none()
-    if not cfg:
-        raise HTTPException(status_code=400, detail="Discord not configured")
-
     from services.discord_api import get_guild_events
     discord_events = await get_guild_events(cfg.bot_token, cfg.guild_id)
 
@@ -135,35 +135,20 @@ async def sync_discord(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/api/sync/push/{occ_id}")
-async def sync_push_to_discord(occ_id: int, db: AsyncSession = Depends(get_db)):
+async def sync_push_to_discord(
+    db: AsyncSession = Depends(get_db),
+    occ_and_event: tuple = Depends(get_occurrence_with_event),
+    cfg: DiscordConfig = Depends(get_discord_config),
+):
     """
     Updates a Discord event to match the current event definition.
     Uses PATCH /guilds/{guild_id}/scheduled-events/{event_id}.
     """
-    result = await db.execute(
-        select(Occurrence, EventDefinition)
-        .join(EventDefinition)
-        .where(Occurrence.id == occ_id)
-    )
-    row = result.one_or_none()
-    if not row:
-        raise HTTPException(status_code=404, detail="Occurrence not found")
-    occ, event = row
+    occ, event = occ_and_event
 
-    log_result = await db.execute(
-        select(PostLog).where(
-            PostLog.event_name == event.name,
-            PostLog.occurrence_date == occ.occurrence_date,
-        )
-    )
-    log = log_result.scalar_one_or_none()
+    log = await find_post_log(db, event.name, occ.occurrence_date)
     if not log or not log.discord_event_id:
         raise HTTPException(status_code=404, detail="No Discord event ID in PostLog")
-
-    cfg_result = await db.execute(select(DiscordConfig))
-    cfg = cfg_result.scalar_one_or_none()
-    if not cfg:
-        raise HTTPException(status_code=400, detail="Discord not configured")
 
     success, error = await update_discord_event(
         token             = cfg.bot_token,
@@ -180,15 +165,14 @@ async def sync_push_to_discord(occ_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/api/sync/acknowledge/{discord_event_id}")
-async def acknowledge_discord_event(discord_event_id: str, db: AsyncSession = Depends(get_db)):
+async def acknowledge_discord_event(
+    discord_event_id: str,
+    db: AsyncSession = Depends(get_db),
+    cfg: DiscordConfig = Depends(get_discord_config),
+):
     """
     Adds a Discord-only event to PostLog as a manually-created record.
     """
-    cfg_result = await db.execute(select(DiscordConfig))
-    cfg = cfg_result.scalar_one_or_none()
-    if not cfg:
-        raise HTTPException(status_code=400, detail="Discord not configured")
-
     from services.discord_api import get_guild_events
     discord_events = await get_guild_events(cfg.bot_token, cfg.guild_id)
     d_event = next((e for e in discord_events if str(e["id"]) == discord_event_id), None)
@@ -230,7 +214,11 @@ async def acknowledge_discord_event(discord_event_id: str, db: AsyncSession = De
 
 
 @router.post("/api/sync/push-by-log/{post_log_id}")
-async def sync_push_by_log(post_log_id: int, db: AsyncSession = Depends(get_db)):
+async def sync_push_by_log(
+    post_log_id: int,
+    db: AsyncSession = Depends(get_db),
+    cfg: DiscordConfig = Depends(get_discord_config),
+):
     """Push Samaya values to Discord using PostLog ID."""
     log_result = await db.execute(select(PostLog).where(PostLog.id == post_log_id))
     log = log_result.scalar_one_or_none()
@@ -243,11 +231,6 @@ async def sync_push_by_log(post_log_id: int, db: AsyncSession = Depends(get_db))
     event = ev_result.scalar_one_or_none()
     if not event:
         raise HTTPException(status_code=404, detail="Event definition not found")
-
-    cfg_result = await db.execute(select(DiscordConfig))
-    cfg = cfg_result.scalar_one_or_none()
-    if not cfg:
-        raise HTTPException(status_code=400, detail="Discord not configured")
 
     success, error = await update_discord_event(
         token             = cfg.bot_token,

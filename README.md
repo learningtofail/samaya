@@ -26,6 +26,14 @@ Kingshot Community Event Scheduler — self-hosted FastAPI + PostgreSQL + Discor
     curl -X POST http://127.0.0.1:8000/admin/api/scheduler/regenerate
     docker compose exec db psql -U taraka -d kingshot_scheduler
 
+## Running Tests
+
+    pip install -r app/requirements-dev.txt
+    cd app && pytest
+
+`requirements.txt` is runtime-only (what the Docker image installs);
+`requirements-dev.txt` adds pytest and an in-memory SQLite driver on top of it.
+
 ## Notes
 
 - All times UTC
