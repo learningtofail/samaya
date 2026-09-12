@@ -1,3 +1,6 @@
+"""Read-only views over PostLog: the paginated list shown in the admin UI
+and the full CSV export.
+"""
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select

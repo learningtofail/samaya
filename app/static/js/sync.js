@@ -1,3 +1,7 @@
+// Sync view (#v-sync): reconciles Samaya's PostLog against what's actually
+// on Discord (matched/mismatched/discord_only/postlog_only), and the
+// actions to resolve each case. Depends on common.js.
+
 const STATUS_LABELS = {1:'Scheduled', 2:'Active', 3:'Completed', 4:'Cancelled'};
 
 async function loadSync() {

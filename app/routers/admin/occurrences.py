@@ -1,3 +1,10 @@
+"""Occurrence-level operations: list/patch occurrences, and the two
+Discord-posting endpoints (create the Discord scheduled event for an
+occurrence, and cancel it). This is where the "already posted" race
+condition and the PostLog reservation pattern live — see the comment in
+post_occurrence for why the PostLog row is inserted before the Discord
+API call rather than after.
+"""
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException

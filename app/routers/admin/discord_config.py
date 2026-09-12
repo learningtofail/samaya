@@ -1,3 +1,7 @@
+"""Discord bot configuration: verifying and storing the bot token/guild
+(the DiscordConfig singleton row, id=1), and listing that guild's
+channels/roles for the event-creation form's dropdowns.
+"""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 

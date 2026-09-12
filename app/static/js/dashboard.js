@@ -1,3 +1,6 @@
+// Dashboard view (#v-dashboard). Depends on common.js (api, toast, CAT_COLORS)
+// and services/discord_api indirectly via GET /api/status.
+
 async function loadDashboard() {
   try {
     const s = await api('GET', '/api/status');
@@ -41,28 +44,5 @@ async function triggerRegen() {
     await api('POST', '/api/scheduler/regenerate');
     toast('Regeneration complete');
     loadDashboard();
-  } catch(e) { toast(e.message, true); }
-}
-
-// ── Events ──────────────────────────────────────────────────
-
-
-async function permanentDelete(btn) {
-  var id   = btn.getAttribute('data-id');
-  var name = btn.getAttribute('data-name');
-
-  if (!confirm('Permanently delete "' + name + '"?\n\nThis will:\n- Remove the event definition\n- Delete all future occurrences\n- Preserve PostLog history\n\nThis cannot be undone.')) return;
-
-  var input = prompt('Type the event name to confirm:\n\n' + name);
-  if (input === null) return;
-  if (input.trim() !== name.trim()) {
-    alert('Name did not match. Deletion cancelled.');
-    return;
-  }
-
-  try {
-    var data = await api('DELETE', '/api/events/' + id + '/permanent');
-    toast('Deleted "' + data.event_name + '". ' + data.post_log_entries_preserved + ' PostLog entries preserved.');
-    loadEvents();
   } catch(e) { toast(e.message, true); }
 }

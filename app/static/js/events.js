@@ -1,3 +1,7 @@
+// Events view (#v-events): the event definitions table, the create/edit
+// modal, and row actions (duplicate, activate/deactivate, permanent delete).
+// Depends on common.js (api, toast, escapeHtml, CAT_COLORS/ALLIANCE_COLORS).
+
 async function loadEvents() {
   try {
     const events = await api('GET', '/api/events');
@@ -239,6 +243,26 @@ async function saveEvent() {
   } catch(e) { toast(e.message, true); }
 }
 
+async function permanentDelete(btn) {
+  var id   = btn.getAttribute('data-id');
+  var name = btn.getAttribute('data-name');
+
+  if (!confirm('Permanently delete "' + name + '"?\n\nThis will:\n- Remove the event definition\n- Delete all future occurrences\n- Preserve PostLog history\n\nThis cannot be undone.')) return;
+
+  var input = prompt('Type the event name to confirm:\n\n' + name);
+  if (input === null) return;
+  if (input.trim() !== name.trim()) {
+    alert('Name did not match. Deletion cancelled.');
+    return;
+  }
+
+  try {
+    var data = await api('DELETE', '/api/events/' + id + '/permanent');
+    toast('Deleted "' + data.event_name + '". ' + data.post_log_entries_preserved + ' PostLog entries preserved.');
+    loadEvents();
+  } catch(e) { toast(e.message, true); }
+}
+
 async function toggleActive(id, current) {
   try {
     await api('PATCH', `/api/events/${id}`, { active: !current });
@@ -268,6 +292,4 @@ async function previewOccurrences() {
     document.getElementById('previewResult').textContent = e.message;
   }
 }
-
-// ── Schedule ────────────────────────────────────────────────
 

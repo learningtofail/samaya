@@ -1,3 +1,8 @@
+"""Manual scheduler triggers: preview upcoming occurrence dates for a
+not-yet-saved event, and force an out-of-band regeneration run (the same
+regenerate_occurrences job scheduler/jobs.py runs automatically every
+day at UTC 00:00).
+"""
 from datetime import date
 
 from fastapi import APIRouter, Depends

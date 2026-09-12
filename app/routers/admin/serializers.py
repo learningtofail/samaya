@@ -1,3 +1,9 @@
+"""Response-shaping helpers shared across the admin routers.
+
+Each admin.<domain> module returns these dicts rather than the raw
+SQLAlchemy model, so a field rename or format change (e.g. how dates are
+stringified) happens once here instead of at every call site.
+"""
 from datetime import date
 
 from models.db import EventDefinition, Occurrence, PostLog

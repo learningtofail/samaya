@@ -1,3 +1,6 @@
+// Post Log view (#v-postlog): PostLog table and CSV export. Depends on
+// common.js.
+
 async function exportPostLogCsv() {
   try {
     const res = await fetch('/admin/api/post-log/export.csv', {
@@ -42,6 +45,4 @@ async function loadPostLog() {
     }).join('');
   } catch(e) { toast(e.message, true); }
 }
-
-// ── Config ──────────────────────────────────────────────────
 

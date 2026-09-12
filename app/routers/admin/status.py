@@ -1,3 +1,7 @@
+"""GET /admin/api/status — scheduler + Discord connectivity summary shown
+on the admin dashboard's top bar (services/discord_api.verify_token,
+models.db.SchedulerState).
+"""
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends

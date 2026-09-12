@@ -1,3 +1,6 @@
+// Schedule view (#v-schedule): the per-occurrence list (post/cancel to
+// Discord, toggle post_to_discord). Depends on common.js.
+
 async function loadSchedule() {
   try {
     occurrenceData = await api('GET', '/api/occurrences');
@@ -101,6 +104,4 @@ async function postSelected(scope) {
   toast(`Posted: ${posted}${errors?`  ·  Errors: ${errors}`:''}`);
   loadSchedule();
 }
-
-// ── Gantt ───────────────────────────────────────────────────
 

@@ -1,3 +1,13 @@
+// Shared helpers loaded before every other admin view script (dashboard.js,
+// events.js, schedule.js, gantt.js, postlog.js, config.js, sync.js). Classic
+// <script> tags, not ES modules, so the functions and consts declared here
+// are reachable as plain globals from every file loaded after this one —
+// see the <script src> order in admin.html.
+
+// ── Admin key (defense-in-depth behind Cloudflare Access) ──────
+// Stored in this browser's localStorage only; sent as X-Admin-Key on
+// every /admin/api/* call. A wrong or missing key gets a 401 from
+// the server, which prompts again below.
 function getAdminKey() {
   let key = localStorage.getItem('samaya_admin_key');
   if (!key) {
@@ -75,6 +85,4 @@ function toast(msg, err) {
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 3500);
 }
-
-// ── Dashboard ───────────────────────────────────────────────
 

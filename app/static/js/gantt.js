@@ -1,3 +1,7 @@
+// Gantt view (#v-gantt): renders the occurrence timeline grid. Reads the
+// same occurrenceData global common.js/schedule.js populate — does not
+// re-fetch it. Depends on common.js (GANTT_PALETTE, DOW3).
+
 async function loadGantt() {
   try {
     const occs = await api('GET', '/api/occurrences');
@@ -135,6 +139,4 @@ function buildGanttGrid(occs, wrapId, legendId, emptyMsg) {
     </div>`;
   }).join('');
 }
-
-// ── Post Log ────────────────────────────────────────────────
 

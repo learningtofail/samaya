@@ -1,3 +1,9 @@
+"""Reconciliation between Samaya's PostLog and what actually exists on
+Discord — drift can happen if a Discord event is edited or deleted
+directly rather than through Samaya. sync_discord() is the read-only
+diff (matched/mismatched/discord_only/postlog_only); the remaining
+endpoints are the fixes a coordinator can apply for each category.
+"""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

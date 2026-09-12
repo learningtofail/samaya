@@ -1,3 +1,11 @@
+"""Admin CRUD for EventDefinition rows: list, create, patch, deactivate,
+and permanently delete. Not to be confused with routers/events.py, which
+is the public-facing read-only events API.
+
+permanent_delete_event nulls out PostLog.event_id (rather than cascading
+the delete to PostLog) so posting history survives the event definition
+being removed — see the comment inline for why.
+"""
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException

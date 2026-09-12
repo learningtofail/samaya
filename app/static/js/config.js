@@ -1,3 +1,7 @@
+// Config view (#v-config): Discord bot token/guild setup and the theme
+// picker (palettes themselves live in theme.js; this just renders swatches
+// and calls window.applyTheme). Depends on common.js and theme.js.
+
 function renderThemeSwatches() {
   const grid = document.getElementById('themeSwatchGrid');
   if (!grid) return;
@@ -36,6 +40,4 @@ async function saveDiscordConfig() {
     toast(e.message, true);
   }
 }
-
-// ── Sync ────────────────────────────────────────────────
 

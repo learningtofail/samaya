@@ -1,3 +1,10 @@
+"""Pydantic request models for the admin event/config API.
+
+EventIn (create) and EventPatch (update) share every field validator via
+services/validators.py — the only difference is EventPatch's `allow_none`
+flag, since a partial update uses None to mean "leave this field
+unchanged" rather than "invalid".
+"""
 from typing import Optional
 
 from pydantic import BaseModel, field_validator

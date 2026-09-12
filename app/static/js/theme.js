@@ -1,3 +1,8 @@
+// Loaded in <head>, before <body>, so the saved theme applies before first
+// paint (avoids a flash of the default palette). Self-contained: exposes
+// window.SAMAYA_THEMES / window.applyTheme / window.getSamayaThemeCookie
+// for config.js to use, rather than relying on shared globals from
+// common.js (which loads later, at the end of <body>).
 (function() {
   var THEME_PALETTES = {
     'autumn-harvest':    { name: 'Autumn Harvest',      text: '#2C1E11', header: '#A04000', bg: '#FAF6F0' },
