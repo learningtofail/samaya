@@ -13,7 +13,7 @@ function renderGantt(occs) {
   const community = occs.filter(o => !o.leadership_only);
   const leadership = occs.filter(o => o.leadership_only);
 
-  buildGanttGrid(community, 'ganttWrap', 'ganttLegend', 'No alliance occurrences in this window.');
+  buildGanttGrid(community, 'ganttWrap', 'ganttLegend', 'No occurrences in this window.');
 
   const leadWrap = document.getElementById('ganttLeadershipWrap');
   if (leadership.length) {
@@ -47,7 +47,7 @@ function buildGanttGrid(occs, wrapId, legendId, emptyMsg) {
   // Group by event name
   const eventMap = new Map();
   occs.forEach(o => {
-    if (!eventMap.has(o.event_name)) eventMap.set(o.event_name, { alliance: o.alliance, occs: new Set() });
+    if (!eventMap.has(o.event_name)) eventMap.set(o.event_name, { owningTenantId: o.owning_tenant_id, occs: new Set() });
     eventMap.get(o.event_name).occs.add(o.occurrence_date);
   });
 
@@ -94,9 +94,9 @@ function buildGanttGrid(occs, wrapId, legendId, emptyMsg) {
   html += '</tr>';
 
   // Event rows
-  events.forEach(([name, {alliance, occs: occDates}], idx) => {
+  events.forEach(([name, {owningTenantId, occs: occDates}], idx) => {
     const color = palette[idx % palette.length];
-    const allyColor = ALLIANCE_COLORS[alliance] || ALLIANCE_COLORS.Server;
+    const allyColor = TENANT_COLORS[owningTenantId] || '#475569';
     const count = [...occDates].filter(d => {
       const dd = new Date(d+'T12:00:00Z');
       return dd >= today;
@@ -129,7 +129,7 @@ function buildGanttGrid(occs, wrapId, legendId, emptyMsg) {
   wrapEl.innerHTML = html;
 
   // Legend — swatches match the per-event cell-fill colours above so they stay
-  // usable for identifying overlapping events; the alliance colour is shown as
+  // usable for identifying overlapping events; the owning alliance's colour is shown as
   // the name-cell border accent instead (consistent with Schedule/Events tables).
   legendEl.innerHTML = events.map(([name], idx) => {
     const color = palette[idx % palette.length];

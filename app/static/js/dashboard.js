@@ -1,5 +1,5 @@
-// Dashboard view (#v-dashboard). Depends on common.js (api, toast, CAT_COLORS)
-// and services/discord_api indirectly via GET /api/status.
+// Dashboard view (#v-dashboard). Depends on common.js (api, toast) and
+// services/discord_api indirectly via GET /api/status.
 
 async function loadDashboard() {
   try {
@@ -29,7 +29,7 @@ async function loadDashboard() {
     }
     el.innerHTML = todayOccs.map(o => `
       <div class="card" style="margin-bottom:8px;padding:12px;display:flex;align-items:center;gap:12px">
-        <span class="cat-dot" style="background:${CAT_COLORS[o.category]||CAT_COLORS.Other}"></span>
+        ${o.scope === 'kingdom-wide' ? '<span title="Kingdom-wide">🌐</span> ' : ''}
         <strong>${escapeHtml(o.event_name)}</strong>${o.leadership_only ? ' <span title="Leadership only">👑</span>' : ' <span title="Alliance">🛡️</span>'}
         <span style="color:var(--muted)">${fmtTime(o.start_datetime_utc)}</span>
         <span style="color:var(--muted)">${escapeHtml(o.discord_channel)}</span>

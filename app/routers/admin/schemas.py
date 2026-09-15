@@ -10,7 +10,7 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 
 from services.validators import (
-    parse_interval_days, parse_duration_hours, parse_alliance,
+    parse_interval_days, parse_duration_hours, parse_scope,
     parse_start_time_utc, parse_anchor_date, parse_notify_minutes_before,
 )
 
@@ -22,8 +22,7 @@ class EventIn(BaseModel):
     duration_hours:          float
     discord_channel:         str = ""
     description:             str = ""
-    category:                str = "Other"
-    alliance:                str = "Server"
+    scope:                   str = "alliance"
     leadership_only:         bool = False
     anchor_date:             str
     notification_channel_id: str = ""
@@ -32,7 +31,7 @@ class EventIn(BaseModel):
 
     _validate_interval = field_validator("interval_days", mode="before")(parse_interval_days)
     _validate_duration = field_validator("duration_hours", mode="before")(parse_duration_hours)
-    _validate_alliance = field_validator("alliance", mode="before")(parse_alliance)
+    _validate_scope     = field_validator("scope", mode="before")(parse_scope)
     _validate_time     = field_validator("start_time_utc", mode="before")(parse_start_time_utc)
     _validate_anchor   = field_validator("anchor_date", mode="before")(parse_anchor_date)
     _validate_notify   = field_validator("notify_minutes_before", mode="before")(parse_notify_minutes_before)
@@ -45,8 +44,7 @@ class EventPatch(BaseModel):
     duration_hours:          Optional[float]= None
     discord_channel:         Optional[str]  = None
     description:             Optional[str]  = None
-    category:                Optional[str]  = None
-    alliance:                Optional[str]  = None
+    scope:                   Optional[str]  = None
     leadership_only:         Optional[bool] = None
     active:                  Optional[bool] = None
     anchor_date:             Optional[str]  = None
@@ -60,8 +58,8 @@ class EventPatch(BaseModel):
         lambda cls, v: parse_interval_days(v, allow_none=True))
     _validate_duration = field_validator("duration_hours", mode="before")(
         lambda cls, v: parse_duration_hours(v, allow_none=True))
-    _validate_alliance = field_validator("alliance", mode="before")(
-        lambda cls, v: parse_alliance(v, allow_none=True))
+    _validate_scope     = field_validator("scope", mode="before")(
+        lambda cls, v: parse_scope(v, allow_none=True))
     _validate_time     = field_validator("start_time_utc", mode="before")(
         lambda cls, v: parse_start_time_utc(v, allow_none=True))
     _validate_anchor   = field_validator("anchor_date", mode="before")(
@@ -69,10 +67,39 @@ class EventPatch(BaseModel):
     _validate_notify   = field_validator("notify_minutes_before", mode="before")(
         lambda cls, v: parse_notify_minutes_before(v, allow_none=True))
 
-class DiscordConfigIn(BaseModel):
-    bot_token:  str
+
+class EventTenantNotificationIn(BaseModel):
+    """Per-tenant notification override for a kingdom-wide event — see
+    models.db.EventTenantNotification for why this can't just reuse
+    EventDefinition's own notification_channel_id/notification_role_id."""
+    tenant_id:                int
+    notification_channel_id:  str = ""
+    notification_role_id:     str = ""
+
+
+class TenantIn(BaseModel):
+    kingdom_id: int
+    name:       str
+    slug:       str
     guild_id:   str
-    public_key: str
+    bot_token:  Optional[str] = None
+    public_key: Optional[str] = None
+    color:      str = "#475569"
+
+
+class TenantPatch(BaseModel):
+    name:       Optional[str] = None
+    slug:       Optional[str] = None
+    guild_id:   Optional[str] = None
+    bot_token:  Optional[str] = None
+    public_key: Optional[str] = None
+    color:      Optional[str] = None
+
+
+class KingdomIn(BaseModel):
+    name: str
+    slug: str
+
 
 class OccurrencePatch(BaseModel):
     post_to_discord: Optional[bool] = None

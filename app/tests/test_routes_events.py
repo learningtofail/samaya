@@ -13,7 +13,6 @@ VALID_EVENT = {
     "duration_hours":  1.0,
     "discord_channel": "#alliance-war",
     "description":     "Biweekly alliance PvP",
-    "category":        "Alliance",
     "anchor_date":     "2025-05-04",
 }
 
@@ -168,40 +167,68 @@ class TestPreview:
             ]
 
 
-class TestAllianceField:
+class TestScopeField:
 
-    async def test_create_defaults_to_server(self, client: AsyncClient):
+    async def test_create_defaults_to_alliance_scope(self, client: AsyncClient, tenant: dict):
         r = await client.post("/admin/api/events", json=VALID_EVENT)
-        assert r.json()["alliance"] == "Server"
+        assert r.json()["scope"] == "alliance"
+        assert r.json()["owning_tenant_id"] == tenant["id"]
 
-    async def test_create_accepts_m0d(self, client: AsyncClient):
-        data = {**VALID_EVENT, "alliance": "M0D"}
+    async def test_create_accepts_kingdom_wide(self, client: AsyncClient):
+        data = {**VALID_EVENT, "scope": "kingdom-wide"}
         r = await client.post("/admin/api/events", json=data)
         assert r.status_code == 201
-        assert r.json()["alliance"] == "M0D"
+        assert r.json()["scope"] == "kingdom-wide"
 
-    async def test_create_accepts_nsr(self, client: AsyncClient):
-        data = {**VALID_EVENT, "alliance": "NSR"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
-        assert r.json()["alliance"] == "NSR"
-
-    async def test_create_rejects_invalid_alliance(self, client: AsyncClient):
-        data = {**VALID_EVENT, "alliance": "PvE"}
+    async def test_create_rejects_invalid_scope(self, client: AsyncClient):
+        data = {**VALID_EVENT, "scope": "everyone"}
         r = await client.post("/admin/api/events", json=data)
         assert r.status_code == 422
-        assert "alliance" in r.json()["detail"].lower()
+        assert "scope" in r.json()["detail"].lower()
 
-    async def test_patch_alliance(self, client: AsyncClient):
+    async def test_patch_scope(self, client: AsyncClient):
         event = await create_event(client)
-        r = await client.patch(f"/admin/api/events/{event['id']}", json={"alliance": "M0D"})
+        r = await client.patch(f"/admin/api/events/{event['id']}", json={"scope": "kingdom-wide"})
         assert r.status_code == 200
-        assert r.json()["alliance"] == "M0D"
+        assert r.json()["scope"] == "kingdom-wide"
 
-    async def test_patch_rejects_invalid_alliance(self, client: AsyncClient):
+    async def test_patch_rejects_invalid_scope(self, client: AsyncClient):
         event = await create_event(client)
-        r = await client.patch(f"/admin/api/events/{event['id']}", json={"alliance": "Cycle"})
+        r = await client.patch(f"/admin/api/events/{event['id']}", json={"scope": "everyone"})
         assert r.status_code == 422
+
+    async def test_events_owned_by_other_tenant_not_editable(
+        self, client: AsyncClient, db_session, tenant: dict, second_tenant: dict
+    ):
+        """A coordinator in one tenant's context can't mutate another
+        tenant's alliance-scope event just by knowing its id."""
+        from datetime import date, time
+        from models.db import EventDefinition
+        other_event = EventDefinition(
+            owning_tenant_id=second_tenant["id"], scope="alliance",
+            name="NSR Only Event", interval_days=7, start_time_utc=time(19, 0),
+            duration_hours=1.0, anchor_date=date.today(),
+            notification_channel_id="", notification_role_id="",
+        )
+        db_session.add(other_event)
+        await db_session.commit()
+        await db_session.refresh(other_event)
+
+        r = await client.patch(f"/admin/api/events/{other_event.id}", json={"name": "Hijacked"})
+        assert r.status_code == 404
+
+    async def test_list_events_includes_kingdom_wide_from_other_tenant(
+        self, client: AsyncClient, second_tenant: dict
+    ):
+        """Kingdom-wide events owned by another tenant in the same Kingdom
+        are visible (read-only) — see routers/admin/events.py's docstring."""
+        client.headers["X-Tenant-Slug"] = second_tenant["slug"]
+        kw_event = await create_event(client, {"scope": "kingdom-wide", "name": "NSR-created Kingdom Event"})
+        client.headers["X-Tenant-Slug"] = "mod"
+
+        r = await client.get("/admin/api/events")
+        names = [e["name"] for e in r.json()]
+        assert "NSR-created Kingdom Event" in names
 
 
 class TestLeadershipOnlyField:

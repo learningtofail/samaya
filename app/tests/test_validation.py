@@ -14,7 +14,6 @@ VALID_EVENT = {
     "duration_hours":  2.0,
     "discord_channel": "#test",
     "description":     "A test event",
-    "category":        "Other",
     "anchor_date":     "2025-05-01",
 }
 
@@ -180,36 +179,31 @@ class TestMultipleErrors:
         assert "interval" in detail.lower() or "duration" in detail.lower()
 
 
-# ── alliance ──────────────────────────────────────────────────
+# ── scope ─────────────────────────────────────────────────────
 
-class TestAllianceValidation:
+class TestScopeValidation:
 
-    async def test_m0d_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "alliance": "M0D"}
+    async def test_alliance_accepted(self, client: AsyncClient):
+        data = {**VALID_EVENT, "scope": "alliance"}
         r = await client.post("/admin/api/events", json=data)
         assert r.status_code == 201
 
-    async def test_nsr_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "alliance": "NSR"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
-
-    async def test_server_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "alliance": "Server"}
+    async def test_kingdom_wide_accepted(self, client: AsyncClient):
+        data = {**VALID_EVENT, "scope": "kingdom-wide"}
         r = await client.post("/admin/api/events", json=data)
         assert r.status_code == 201
 
     async def test_default_when_omitted(self, client: AsyncClient):
         r = await client.post("/admin/api/events", json=VALID_EVENT)
-        assert r.json()["alliance"] == "Server"
+        assert r.json()["scope"] == "alliance"
 
-    async def test_unknown_alliance_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "alliance": "Everyone"}
+    async def test_unknown_scope_rejected(self, client: AsyncClient):
+        data = {**VALID_EVENT, "scope": "everyone"}
         r = await client.post("/admin/api/events", json=data)
         assert r.status_code == 422
-        assert "alliance" in r.json()["detail"].lower()
+        assert "scope" in r.json()["detail"].lower()
 
-    async def test_lowercase_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "alliance": "m0d"}
+    async def test_wrong_case_rejected(self, client: AsyncClient):
+        data = {**VALID_EVENT, "scope": "Alliance"}
         r = await client.post("/admin/api/events", json=data)
         assert r.status_code == 422

@@ -3,43 +3,50 @@ Discord — drift can happen if a Discord event is edited or deleted
 directly rather than through Samaya. sync_discord() is the read-only
 diff (matched/mismatched/discord_only/postlog_only); the remaining
 endpoints are the fixes a coordinator can apply for each category.
+
+Everything here is scoped to the current tenant's own guild — for a
+kingdom-wide event, each tenant reconciles against its own independent
+PostLog row and its own guild, same as posting and cancelling do.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
-from models.db import DiscordConfig, EventDefinition, PostLog
+from models.db import EventDefinition, PostLog, Tenant
 from services.discord_api import update_discord_event
 from services.auth import require_admin_key
 
-from .deps import find_post_log, get_discord_config, get_occurrence_with_event
+from .deps import PLATFORM_BOT_TOKEN, find_post_log, get_current_tenant, get_occurrence_with_event
 
 router = APIRouter(dependencies=[Depends(require_admin_key)])
 
 
 @router.get("/api/sync/discord")
 async def sync_discord(
-    db: AsyncSession = Depends(get_db),
-    cfg: DiscordConfig = Depends(get_discord_config),
+    tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
 ):
     """
-    Fetches all current Discord scheduled events and compares
-    against PostLog. Returns four categories:
+    Fetches all current Discord scheduled events (in this tenant's guild)
+    and compares against this tenant's own PostLog. Returns four categories:
     - matched: in both, details align
     - mismatched: in both, but fields differ from event definition
     - discord_only: on Discord but not in PostLog
     - postlog_only: in PostLog as posted but not found on Discord
     """
+    token = tenant.bot_token or PLATFORM_BOT_TOKEN
+    if not token:
+        raise HTTPException(status_code=400, detail="No Discord bot token configured for this tenant")
+
     from services.discord_api import get_guild_events
-    discord_events = await get_guild_events(cfg.bot_token, cfg.guild_id)
+    discord_events = await get_guild_events(token, tenant.guild_id)
 
     # Build lookup maps
     discord_map = {str(e["id"]): e for e in discord_events}
 
-    # Load all posted PostLog entries
+    # Load all posted PostLog entries for this tenant
     log_result = await db.execute(
-        select(PostLog).where(PostLog.status == "posted")
+        select(PostLog).where(PostLog.tenant_id == tenant.id, PostLog.status == "posted")
     )
     post_logs = log_result.scalars().all()
 
@@ -144,7 +151,7 @@ async def sync_discord(
 async def sync_push_to_discord(
     db: AsyncSession = Depends(get_db),
     occ_and_event: tuple = Depends(get_occurrence_with_event),
-    cfg: DiscordConfig = Depends(get_discord_config),
+    tenant: Tenant = Depends(get_current_tenant),
 ):
     """
     Updates a Discord event to match the current event definition.
@@ -152,13 +159,17 @@ async def sync_push_to_discord(
     """
     occ, event = occ_and_event
 
-    log = await find_post_log(db, event.name, occ.occurrence_date)
+    log = await find_post_log(db, tenant.id, event.name, occ.occurrence_date)
     if not log or not log.discord_event_id:
         raise HTTPException(status_code=404, detail="No Discord event ID in PostLog")
 
+    token = tenant.bot_token or PLATFORM_BOT_TOKEN
+    if not token:
+        raise HTTPException(status_code=400, detail="No Discord bot token configured for this tenant")
+
     success, error = await update_discord_event(
-        token             = cfg.bot_token,
-        guild_id          = cfg.guild_id,
+        token             = token,
+        guild_id          = tenant.guild_id,
         discord_event_id  = log.discord_event_id,
         name              = event.name,
         description       = event.description,
@@ -173,14 +184,19 @@ async def sync_push_to_discord(
 @router.post("/api/sync/acknowledge/{discord_event_id}")
 async def acknowledge_discord_event(
     discord_event_id: str,
+    tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
-    cfg: DiscordConfig = Depends(get_discord_config),
 ):
     """
-    Adds a Discord-only event to PostLog as a manually-created record.
+    Adds a Discord-only event to this tenant's PostLog as a manually-created
+    record.
     """
+    token = tenant.bot_token or PLATFORM_BOT_TOKEN
+    if not token:
+        raise HTTPException(status_code=400, detail="No Discord bot token configured for this tenant")
+
     from services.discord_api import get_guild_events
-    discord_events = await get_guild_events(cfg.bot_token, cfg.guild_id)
+    discord_events = await get_guild_events(token, tenant.guild_id)
     d_event = next((e for e in discord_events if str(e["id"]) == discord_event_id), None)
     if not d_event:
         raise HTTPException(status_code=404, detail="Discord event not found")
@@ -199,15 +215,16 @@ async def acknowledge_discord_event(
         occ_date = datetime.now(timezone.utc).date()
 
     log = PostLog(
-        event_id         = ev.id if ev else None,
-        event_name       = d_event.get("name", "Unknown"),
-        occurrence_date  = occ_date,
-        discord_event_id = discord_event_id,
-        discord_guild_id = cfg.guild_id,
-        posted_at_utc    = datetime.now(timezone.utc),
-        posted_by        = "manual (acknowledged via sync)",
-        status           = "posted",
-        status_detail    = "Acknowledged from Discord sync — created outside Samaya",
+        tenant_id         = tenant.id,
+        event_id          = ev.id if ev else None,
+        event_name        = d_event.get("name", "Unknown"),
+        occurrence_date   = occ_date,
+        discord_event_id  = discord_event_id,
+        discord_guild_id  = tenant.guild_id,
+        posted_at_utc     = datetime.now(timezone.utc),
+        posted_by         = "manual (acknowledged via sync)",
+        status            = "posted",
+        status_detail     = "Acknowledged from Discord sync — created outside Samaya",
     )
     db.add(log)
     try:
@@ -222,11 +239,13 @@ async def acknowledge_discord_event(
 @router.post("/api/sync/push-by-log/{post_log_id}")
 async def sync_push_by_log(
     post_log_id: int,
+    tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
-    cfg: DiscordConfig = Depends(get_discord_config),
 ):
     """Push Samaya values to Discord using PostLog ID."""
-    log_result = await db.execute(select(PostLog).where(PostLog.id == post_log_id))
+    log_result = await db.execute(
+        select(PostLog).where(PostLog.id == post_log_id, PostLog.tenant_id == tenant.id)
+    )
     log = log_result.scalar_one_or_none()
     if not log:
         raise HTTPException(status_code=404, detail="PostLog entry not found")
@@ -238,9 +257,13 @@ async def sync_push_by_log(
     if not event:
         raise HTTPException(status_code=404, detail="Event definition not found")
 
+    token = tenant.bot_token or PLATFORM_BOT_TOKEN
+    if not token:
+        raise HTTPException(status_code=400, detail="No Discord bot token configured for this tenant")
+
     success, error = await update_discord_event(
-        token             = cfg.bot_token,
-        guild_id          = cfg.guild_id,
+        token             = token,
+        guild_id          = tenant.guild_id,
         discord_event_id  = log.discord_event_id,
         name              = event.name,
         description       = event.description,
@@ -252,9 +275,15 @@ async def sync_push_by_log(
 
 
 @router.post("/api/sync/mark-cancelled/{post_log_id}")
-async def sync_mark_cancelled(post_log_id: int, db: AsyncSession = Depends(get_db)):
+async def sync_mark_cancelled(
+    post_log_id: int,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     """Mark a PostLog entry as cancelled when Discord event no longer exists."""
-    log_result = await db.execute(select(PostLog).where(PostLog.id == post_log_id))
+    log_result = await db.execute(
+        select(PostLog).where(PostLog.id == post_log_id, PostLog.tenant_id == tenant.id)
+    )
     log = log_result.scalar_one_or_none()
     if not log:
         raise HTTPException(status_code=404, detail="PostLog entry not found")
@@ -262,4 +291,3 @@ async def sync_mark_cancelled(post_log_id: int, db: AsyncSession = Depends(get_d
     log.status_detail = "Marked cancelled via sync — Discord event not found"
     await db.commit()
     return {"status": "ok"}
-

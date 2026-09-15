@@ -12,14 +12,14 @@ from models.db import EventDefinition, Occurrence, PostLog
 def _event_dict(e: EventDefinition) -> dict:
     return {
         "id":                       e.id,
+        "owning_tenant_id":         e.owning_tenant_id,
+        "scope":                    e.scope,
         "name":                     e.name,
         "interval_days":            e.interval_days,
         "start_time_utc":           e.start_time_utc.strftime("%H:%M"),
         "duration_hours":           float(e.duration_hours),
         "discord_channel":          e.discord_channel,
         "description":              e.description,
-        "category":                 e.category,
-        "alliance":                 e.alliance,
         "leadership_only":          e.leadership_only,
         "active":                   e.active,
         "anchor_date":              str(e.anchor_date),
@@ -33,7 +33,8 @@ def _occurrence_dict(occ: Occurrence, ev: EventDefinition) -> dict:
         "id":                 occ.id,
         "event_id":           occ.event_id,
         "event_name":         ev.name,
-        "category":           ev.category,
+        "owning_tenant_id":   ev.owning_tenant_id,
+        "scope":              ev.scope,
         "occurrence_date":    str(occ.occurrence_date),
         "start_datetime_utc": occ.start_datetime_utc.isoformat(),
         "end_datetime_utc":   occ.end_datetime_utc.isoformat(),
@@ -43,7 +44,6 @@ def _occurrence_dict(occ: Occurrence, ev: EventDefinition) -> dict:
         "discord_channel":    ev.discord_channel,
         "duration_hours":     float(ev.duration_hours),
         "reminder_sent":      occ.reminder_sent,
-        "alliance":           ev.alliance,
         "leadership_only":    ev.leadership_only,
     }
 
@@ -53,6 +53,7 @@ def _log_dict(l: PostLog, ev: EventDefinition | None = None) -> dict:
     timing = "Today" if diff == 0 else (f"In {diff} days" if diff > 0 else f"{abs(diff)} days ago")
     return {
         "id":               l.id,
+        "tenant_id":        l.tenant_id,
         "event_name":       l.event_name,
         "occurrence_date":  str(l.occurrence_date),
         "discord_event_id": l.discord_event_id,
@@ -61,6 +62,6 @@ def _log_dict(l: PostLog, ev: EventDefinition | None = None) -> dict:
         "status":           l.status,
         "status_detail":    l.status_detail,
         "timing":           timing,
-        "alliance":         ev.alliance if ev else None,
+        "scope":            ev.scope if ev else None,
         "leadership_only":  ev.leadership_only if ev else False,
     }

@@ -10,8 +10,11 @@
 <body>
 
 <header>
-  <h1>⏱ Samaya</h1>
-  <span id="headerStatus">Kingshot Alliance Event Scheduler</span>
+  <div>
+    <h1 style="display:inline">⏱ Samaya</h1>
+    <span id="headerStatus">Kingshot Alliance Event Scheduler</span>
+  </div>
+  <select id="tenantPicker" onchange="onTenantChange(this.value)" title="Which alliance's data you're viewing and editing"></select>
 </header>
 
 <nav>
@@ -197,12 +200,11 @@
         <input type="text" id="mName" placeholder="Tri-Alliance Clash">
       </div>
       <div>
-        <label>Alliance</label>
-        <select id="mAlliance">
-          <option value="M0D">M0D</option>
-          <option value="NSR">NSR</option>
-          <option value="Server">Server</option>
-        </select>
+        <label>Scope</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;text-transform:none;letter-spacing:0">
+          <input type="checkbox" id="mKingdomWide" style="width:auto">
+          Kingdom-wide (every alliance's own server)
+        </label>
       </div>
       <div>
         <label>Interval (days)</label>

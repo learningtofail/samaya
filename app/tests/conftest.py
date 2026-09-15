@@ -50,10 +50,49 @@ async def db_session(db_engine):
 
 
 @pytest_asyncio.fixture(scope="function")
-async def client(db_engine):
+async def tenant(db_engine):
+    """The default tenant almost every test operates in. Multi-tenant/
+    kingdom-wide tests that need a second one use second_tenant below
+    instead of re-seeding by hand."""
+    from models.db import Kingdom, Tenant
+    TestSessionLocal = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async with TestSessionLocal() as session:
+        kingdom = Kingdom(name="Kingdom 138", slug="k138")
+        session.add(kingdom)
+        await session.commit()
+        t = Tenant(
+            kingdom_id=kingdom.id, name="MOD", slug="mod",
+            guild_id="test-guild-mod", bot_token="test-bot-token-mod", public_key="test-pubkey-mod",
+        )
+        session.add(t)
+        await session.commit()
+        return {"id": t.id, "slug": t.slug, "kingdom_id": kingdom.id}
+
+
+@pytest_asyncio.fixture(scope="function")
+async def second_tenant(db_engine, tenant):
+    """A second tenant in the same Kingdom as `tenant` — for kingdom-wide
+    fan-out and cross-tenant-isolation tests."""
+    from models.db import Tenant
+    TestSessionLocal = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async with TestSessionLocal() as session:
+        t = Tenant(
+            kingdom_id=tenant["kingdom_id"], name="NSR", slug="nsr",
+            guild_id="test-guild-nsr", bot_token="test-bot-token-nsr", public_key="test-pubkey-nsr",
+        )
+        session.add(t)
+        await session.commit()
+        return {"id": t.id, "slug": t.slug, "kingdom_id": tenant["kingdom_id"]}
+
+
+@pytest_asyncio.fixture(scope="function")
+async def client(db_engine, tenant):
     """
     HTTP test client wired to the FastAPI app with the test database.
-    Overrides the get_db dependency so no real DB is touched.
+    Overrides the get_db dependency so no real DB is touched. Carries
+    X-Tenant-Slug for `tenant` by default — tests that need a specific
+    other tenant's context use client.headers["X-Tenant-Slug"] = ... to
+    switch it, rather than a separate fixture per tenant.
     """
     from main import app
 
@@ -69,7 +108,7 @@ async def client(db_engine):
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test",
-        headers={"X-Admin-Key": TEST_ADMIN_KEY},
+        headers={"X-Admin-Key": TEST_ADMIN_KEY, "X-Tenant-Slug": tenant["slug"]},
     ) as ac:
         yield ac
 

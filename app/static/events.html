@@ -17,9 +17,6 @@
     --accent:  #334155;
     --green:   #bbf7d0;
     --red:     #fecaca;
-    --alliance-m0d: #1d4ed8;
-    --alliance-nsr: #15803d;
-    --alliance-server: #475569;
     --fs-2xs:  0.625rem;
     --fs-xs:   0.75rem;
     --fs-sm:   0.8125rem;
@@ -207,10 +204,10 @@
 
 <header>
   <div>
-    <h1>⏱ M0D & NSR Alliances — Server 138</h1>
-    <p>Upcoming events for M0D and NSR alliance members</p>
+    <h1 id="pageTitle">⏱ Kingshot Event Schedule</h1>
+    <p id="pageSubtitle">Upcoming events</p>
   </div>
-  <a class="ics-btn" href="/ics/events.ics">📅 Subscribe to Calendar</a>
+  <a class="ics-btn" id="icsLink" href="#">📅 Subscribe to Calendar</a>
 </header>
 
 <main>
@@ -221,30 +218,28 @@
         Add our calendar to Google Calendar, Apple Calendar, or any app that supports ICS.
         It updates automatically — no manual refresh needed.
       </p>
-      <p class="scope-note">This calendar is for M0D and NSR alliance members in server 138. Events shown are not server-wide.</p>
     </div>
-    <a class="ics-btn" href="/ics/events.ics">📅 Get ICS Feed</a>
-  </div>
-
-  <div class="legend">
-    <div class="legend-item"><div class="legend-dot" style="background:var(--alliance-m0d)"></div>M0D</div>
-    <div class="legend-item"><div class="legend-dot" style="background:var(--alliance-nsr)"></div>NSR</div>
-    <div class="legend-item"><div class="legend-dot" style="background:var(--alliance-server)"></div>Server</div>
+    <a class="ics-btn" id="icsLinkBottom" href="#">📅 Get ICS Feed</a>
   </div>
 
   <div id="content"><div class="loading">Loading events…</div></div>
 </main>
 
 <footer>
-  <p>All times are UTC · <a href="/ics/events.ics">ICS Calendar Feed</a> · Powered by Samaya</p>
+  <p id="footerText">All times are UTC · Powered by Samaya</p>
 </footer>
 
 <script>
-const ALLIANCE_COLORS = {
-  M0D:    'var(--alliance-m0d)',
-  NSR:    'var(--alliance-nsr)',
-  Server: 'var(--alliance-server)',
-};
+// This page is served at /t/{tenant_slug}/events — every API and ICS
+// call below is scoped to that same tenant, read straight from the
+// page's own URL rather than templated server-side.
+const TENANT_SLUG = window.location.pathname.split('/')[2] || '';
+
+document.getElementById('pageTitle').textContent = `⏱ ${TENANT_SLUG.toUpperCase()} — Kingshot Event Schedule`;
+document.getElementById('icsLink').href = `/t/${TENANT_SLUG}/ics/events.ics`;
+document.getElementById('icsLinkBottom').href = `/t/${TENANT_SLUG}/ics/events.ics`;
+document.getElementById('footerText').innerHTML =
+  `All times are UTC · <a href="/t/${TENANT_SLUG}/ics/events.ics">ICS Calendar Feed</a> · Powered by Samaya`;
 
 const DOW_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MONTH    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -257,6 +252,7 @@ function escapeHtml(value) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
 }
+
 
 function formatTime(iso) {
   return iso.slice(11, 16) + ' UTC';
@@ -280,10 +276,9 @@ function statusBadge(status) {
   }
 }
 
-function allianceBadge(alliance) {
-  const key   = alliance || 'Server';
-  const color = ALLIANCE_COLORS[key] || ALLIANCE_COLORS.Server;
-  return `<span class="alliance-badge" style="background:${color};color:var(--bg)">${escapeHtml(key)}</span>`;
+function scopeBadge(scope) {
+  if (scope !== 'kingdom-wide') return '';
+  return `<span class="alliance-badge" style="background:var(--accent);color:var(--bg)" title="Every alliance in this Kingdom plays this together">🌐 Kingdom-wide</span>`;
 }
 
 function weekLabel(dateStr) {
@@ -311,7 +306,7 @@ function weekLabel(dateStr) {
 async function loadEvents() {
   const content = document.getElementById('content');
   try {
-    const res    = await fetch('/api/events');
+    const res    = await fetch(`/t/${TENANT_SLUG}/api/events`);
     const events = await res.json();
 
     if (!events.length) {
@@ -339,8 +334,6 @@ async function loadEvents() {
       evs.forEach(ev => {
         const d           = new Date(ev.occurrence_date + 'T12:00:00Z');
         const isToday     = ev.occurrence_date === today;
-        const allianceKey = ev.alliance || 'Server';
-        const barColor    = ALLIANCE_COLORS[allianceKey] || ALLIANCE_COLORS.Server;
         const dayNum      = d.getUTCDate();
         const dowLabel    = DOW_FULL[d.getUTCDay()].slice(0, 3);
 
@@ -350,11 +343,11 @@ async function loadEvents() {
               <div class="date-day">${dayNum}</div>
               <div class="date-dow">${dowLabel}</div>
             </div>
-            <div class="alliance-bar" style="background:${barColor}"></div>
+            <div class="alliance-bar" style="background:var(--accent)"></div>
             <div class="event-body">
               <div class="event-name-row">
                 <span class="event-name">${escapeHtml(ev.event_name)}</span>
-                ${allianceBadge(ev.alliance)}
+                ${scopeBadge(ev.scope)}
               </div>
               <div class="event-meta">
                 <span>🕐 ${formatTime(ev.start_datetime_utc)}</span>

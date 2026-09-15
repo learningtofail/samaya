@@ -20,6 +20,48 @@ function clearAdminKey() {
   localStorage.removeItem('samaya_admin_key');
 }
 
+// ── Tenant selection ─────────────────────────────────────────
+// Which alliance's data every /admin/api/* call operates on, sent as
+// X-Tenant-Slug (see routers/admin/deps.py.get_current_tenant). A
+// bridge-period mechanism: once real per-user sessions exist, this
+// becomes derived from login instead of a manually-picked value stored
+// in this browser only.
+let TENANTS = [];               // populated by loadTenants(), used for the
+                                 // picker and for TENANT_COLORS below
+const TENANT_COLORS = {};       // tenant.id -> tenant.color, replaces the
+                                 // old hardcoded ALLIANCE_COLORS constant
+
+function getCurrentTenantSlug() {
+  return localStorage.getItem('samaya_tenant_slug') || '';
+}
+function setCurrentTenantSlug(slug) {
+  localStorage.setItem('samaya_tenant_slug', slug);
+}
+
+async function loadTenants() {
+  TENANTS = await api('GET', '/api/tenants', null, /*skipTenantHeader=*/true);
+  TENANTS.forEach(t => { TENANT_COLORS[t.id] = t.color; });
+  const picker = document.getElementById('tenantPicker');
+  if (!picker) return;
+  picker.innerHTML = TENANTS.map(t =>
+    `<option value="${escapeHtml(t.slug)}">${escapeHtml(t.name)}</option>`
+  ).join('');
+  const current = getCurrentTenantSlug();
+  if (current && TENANTS.some(t => t.slug === current)) {
+    picker.value = current;
+  } else if (TENANTS.length) {
+    setCurrentTenantSlug(TENANTS[0].slug);
+    picker.value = TENANTS[0].slug;
+  }
+}
+
+function onTenantChange(slug) {
+  setCurrentTenantSlug(slug);
+  // Reload whichever view is currently open under the new tenant.
+  const activeView = document.querySelector('.view.active');
+  if (activeView) showView(activeView.id.replace('v-', ''), document.querySelector('nav button.active'));
+}
+
 // ── HTML escaping ────────────────────────────────────────────
 // Every value interpolated into innerHTML below that originates from
 // the database (event names, channel labels, descriptions, etc.) must
@@ -31,8 +73,6 @@ function escapeHtml(value) {
   }[c]));
 }
 
-const CAT_COLORS = {PvE:'#22c55e',PvP:'#ef4444',Alliance:'#3b82f6',Cycle:'#f59e0b',Other:'#94a3b8'};
-const ALLIANCE_COLORS = {M0D:'#1d4ed8', NSR:'#15803d', Server:'#475569'};
 const GANTT_PALETTE = ['#bbf7d0','#bfdbfe','#fed7aa','#fde68a','#e9d5ff','#99f6e4','#fecaca','#d9f99d','#fbcfe8','#a5f3fc','#c7d2fe','#fef08a'];
 const DOW3 = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 let occurrenceData = [];
@@ -60,11 +100,13 @@ function showView(id, btn) {
   if (id === 'config')    renderThemeSwatches();
 }
 
-async function api(method, path, body) {
-  const opts = {
-    method,
-    headers: {'Content-Type':'application/json', 'X-Admin-Key': getAdminKey()},
-  };
+async function api(method, path, body, skipTenantHeader) {
+  const headers = {'Content-Type':'application/json', 'X-Admin-Key': getAdminKey()};
+  if (!skipTenantHeader) {
+    const slug = getCurrentTenantSlug();
+    if (slug) headers['X-Tenant-Slug'] = slug;
+  }
+  const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch('/admin' + path, opts);
   if (res.status === 401) {

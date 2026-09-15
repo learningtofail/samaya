@@ -19,20 +19,23 @@ function renderSchedule() {
     return;
   }
 
-  function buildRow(o, scope) {
+  function buildRow(o, sectionScope) {
+    // sectionScope is 'Alliance' or 'Leadership' (which table section this
+    // row is in, used by postSelected()'s bulk actions) — distinct from
+    // o.scope, the event's own alliance/kingdom-wide field below.
     const isToday = o.occurrence_date === today;
-    const allyColor = ALLIANCE_COLORS[o.alliance] || ALLIANCE_COLORS.Server;
+    const allyColor = TENANT_COLORS[o.owning_tenant_id] || '#475569';
     const rowStyle = 'border-left:3px solid ' + allyColor + (isToday ? ';background:var(--amber)' : '');
     const badgeClass = `badge-${escapeHtml(o.post_status)}`;
     return `<tr style="${rowStyle}">
       <td style="${isToday?'font-weight:600':''}">${o.occurrence_date}</td>
       <td>${DOW3[new Date(o.occurrence_date+'T12:00:00Z').getUTCDay()]}</td>
-      <td><span class="cat-dot" style="background:${allyColor}"></span>${escapeHtml(o.event_name)}${o.leadership_only ? ' 👑' : ' 🛡️'}</td>
+      <td><span class="cat-dot" style="background:${allyColor}"></span>${escapeHtml(o.event_name)}${o.scope === 'kingdom-wide' ? ' 🌐' : ''}${o.leadership_only ? ' 👑' : ' 🛡️'}</td>
       <td>${fmtTime(o.start_datetime_utc)}</td>
       <td>${o.duration_hours}h</td>
       <td style="color:var(--muted);font-size:var(--fs-sm)">${escapeHtml(o.discord_channel)}</td>
       <td style="text-align:center">
-        <input type="checkbox" data-occ-id="${o.id}" data-scope="${scope}"
+        <input type="checkbox" data-occ-id="${o.id}" data-scope="${sectionScope}"
           ${o.post_to_discord?'checked':''}
           ${['posted','cancelled'].includes(o.post_status)?'disabled':''}
           onchange="togglePostFlag(${o.id},this.checked)">
@@ -55,7 +58,7 @@ function renderSchedule() {
 
   tbody.innerHTML = community.length
     ? community.map(o => buildRow(o, 'Alliance')).join('')
-    : '<tr><td colspan="9" style="color:var(--muted);padding:20px">No alliance occurrences in this window.</td></tr>';
+    : '<tr><td colspan="9" style="color:var(--muted);padding:20px">No occurrences in this window.</td></tr>';
 
   if (leadership.length) {
     leadWrap.style.display = 'block';

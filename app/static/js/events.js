@@ -1,6 +1,6 @@
 // Events view (#v-events): the event definitions table, the create/edit
 // modal, and row actions (duplicate, activate/deactivate, permanent delete).
-// Depends on common.js (api, toast, escapeHtml, CAT_COLORS/ALLIANCE_COLORS).
+// Depends on common.js (api, toast, escapeHtml, TENANT_COLORS).
 
 async function loadEvents() {
   try {
@@ -21,7 +21,8 @@ async function loadEvents() {
       return 'Every ' + i + ' days';
     }
     function buildRow(e) {
-      var allyColor = ALLIANCE_COLORS[e.alliance] || ALLIANCE_COLORS.Server;
+      var allyColor = TENANT_COLORS[e.owning_tenant_id] || '#475569';
+      var scopeLabel = e.scope === 'kingdom-wide' ? '🌐 Kingdom-wide' : 'Alliance';
       var badgeCls  = e.active ? 'badge-ok' : 'badge-pending';
       var badgeTxt  = e.active ? 'Active' : 'Inactive';
       var btnCls    = e.active ? 'btn-danger' : 'btn-ghost';
@@ -42,7 +43,7 @@ async function loadEvents() {
       }
       return '<tr style="border-left:3px solid ' + allyColor + '">'
         + '<td><span class="cat-dot" style="background:' + allyColor + '"></span>' + escapeHtml(e.name) + '</td>'
-        + '<td>' + escapeHtml(e.alliance || 'Server') + '</td>'
+        + '<td>' + scopeLabel + '</td>'
         + '<td>' + intervalLabel(e.interval_days) + '</td>'
         + '<td>' + e.start_time_utc + ' UTC</td>'
         + '<td>' + e.duration_hours + 'h</td>'
@@ -60,7 +61,7 @@ async function loadEvents() {
     const leadership = events.filter(e => e.leadership_only);
     tbody.innerHTML = community.length
       ? community.map(buildRow).join('')
-      : '<tr><td colspan="8" style="color:var(--muted);padding:20px">No alliance events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
+      : '<tr><td colspan="8" style="color:var(--muted);padding:20px">No events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
     tbodyLead.innerHTML = leadership.length
       ? leadership.map(buildRow).join('')
       : '<tr><td colspan="8" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
@@ -71,7 +72,7 @@ function openEventModal(event, presetLeadership) {
   document.getElementById('modalTitle').textContent = event ? 'Edit Event' : (presetLeadership ? 'Add Leadership Event' : 'Add Event');
   document.getElementById('modalEventId').value = event && event.id ? event.id : '';
   document.getElementById('mName').value        = event?.name || '';
-  document.getElementById('mAlliance').value    = event?.alliance || 'Server';
+  document.getElementById('mKingdomWide').checked = event?.scope === 'kingdom-wide';
   document.getElementById('mInterval').value    = event?.interval_days || '';
   document.getElementById('mStartTime').value   = event?.start_time_utc || '';
   document.getElementById('mDuration').value    = event?.duration_hours || '';
@@ -216,7 +217,7 @@ async function saveEvent() {
   }
   const payload = {
     name:            document.getElementById('mName').value,
-    alliance:        document.getElementById('mAlliance').value,
+    scope:           document.getElementById('mKingdomWide').checked ? 'kingdom-wide' : 'alliance',
     leadership_only: document.getElementById('mLeadershipOnly').checked,
     interval_days:   parseInt(document.getElementById('mInterval').value),
     start_time_utc:  startTime,

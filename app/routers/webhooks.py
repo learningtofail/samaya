@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
@@ -7,10 +8,20 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from models import AsyncSessionLocal
-from models.db import DiscordConfig, PostLog
+from models.db import PostLog
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Falls back to this when no Tenant has its own public_key set — the
+# common case, since most tenants share the platform bot (see
+# routers/admin/deps.py.PLATFORM_BOT_TOKEN). A tenant with its own custom
+# bot AND its own Discord "Interactions Endpoint URL" pointed at this same
+# route would need signature verification against its own public_key
+# instead — not implemented here: this endpoint tries the platform key
+# only, so that narrow combination will 401. Worth revisiting if a tenant
+# actually sets up their own bot's interactions endpoint.
+PLATFORM_PUBLIC_KEY = os.environ.get("PLATFORM_PUBLIC_KEY", "")
 
 
 def verify_signature(public_key: str, signature: str, timestamp: str, body: bytes) -> bool:
@@ -30,12 +41,7 @@ async def discord_webhook(request: Request):
     signature = request.headers.get("X-Signature-Ed25519", "")
     timestamp = request.headers.get("X-Signature-Timestamp", "")
 
-    # Load public key from DB
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(select(DiscordConfig))
-        cfg    = result.scalar_one_or_none()
-
-    if not cfg:
+    if not PLATFORM_PUBLIC_KEY:
         # No config yet — only allow PING for initial Discord verification
         try:
             data = await request.json()
@@ -46,7 +52,7 @@ async def discord_webhook(request: Request):
         raise HTTPException(status_code=401, detail="Discord not configured")
 
     # Validate signature
-    if not verify_signature(cfg.public_key, signature, timestamp, body):
+    if not verify_signature(PLATFORM_PUBLIC_KEY, signature, timestamp, body):
         raise HTTPException(status_code=401, detail="Invalid request signature")
 
     try:

@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from models import engine
-from models.db import Base, SchedulerState
+from models.db import Base
 from models import AsyncSessionLocal
 from scheduler.jobs import regenerate_occurrences, send_pre_event_reminders
 from routers import events, admin, webhooks, ics
@@ -39,26 +39,38 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    async with AsyncSessionLocal() as session:
-        from sqlalchemy.dialects.postgresql import insert
-        for job in ("regenerate_occurrences", "pre_event_notifier"):
-            await session.execute(
-                insert(SchedulerState)
-                .values(job_name=job)
-                .on_conflict_do_nothing()
-            )
-        await session.commit()
+    # SchedulerState rows are now per-tenant (tenant_id, job_name), created
+    # lazily by scheduler.jobs._update_state on each tenant's first run —
+    # there's no fixed set of rows to pre-seed the way there was with one
+    # global row per job, since tenants can be added at any time via the
+    # tenants admin API.
 
-    # Check if regeneration is overdue (>25h since last run)
+    # Check if regeneration is overdue (>25h since last run) for any
+    # existing tenant, or missing entirely (a tenant with no state row
+    # yet). Runs for every tenant if so — cheap and idempotent, and
+    # simpler than tracking per-tenant overdue-ness separately at startup.
     async with AsyncSessionLocal() as session:
         from sqlalchemy import select
-        row = await session.execute(
-            select(SchedulerState).where(SchedulerState.job_name == "regenerate_occurrences")
-        )
-        state = row.scalar_one_or_none()
-        if state is None or state.last_run_utc is None or \
-           (datetime.now(timezone.utc) - state.last_run_utc).total_seconds() > 90000:
-            logger.info("Overdue regeneration detected on startup — running now")
+        from models.db import SchedulerState, Tenant
+        tenants_result = await session.execute(select(Tenant))
+        tenant_ids = [t.id for t in tenants_result.scalars().all()]
+
+        overdue = False
+        for tid in tenant_ids:
+            row = await session.execute(
+                select(SchedulerState).where(
+                    SchedulerState.tenant_id == tid,
+                    SchedulerState.job_name == "regenerate_occurrences",
+                )
+            )
+            state = row.scalar_one_or_none()
+            if state is None or state.last_run_utc is None or \
+               (datetime.now(timezone.utc) - state.last_run_utc).total_seconds() > 90000:
+                overdue = True
+                break
+
+        if overdue:
+            logger.info("Overdue regeneration detected on startup — running now for all tenants")
             await regenerate_occurrences()
 
     # Daily regeneration at UTC 00:00

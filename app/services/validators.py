@@ -10,8 +10,6 @@ update). That's the only real difference, so it's pulled out here as an
 import re
 from datetime import date as _date
 
-ALLOWED_ALLIANCES = ("M0D", "NSR", "Server")
-
 
 def parse_interval_days(v, allow_none: bool = False):
     if v is None and allow_none:
@@ -37,15 +35,6 @@ def parse_duration_hours(v, allow_none: bool = False):
     if val <= 0:
         raise ValueError("Duration must be greater than 0 hours")
     return val
-
-
-def parse_alliance(v, allow_none: bool = False):
-    if v is None and allow_none:
-        return v
-    v = str(v).strip()
-    if v not in ALLOWED_ALLIANCES:
-        raise ValueError(f"Alliance must be one of: {', '.join(ALLOWED_ALLIANCES)}")
-    return v
 
 
 def parse_start_time_utc(v, allow_none: bool = False):
@@ -85,3 +74,12 @@ def parse_notify_minutes_before(v, allow_none: bool = False):
     if val < 1:
         raise ValueError("Notify minutes must be at least 1")
     return val
+
+
+def parse_scope(v, allow_none: bool = False):
+    if v is None and allow_none:
+        return v
+    v = str(v).strip()
+    if v not in ("alliance", "kingdom-wide"):
+        raise ValueError("Scope must be 'alliance' or 'kingdom-wide'")
+    return v
