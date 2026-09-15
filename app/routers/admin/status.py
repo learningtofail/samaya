@@ -11,11 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models import get_db
 from models.db import SchedulerState, Tenant
 from services.discord_api import verify_token
-from services.auth import require_admin_key
 
 from .deps import PLATFORM_BOT_TOKEN, get_current_tenant
 
-router = APIRouter(dependencies=[Depends(require_admin_key)])
+router = APIRouter()
 
 
 @router.get("/api/status")

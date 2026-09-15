@@ -1,4 +1,8 @@
-"""One-time migration: singleton DiscordConfig -> multi-tenant schema.
+"""One-time migration: singleton DiscordConfig -> multi-tenant schema,
+plus the Phase 4 (real auth) and Phase 5 (scheduled announcements) tables
+— all three phases were built before this was ever run against
+production, so this is the single combined migration for all of them,
+not three separate ones.
 
 Run this ONCE against production, after taking a backup, BEFORE deploying
 the new application code (the new models/db.py expects the columns this
@@ -50,6 +54,14 @@ What it does, in order:
      business data, and the old single global row can't be attributed to
      one specific tenant retroactively.
   7. Drops discord_config — fully superseded by tenants.bot_token/guild_id.
+  8. Creates users, user_tenants, user_kingdoms, invites, audit_log
+     (Phase 4 — real auth). Pure CREATE TABLE, no backfill: these are
+     brand new, so there's no existing data to migrate into them. No
+     superadmin is seeded here — the first one is granted by
+     SUPERADMIN_DISCORD_IDS in .env on their first login, same as
+     ADMIN_API_KEY used to work before Phase 4 replaced it.
+  9. Creates announcements, announcement_targets (Phase 5 — scheduled
+     announcements). Also pure CREATE TABLE, same reasoning as step 8.
 """
 import asyncio
 import os
@@ -284,13 +296,115 @@ async def migrate():
         await conn.execute(text("DROP TABLE IF EXISTS discord_config"))
         print("  done")
 
+        # ---- Step 8: Phase 4 auth tables ----
+        print("Step 8: creating users, user_tenants, user_kingdoms, invites, audit_log...")
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                discord_id TEXT NOT NULL UNIQUE,
+                discord_username TEXT NOT NULL,
+                is_superadmin BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                last_login_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS user_tenants (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+                role TEXT NOT NULL CHECK (role IN ('owner', 'coordinator')),
+                created_at TIMESTAMPTZ DEFAULT now(),
+                UNIQUE (user_id, tenant_id)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS user_kingdoms (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                kingdom_id INTEGER NOT NULL REFERENCES kingdoms(id),
+                created_at TIMESTAMPTZ DEFAULT now(),
+                UNIQUE (user_id, kingdom_id)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS invites (
+                id SERIAL PRIMARY KEY,
+                token TEXT NOT NULL UNIQUE,
+                tenant_id INTEGER REFERENCES tenants(id),
+                kingdom_id INTEGER REFERENCES kingdoms(id),
+                role TEXT NOT NULL CHECK (role IN ('owner', 'coordinator', 'kingdom_coordinator')),
+                created_by INTEGER REFERENCES users(id),
+                expires_at TIMESTAMPTZ NOT NULL,
+                used_at TIMESTAMPTZ,
+                used_by INTEGER REFERENCES users(id),
+                revoked_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                CHECK (
+                    (tenant_id IS NOT NULL AND kingdom_id IS NULL) OR
+                    (tenant_id IS NULL AND kingdom_id IS NOT NULL)
+                )
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id SERIAL PRIMARY KEY,
+                tenant_id INTEGER REFERENCES tenants(id),
+                user_id INTEGER REFERENCES users(id),
+                table_name TEXT NOT NULL,
+                row_id INTEGER,
+                action TEXT NOT NULL CHECK (action IN ('create', 'update', 'delete')),
+                before TEXT,
+                after TEXT,
+                timestamp TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+        print("  done — no superadmin seeded here; the first login from a "
+              "Discord ID listed in SUPERADMIN_DISCORD_IDS (.env) grants it")
+
+        # ---- Step 9: Phase 5 announcement tables ----
+        print("Step 9: creating announcements, announcement_targets...")
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS announcements (
+                id SERIAL PRIMARY KEY,
+                owning_tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+                title TEXT NOT NULL,
+                body_markdown TEXT NOT NULL,
+                scheduled_for TIMESTAMPTZ NOT NULL,
+                status TEXT NOT NULL DEFAULT 'scheduled'
+                    CHECK (status IN ('draft', 'scheduled', 'posted', 'failed', 'cancelled')),
+                created_by INTEGER REFERENCES users(id),
+                created_at TIMESTAMPTZ DEFAULT now(),
+                posted_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS announcement_targets (
+                id SERIAL PRIMARY KEY,
+                announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+                tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+                discord_channel_id TEXT NOT NULL,
+                discord_message_id TEXT,
+                post_status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (post_status IN ('pending', 'posted', 'error')),
+                status_detail TEXT,
+                UNIQUE (announcement_id, tenant_id)
+            )
+        """))
+        print("  done")
+
     await engine.dispose()
     print("\nMigration complete.")
     print(f"MOD tenant id={mod_id}, slug=mod")
     print(f"NSR tenant id={nsr_id}, slug=nsr")
-    print("Next: deploy the new application code, then verify both tenants "
-          "load correctly in the admin UI (X-Tenant-Slug: mod / nsr) before "
-          "considering this done.")
+    print("\nNext, in order:")
+    print("  1. Set SUPERADMIN_DISCORD_IDS, DISCORD_OAUTH_CLIENT_ID/_SECRET/_REDIRECT_URI,")
+    print("     and SECRET_KEY in .env if not already set — the app refuses to boot")
+    print("     without them now (see main.py's startup check).")
+    print("  2. Deploy the new application code.")
+    print("  3. Log in via Discord as one of the SUPERADMIN_DISCORD_IDS to confirm")
+    print("     superadmin access, then verify both tenants load correctly in the")
+    print("     admin UI before considering this done.")
 
 
 if __name__ == "__main__":

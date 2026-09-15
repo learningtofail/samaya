@@ -15,6 +15,7 @@
     <span id="headerStatus">Kingshot Alliance Event Scheduler</span>
   </div>
   <select id="tenantPicker" onchange="onTenantChange(this.value)" title="Which alliance's data you're viewing and editing"></select>
+  <form method="post" action="/auth/logout" style="margin:0"><button type="submit" class="btn btn-ghost btn-sm">Log out</button></form>
 </header>
 
 <nav>
@@ -24,7 +25,9 @@
   <button onclick="showView('gantt',this)">Gantt</button>
   <button onclick="showView('postlog',this)">Post Log</button>
   <button id="syncTabBtn" onclick="showView('sync',this)">Sync <span id="syncBadge" style="display:none;background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:var(--fs-2xs);margin-left:4px">0</span></button>
+  <button id="accessTabBtn" onclick="showView('access',this)" style="display:none" title="Manage who has coordinator/owner access to this alliance">Access</button>
   <div style="flex:1"></div>
+  <button id="platformTabBtn" onclick="showView('platform',this)" style="display:none" title="Superadmin: manage Kingdoms and Tenants">Platform</button>
   <button onclick="showView('config',this)">Config</button>
 </nav>
 
@@ -187,6 +190,45 @@
   <div id="syncContent"><p style="color:var(--muted)">Click "Run Sync Check" to fetch current Discord events.</p></div>
 </div>
 
+<!-- ACCESS -->
+<div id="v-access" class="view">
+  <div class="flex mb-16">
+    <h2 style="margin:0">Access</h2>
+    <button class="btn btn-accent" onclick="createInvite()">+ Invite Coordinator</button>
+  </div>
+  <p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:16px">
+    Anyone with a link below can claim it via Discord login. Share it in a DM or an officer channel — it's a
+    single-use link, not a password.
+  </p>
+  <table>
+    <thead><tr><th>Role</th><th>Status</th><th>Expires</th><th></th></tr></thead>
+    <tbody id="invitesBody"><tr><td colspan="4" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+  </table>
+</div>
+
+<!-- PLATFORM -->
+<div id="v-platform" class="view">
+  <h2 style="margin-bottom:16px">Platform</h2>
+
+  <div class="flex mb-16">
+    <h3 style="margin:0;font-size:var(--fs-md)">Kingdoms</h3>
+    <button class="btn btn-ghost btn-sm" onclick="createKingdom()">+ New Kingdom</button>
+  </div>
+  <table class="mb-16">
+    <thead><tr><th>Name</th><th>Slug</th><th></th></tr></thead>
+    <tbody id="kingdomsBody"><tr><td colspan="3" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+  </table>
+
+  <div class="flex mb-16">
+    <h3 style="margin:0;font-size:var(--fs-md)">Tenants (Alliances)</h3>
+    <button class="btn btn-ghost btn-sm" onclick="createTenant()">+ New Tenant</button>
+  </div>
+  <table>
+    <thead><tr><th>Name</th><th>Slug</th><th>Kingdom</th><th>Guild ID</th><th>Bot</th><th></th></tr></thead>
+    <tbody id="tenantsBody"><tr><td colspan="6" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+  </table>
+</div>
+
 </main>
 
 <!-- EVENT MODAL -->
@@ -294,6 +336,8 @@
 <script src="/static/js/postlog.js"></script>
 <script src="/static/js/config.js"></script>
 <script src="/static/js/sync.js"></script>
+<script src="/static/js/access.js"></script>
+<script src="/static/js/platform.js"></script>
 <script src="/static/js/init.js"></script>
 </body>
 </html>

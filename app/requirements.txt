@@ -8,3 +8,4 @@ apscheduler>=3.10
 icalendar>=5.0
 pynacl>=1.5
 python-dotenv>=1.0
+itsdangerous>=2.1

@@ -24,13 +24,13 @@ from models.db import EventTenantNotification, Occurrence, PostLog, Tenant
 from services.discord_api import (
     cancel_discord_event, create_discord_event, send_channel_message,
 )
-from services.auth import require_admin_key
+from services.time_utils import ensure_utc
 
 from .deps import PLATFORM_BOT_TOKEN, find_post_log, get_current_tenant, get_occurrence_with_event
 from .schemas import OccurrencePatch
 from .serializers import _occurrence_dict
 
-router = APIRouter(dependencies=[Depends(require_admin_key)])
+router = APIRouter()
 
 
 @router.get("/api/occurrences")
@@ -183,13 +183,7 @@ async def post_occurrence(
     occ, event = occ_and_event
 
     now = datetime.now(timezone.utc)
-    start = occ.start_datetime_utc
-    if start.tzinfo is None:
-        # Not every driver round-trips tzinfo on a DateTime(timezone=True)
-        # column the same way — asyncpg (production/Postgres) does,
-        # aiosqlite doesn't. Every value in this column is UTC regardless
-        # of what the driver hands back, so normalise rather than assume.
-        start = start.replace(tzinfo=timezone.utc)
+    start = ensure_utc(occ.start_datetime_utc)
     if (start - now).total_seconds() < 900:
         raise HTTPException(status_code=400, detail="Event starts in less than 15 minutes")
 

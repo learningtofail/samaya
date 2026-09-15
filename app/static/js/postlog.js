@@ -4,9 +4,10 @@
 async function exportPostLogCsv() {
   try {
     const res = await fetch('/admin/api/post-log/export.csv', {
-      headers: { 'X-Admin-Key': getAdminKey() },
+      headers: { 'X-Tenant-Slug': getCurrentTenantSlug() },
+      credentials: 'same-origin',
     });
-    if (res.status === 401) { clearAdminKey(); throw new Error('Admin key rejected — reload and re-enter it.'); }
+    if (res.status === 401) { window.location.href = '/auth/login'; return; }
     if (!res.ok) throw new Error('Export failed: ' + res.statusText);
     const blob = await res.blob();
     const url  = URL.createObjectURL(blob);

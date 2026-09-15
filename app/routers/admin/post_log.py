@@ -10,12 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
 from models.db import EventDefinition, PostLog, Tenant
-from services.auth import require_admin_key
 
 from .deps import get_current_tenant
 from .serializers import _log_dict
 
-router = APIRouter(dependencies=[Depends(require_admin_key)])
+router = APIRouter()
 
 
 @router.get("/api/post-log")

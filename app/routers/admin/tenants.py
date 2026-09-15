@@ -1,23 +1,26 @@
 """Kingdom and Tenant management — the "onboard a new alliance" surface.
 
-Gated by require_admin_key only, same as every other admin route, for now.
-Per the multi-tenant design doc, this becomes superadmin-only once Phase 4
-(real auth) lands — creating tenants is not itself tenant-scoped, so it
-deliberately does not depend on get_current_tenant the way every other
-admin router does.
+Creating/editing Kingdoms and Tenants is superadmin-only (require_superadmin).
+Listing tenants is scoped to what the logged-in user actually has access
+to — a superadmin sees every tenant (needed to onboard new alliances and
+pick their first owner); anyone else sees only the tenants their own
+UserTenant grants cover, since this list also populates the admin UI's
+tenant picker and a coordinator has no business seeing (or switching
+into) alliances they don't belong to.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
-from models.db import Kingdom, Tenant
-from services.auth import require_admin_key
+from models.db import Kingdom, Tenant, User, UserTenant
+from services.audit import log_change
 from services.discord_api import verify_token
 
+from .deps import get_current_user, require_superadmin
 from .schemas import KingdomIn, TenantIn, TenantPatch
 
-router = APIRouter(dependencies=[Depends(require_admin_key)])
+router = APIRouter()
 
 
 def _kingdom_dict(k: Kingdom) -> dict:
@@ -37,13 +40,15 @@ def _tenant_dict(t: Tenant) -> dict:
 
 
 @router.get("/api/kingdoms")
-async def list_kingdoms(db: AsyncSession = Depends(get_db)):
+async def list_kingdoms(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Kingdom).order_by(Kingdom.name))
     return [_kingdom_dict(k) for k in result.scalars().all()]
 
 
 @router.post("/api/kingdoms", status_code=201)
-async def create_kingdom(payload: KingdomIn, db: AsyncSession = Depends(get_db)):
+async def create_kingdom(
+    payload: KingdomIn, user: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)
+):
     kingdom = Kingdom(name=payload.name, slug=payload.slug)
     db.add(kingdom)
     try:
@@ -56,18 +61,22 @@ async def create_kingdom(payload: KingdomIn, db: AsyncSession = Depends(get_db))
 
 
 @router.get("/api/tenants")
-async def list_tenants(db: AsyncSession = Depends(get_db)):
-    """Every tenant, not just the caller's own — this is what populates the
-    tenant picker in the admin UI, so it deliberately isn't scoped to one
-    tenant. Bridge-period trust model: anyone with the shared admin key can
-    see (and switch into) every alliance. Phase 4 restricts this to the
-    tenants a logged-in user actually has UserTenant access to."""
-    result = await db.execute(select(Tenant).order_by(Tenant.name))
+async def list_tenants(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    if user.is_superadmin:
+        result = await db.execute(select(Tenant).order_by(Tenant.name))
+    else:
+        result = await db.execute(
+            select(Tenant).join(UserTenant, UserTenant.tenant_id == Tenant.id)
+            .where(UserTenant.user_id == user.id)
+            .order_by(Tenant.name)
+        )
     return [_tenant_dict(t) for t in result.scalars().all()]
 
 
 @router.post("/api/tenants", status_code=201)
-async def create_tenant(payload: TenantIn, db: AsyncSession = Depends(get_db)):
+async def create_tenant(
+    payload: TenantIn, user: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)
+):
     if payload.bot_token:
         ok, result = await verify_token(payload.bot_token)
         if not ok:
@@ -84,16 +93,28 @@ async def create_tenant(payload: TenantIn, db: AsyncSession = Depends(get_db)):
     )
     db.add(tenant)
     try:
-        await db.commit()
-        await db.refresh(tenant)
+        await db.flush()
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=422, detail=f"Could not create tenant: {e}")
+
+    # bot_token/public_key deliberately excluded from the log entry — a
+    # secret has no business sitting in a table other people can read.
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id,
+        table_name="tenants", row_id=tenant.id, action="create",
+        after={"name": tenant.name, "slug": tenant.slug, "kingdom_id": tenant.kingdom_id},
+    )
+    await db.commit()
+    await db.refresh(tenant)
     return _tenant_dict(tenant)
 
 
 @router.patch("/api/tenants/{tenant_id}")
-async def update_tenant(tenant_id: int, payload: TenantPatch, db: AsyncSession = Depends(get_db)):
+async def update_tenant(
+    tenant_id: int, payload: TenantPatch,
+    user: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
     tenant = result.scalar_one_or_none()
     if not tenant:
@@ -111,6 +132,11 @@ async def update_tenant(tenant_id: int, payload: TenantPatch, db: AsyncSession =
     if payload.public_key is not None: tenant.public_key = payload.public_key or None
     if payload.color is not None:      tenant.color      = payload.color
 
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id,
+        table_name="tenants", row_id=tenant.id, action="update",
+        after={"name": tenant.name, "slug": tenant.slug, "guild_id": tenant.guild_id},
+    )
     await db.commit()
     await db.refresh(tenant)
     return _tenant_dict(tenant)

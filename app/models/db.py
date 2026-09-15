@@ -1,3 +1,16 @@
+"""The full data model, grouped roughly in the order each layer was
+built:
+
+  Kingdom, Tenant                        — multi-tenancy (Phase 1)
+  User, UserTenant, UserKingdom, Invite,
+  AuditLog                               — real auth (Phase 4)
+  EventDefinition, EventTenantNotification,
+  Occurrence, PostLog                    — events and Discord posting
+  Announcement, AnnouncementTarget       — scheduled announcements (Phase 5)
+  SchedulerState                         — background job status, per tenant
+
+Every table has its own docstring explaining what it's for and why it's
+shaped the way it is — this header is just the map."""
 from sqlalchemy import (
     Boolean, CheckConstraint, Column, Date, DateTime,
     ForeignKey, Integer, Numeric, Text, Time,
@@ -42,6 +55,112 @@ class Tenant(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     kingdom = relationship("Kingdom", back_populates="tenants")
+
+
+class User(Base):
+    """A person, identified by their Discord account. Created only when
+    someone authenticates via Discord OAuth — never on invite creation
+    itself (see Invite below); an invite grants access to a discord_id
+    that may or may not have a User row yet."""
+    __tablename__ = "users"
+
+    id             = Column(Integer, primary_key=True)
+    discord_id     = Column(Text, nullable=False, unique=True)
+    discord_username = Column(Text, nullable=False)
+    is_superadmin  = Column(Boolean, nullable=False, default=False)
+    created_at     = Column(DateTime(timezone=True), server_default=func.now())
+    last_login_at  = Column(DateTime(timezone=True))
+
+
+class UserTenant(Base):
+    """Grants a user owner/coordinator access to one Tenant. Independent
+    per tenant — a coordinator of MOD is not automatically anything to
+    NSR, even if the two share a Discord guild."""
+    __tablename__ = "user_tenants"
+
+    id         = Column(Integer, primary_key=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), nullable=False)
+    tenant_id  = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    role       = Column(Text, nullable=False)  # owner | coordinator
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "tenant_id", name="uq_user_tenant"),
+        CheckConstraint("role IN ('owner', 'coordinator')", name="ck_user_tenant_role"),
+    )
+
+
+class UserKingdom(Base):
+    """Grants a user the right to create/edit/cancel kingdom-wide events
+    for one Kingdom. Deliberately separate from UserTenant — being an
+    owner of one alliance in a Kingdom does not imply this; it is not a
+    role with sub-tiers, just a flag (see the multi-tenant design doc,
+    'Kingdom-wide events')."""
+    __tablename__ = "user_kingdoms"
+
+    id         = Column(Integer, primary_key=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), nullable=False)
+    kingdom_id = Column(Integer, ForeignKey("kingdoms.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "kingdom_id", name="uq_user_kingdom"),
+    )
+
+
+class Invite(Base):
+    """The only path to creating a UserTenant or UserKingdom grant (and,
+    incidentally, the only path to a first-time visitor ever completing
+    Discord OAuth at all — see routers/auth.py). Exactly one of
+    tenant_id/kingdom_id is set, matching role."""
+    __tablename__ = "invites"
+
+    id            = Column(Integer, primary_key=True)
+    token         = Column(Text, nullable=False, unique=True)
+    tenant_id     = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+    kingdom_id    = Column(Integer, ForeignKey("kingdoms.id"), nullable=True)
+    role          = Column(Text, nullable=False)  # owner | coordinator | kingdom_coordinator
+    created_by    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    expires_at    = Column(DateTime(timezone=True), nullable=False)
+    used_at       = Column(DateTime(timezone=True))
+    used_by       = Column(Integer, ForeignKey("users.id"))
+    revoked_at    = Column(DateTime(timezone=True))
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('owner', 'coordinator', 'kingdom_coordinator')",
+            name="ck_invite_role",
+        ),
+        CheckConstraint(
+            "(tenant_id IS NOT NULL AND kingdom_id IS NULL) OR "
+            "(tenant_id IS NULL AND kingdom_id IS NOT NULL)",
+            name="ck_invite_exactly_one_target",
+        ),
+    )
+
+
+class AuditLog(Base):
+    """Append-only. No rollback — see the multi-tenant design doc, 'Audit
+    log — recorded, not reversible': many of the actions this covers also
+    reach Discord, and restoring a DB snapshot doesn't undo that. before/
+    after are JSON-serialized dicts, not ORM objects, so a future schema
+    change doesn't retroactively break reading old log rows."""
+    __tablename__ = "audit_log"
+
+    id          = Column(Integer, primary_key=True)
+    tenant_id   = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+    user_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    table_name  = Column(Text, nullable=False)
+    row_id      = Column(Integer)
+    action      = Column(Text, nullable=False)  # create | update | delete
+    before      = Column(Text)  # JSON, null on create
+    after       = Column(Text)  # JSON, null on delete
+    timestamp   = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("action IN ('create', 'update', 'delete')", name="ck_audit_action"),
+    )
 
 
 class EventDefinition(Base):
@@ -146,6 +265,57 @@ class PostLog(Base):
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "event_name", "occurrence_date", name="uq_post_log"),
+    )
+
+
+class Announcement(Base):
+    """A scheduled markdown-text announcement — not built on
+    EventDefinition/Occurrence since the shape is fundamentally
+    different (no start/end time, no recurrence). Delivery fans out to
+    one or more AnnouncementTargets, each an independent post, since
+    targets may be different Discord guilds with different bot tokens."""
+    __tablename__ = "announcements"
+
+    id               = Column(Integer, primary_key=True)
+    owning_tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    title            = Column(Text, nullable=False)
+    body_markdown    = Column(Text, nullable=False)
+    scheduled_for    = Column(DateTime(timezone=True), nullable=False)
+    status           = Column(Text, nullable=False, default="scheduled")
+    created_by       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+    posted_at        = Column(DateTime(timezone=True))
+
+    targets = relationship("AnnouncementTarget", back_populates="announcement", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'scheduled', 'posted', 'failed', 'cancelled')",
+            name="ck_announcement_status",
+        ),
+    )
+
+
+class AnnouncementTarget(Base):
+    """One row per (announcement, tenant) — independent success/failure
+    per target, same resilience principle as PostLog's kingdom-wide
+    fan-out (see PostLog's docstring): one tenant's Discord API hiccup
+    never blocks or corrupts another's delivery."""
+    __tablename__ = "announcement_targets"
+
+    id                 = Column(Integer, primary_key=True)
+    announcement_id    = Column(Integer, ForeignKey("announcements.id", ondelete="CASCADE"), nullable=False)
+    tenant_id          = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    discord_channel_id = Column(Text, nullable=False)
+    discord_message_id = Column(Text)
+    post_status        = Column(Text, nullable=False, default="pending")
+    status_detail      = Column(Text)
+
+    announcement = relationship("Announcement", back_populates="targets")
+
+    __table_args__ = (
+        UniqueConstraint("announcement_id", "tenant_id", name="uq_announcement_target"),
+        CheckConstraint("post_status IN ('pending', 'posted', 'error')", name="ck_announcement_target_status"),
     )
 
 

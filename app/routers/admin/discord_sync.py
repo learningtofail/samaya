@@ -15,11 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models import get_db
 from models.db import EventDefinition, PostLog, Tenant
 from services.discord_api import update_discord_event
-from services.auth import require_admin_key
 
 from .deps import PLATFORM_BOT_TOKEN, find_post_log, get_current_tenant, get_occurrence_with_event
 
-router = APIRouter(dependencies=[Depends(require_admin_key)])
+router = APIRouter()
 
 
 @router.get("/api/sync/discord")

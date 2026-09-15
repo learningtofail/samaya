@@ -7,11 +7,10 @@ the delete to PostLog) so posting history survives the event definition
 being removed — see the comment inline for why.
 
 List includes kingdom-wide events owned by *other* tenants in the same
-Kingdom (read visibility only — mutations below stay scoped to events
-this tenant actually owns). Editing another tenant's kingdom-wide event
-requires a UserKingdom grant, which doesn't exist yet (Phase 4); during
-the bridge period every mutation here is scoped to owning_tenant_id ==
-the caller's own tenant, same as an alliance-scoped event always was.
+Kingdom (read visibility only). Creating or editing a kingdom-wide event
+additionally requires a UserKingdom grant (check_kingdom_coordinator) —
+being trusted with one alliance's own settings doesn't imply being
+trusted to post into every other alliance's Discord server.
 """
 from datetime import date
 
@@ -20,14 +19,14 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
-from models.db import EventDefinition, PostLog, Tenant
-from services.auth import require_admin_key
+from models.db import EventDefinition, PostLog, Tenant, User
+from services.audit import log_change
 
-from .deps import get_current_tenant
-from .schemas import EventIn, EventPatch
+from .deps import check_kingdom_coordinator, get_current_tenant, get_current_user
+from .schemas import EventIn, EventPatch, EventTenantNotificationIn
 from .serializers import _event_dict
 
-router = APIRouter(dependencies=[Depends(require_admin_key)])
+router = APIRouter()
 
 
 @router.get("/api/events")
@@ -50,8 +49,14 @@ async def list_events(
 
 @router.post("/api/events", status_code=201)
 async def create_event(
-    payload: EventIn, tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
+    payload: EventIn,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
+    if payload.scope == "kingdom-wide":
+        await check_kingdom_coordinator(db, user, tenant.kingdom_id)
+
     from datetime import time as dtime
     try:
         h, m = map(int, payload.start_time_utc.split(":"))
@@ -76,8 +81,7 @@ async def create_event(
     )
     db.add(event)
     try:
-        await db.commit()
-        await db.refresh(event)
+        await db.flush()
     except Exception as e:
         await db.rollback()
         err = str(e)
@@ -88,13 +92,23 @@ async def create_event(
         if "isoformat" in err or "anchor" in err.lower():
             raise HTTPException(status_code=422, detail="Anchor date must be in yyyy-mm-dd format")
         raise HTTPException(status_code=422, detail=f"Validation error: {err}")
+
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id,
+        table_name="event_definitions", row_id=event.id, action="create",
+        after={"name": event.name, "scope": event.scope, "active": event.active},
+    )
+    await db.commit()
+    await db.refresh(event)
     return _event_dict(event)
 
 
 @router.patch("/api/events/{event_id}")
 async def update_event(
     event_id: int, payload: EventPatch,
-    tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db),
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     from datetime import time as dtime
     result = await db.execute(
@@ -105,6 +119,12 @@ async def update_event(
     event = result.scalar_one_or_none()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
+
+    target_scope = payload.scope if payload.scope is not None else event.scope
+    if target_scope == "kingdom-wide":
+        await check_kingdom_coordinator(db, user, tenant.kingdom_id)
+
+    before = {"name": event.name, "scope": event.scope, "active": event.active}
 
     if payload.name is not None:                    event.name                    = payload.name
     if payload.interval_days is not None:           event.interval_days           = payload.interval_days
@@ -125,6 +145,11 @@ async def update_event(
         except (ValueError, TypeError) as e:
             raise HTTPException(status_code=422, detail=f"Invalid start time: {e}")
 
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id,
+        table_name="event_definitions", row_id=event.id, action="update",
+        before=before, after={"name": event.name, "scope": event.scope, "active": event.active},
+    )
     await db.commit()
     await db.refresh(event)
     return _event_dict(event)
@@ -132,7 +157,10 @@ async def update_event(
 
 @router.delete("/api/events/{event_id}", status_code=204)
 async def deactivate_event(
-    event_id: int, tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
+    event_id: int,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
         select(EventDefinition).where(
@@ -143,12 +171,87 @@ async def deactivate_event(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
     event.active = False
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id,
+        table_name="event_definitions", row_id=event.id, action="update",
+        before={"active": True}, after={"active": False},
+    )
     await db.commit()
+
+
+@router.put("/api/events/{event_id}/notification-override")
+async def set_notification_override(
+    event_id: int, payload: EventTenantNotificationIn,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """A non-owning tenant's own notification channel/role for a
+    kingdom-wide event — see models.db.EventTenantNotification. Always
+    applies to the caller's own current tenant; there is no way to set
+    another tenant's override through this endpoint.
+
+    Deliberately does not require check_kingdom_coordinator: configuring
+    where *your own* alliance gets pinged for an event someone else
+    created is a lower-stakes action than creating the kingdom-wide event
+    itself, and gating it the same way would mean an alliance's regular
+    coordinators can never set this up without asking their kingdom
+    coordinator to do it for them every time.
+    """
+    from models.db import EventDefinition, EventTenantNotification
+
+    result = await db.execute(
+        select(EventDefinition)
+        .join(Tenant, EventDefinition.owning_tenant_id == Tenant.id)
+        .where(
+            EventDefinition.id == event_id,
+            EventDefinition.scope == "kingdom-wide",
+            Tenant.kingdom_id == tenant.kingdom_id,
+        )
+    )
+    event = result.scalar_one_or_none()
+    if not event:
+        raise HTTPException(status_code=404, detail="Kingdom-wide event not found in your kingdom")
+
+    if tenant.id == event.owning_tenant_id:
+        raise HTTPException(
+            status_code=400,
+            detail="The owning tenant uses the event's own notification_channel_id/role — "
+                   "set those via PATCH /api/events/{event_id} instead",
+        )
+
+    existing = await db.execute(
+        select(EventTenantNotification).where(
+            EventTenantNotification.event_id == event_id,
+            EventTenantNotification.tenant_id == tenant.id,
+        )
+    )
+    override = existing.scalar_one_or_none()
+    if override:
+        override.notification_channel_id = payload.notification_channel_id
+        override.notification_role_id    = payload.notification_role_id
+    else:
+        override = EventTenantNotification(
+            event_id=event_id, tenant_id=tenant.id,
+            notification_channel_id=payload.notification_channel_id,
+            notification_role_id=payload.notification_role_id,
+        )
+        db.add(override)
+
+    await db.commit()
+    return {
+        "event_id": event_id, "tenant_id": tenant.id,
+        "notification_channel_id": override.notification_channel_id,
+        "notification_role_id": override.notification_role_id,
+    }
 
 
 @router.delete("/api/events/{event_id}/permanent", status_code=200)
 async def permanent_delete_event(
-    event_id: int, tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
+    event_id: int,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
         select(EventDefinition).where(
@@ -169,6 +272,12 @@ async def permanent_delete_event(
     # so audit history is preserved with event_name still readable
     for log in log_entries:
         log.event_id = None
+
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id,
+        table_name="event_definitions", row_id=event.id, action="delete",
+        before={"name": event.name, "scope": event.scope},
+    )
 
     # Delete the event — cascades to occurrences
     await db.delete(event)

@@ -7,11 +7,10 @@ tenants.py has superseded.
 from fastapi import APIRouter, Depends, HTTPException
 
 from services.discord_api import get_guild_channels, get_guild_roles
-from services.auth import require_admin_key
 
 from .deps import DiscordCreds, get_discord_config
 
-router = APIRouter(dependencies=[Depends(require_admin_key)])
+router = APIRouter()
 
 
 @router.get("/api/discord/channels")

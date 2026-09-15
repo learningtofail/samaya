@@ -71,8 +71,10 @@ class EventPatch(BaseModel):
 class EventTenantNotificationIn(BaseModel):
     """Per-tenant notification override for a kingdom-wide event — see
     models.db.EventTenantNotification for why this can't just reuse
-    EventDefinition's own notification_channel_id/notification_role_id."""
-    tenant_id:                int
+    EventDefinition's own notification_channel_id/notification_role_id.
+    No tenant_id field: the endpoint that uses this always applies it to
+    the caller's own current tenant (X-Tenant-Slug), never one supplied
+    in the body, so one tenant can't set another's notification channel."""
     notification_channel_id:  str = ""
     notification_role_id:     str = ""
 
@@ -99,6 +101,50 @@ class TenantPatch(BaseModel):
 class KingdomIn(BaseModel):
     name: str
     slug: str
+
+
+class TenantInviteIn(BaseModel):
+    role: str  # owner | coordinator
+
+    @field_validator("role")
+    @classmethod
+    def _validate_role(cls, v):
+        if v not in ("owner", "coordinator"):
+            raise ValueError("role must be 'owner' or 'coordinator'")
+        return v
+
+
+class KingdomInviteIn(BaseModel):
+    kingdom_id: int
+
+
+class AnnouncementTargetIn(BaseModel):
+    tenant_slug: str
+    discord_channel_id: str
+
+
+class AnnouncementIn(BaseModel):
+    title: str
+    body_markdown: str
+    scheduled_for: str  # ISO datetime, UTC
+    targets: list[AnnouncementTargetIn]
+
+    @field_validator("body_markdown")
+    @classmethod
+    def _validate_length(cls, v):
+        # Discord's hard cap on message content — reject here, at
+        # creation, rather than let the scheduler discover it at send
+        # time when it's too late to fix.
+        if len(v) > 2000:
+            raise ValueError(f"Announcement body is {len(v)} characters; Discord's limit is 2000")
+        return v
+
+    @field_validator("targets")
+    @classmethod
+    def _validate_at_least_one_target(cls, v):
+        if not v:
+            raise ValueError("At least one target is required")
+        return v
 
 
 class OccurrencePatch(BaseModel):
