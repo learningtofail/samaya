@@ -3,230 +3,104 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>KS138 — Kingshot Event Schedule</title>
+<title>Kingshot Event Schedule</title>
+<link rel="stylesheet" href="/static/vendor/patternfly/patternfly.min.css">
+<link rel="stylesheet" href="/static/vendor/patternfly/patternfly-addons.css">
 <style>
-  :root {
-    font-size: 16px;
-    --bg:      #F8FAFC;
-    --bg2:     #F1F5F9;
-    --bg3:     #E2E8F0;
-    --border:  #CBD5E1;
-    --banner:  #1E293B;
-    --text:    #1E293B;
-    --muted:   #475569;
-    --accent:  #334155;
-    --green:   #bbf7d0;
-    --red:     #fecaca;
-    --fs-2xs:  0.625rem;
-    --fs-xs:   0.75rem;
-    --fs-sm:   0.8125rem;
-    --fs-base: 0.9375rem;
-    --fs-md:   1rem;
-    --fs-lg:   1.25rem;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: system-ui, -apple-system, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    font-size: var(--fs-base);
-    line-height: 1.5;
-    min-height: 100vh;
-  }
-  header {
-    background: var(--banner);
-    color: var(--bg);
-    padding: 18px 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-  header h1 { font-size: var(--fs-lg); font-weight: 600; letter-spacing: .02em; }
-  header p  { font-size: var(--fs-sm); opacity: .7; }
-  .ics-btn {
-    background: var(--accent);
-    color: var(--bg);
-    padding: 8px 16px;
-    border-radius: 5px;
-    text-decoration: none;
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    white-space: nowrap;
-    transition: opacity .15s;
-  }
-  .ics-btn:hover { opacity: .85; }
-  main { max-width: 860px; margin: 0 auto; padding: 28px 20px; }
-  .week-header {
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: .1em;
-    color: var(--muted);
-    margin: 28px 0 10px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--border);
-  }
-  .week-header:first-of-type { margin-top: 0; }
-  .event-card {
-    background: white;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px 16px;
-    margin-bottom: 8px;
+  /* Small, deliberate additions on top of PatternFly — everything else on
+     this page is real PatternFly markup/classes, not a custom theme.
+     Emoji are used for icons rather than an icon font, to avoid adding a
+     second vendored/CDN dependency for a handful of glyphs. */
+  .samaya-event-row {
     display: flex;
     align-items: flex-start;
-    gap: 14px;
-    transition: box-shadow .15s;
+    gap: var(--pf-t--global--spacer--md);
   }
-  .event-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.07); }
-  .event-card.today { border-left: 3px solid var(--accent); }
-  .alliance-bar {
-    width: 4px;
-    min-width: 4px;
-    height: 100%;
-    border-radius: 2px;
-    align-self: stretch;
-    min-height: 40px;
-  }
-  .event-body { flex: 1; min-width: 0; }
-  .event-name-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 4px;
-  }
-  .event-name {
-    font-size: var(--fs-base);
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .alliance-badge {
-    display: inline-block;
-    padding: 1px 7px;
-    border-radius: 3px;
-    font-size: var(--fs-2xs);
-    font-weight: 600;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-  .event-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    font-size: var(--fs-sm);
-    color: var(--muted);
-  }
-  .event-meta span { display: flex; align-items: center; gap: 4px; }
-  .badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 3px;
-    font-size: var(--fs-2xs);
-    font-weight: 500;
-    white-space: nowrap;
-  }
-  .badge-posted    { background: var(--green);  color: #166534; }
-  .badge-pending   { background: var(--bg3);    color: var(--muted); }
-  .badge-active    { background: var(--accent); color: var(--bg); }
-  .badge-completed { background: var(--bg2);    color: var(--muted); }
-  .badge-cancelled { background: var(--red);    color: #991b1b; }
-  .date-col {
+  .samaya-date-col {
     text-align: right;
-    min-width: 72px;
+    min-width: 4.5rem;
     flex-shrink: 0;
   }
-  .date-day  { font-size: 1.375rem; font-weight: 700; line-height: 1; }
-  .date-dow  { font-size: var(--fs-2xs); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-  .date-col.today .date-day { color: var(--accent); }
-  .empty {
-    text-align: center;
-    padding: 60px 20px;
-    color: var(--muted);
-  }
-  .empty p { font-size: var(--fs-md); margin-bottom: 8px; }
-  .loading { text-align: center; padding: 60px; color: var(--muted); }
-  footer {
-    text-align: center;
-    padding: 32px 20px;
-    color: var(--muted);
-    font-size: var(--fs-sm);
-    border-top: 1px solid var(--border);
-    margin-top: 32px;
-  }
-  footer a { color: var(--muted); }
-  .subscribe-box {
-    background: white;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px 20px;
-    margin-bottom: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-  }
-  .subscribe-box p { font-size: var(--fs-sm); color: var(--muted); }
-  .subscribe-box strong { color: var(--text); }
-  .subscribe-box .scope-note { font-size: var(--fs-xs); margin-top: 6px; color: var(--muted); }
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-bottom: 20px;
-  }
-  .legend-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--fs-xs);
-    color: var(--muted);
-  }
-  .legend-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    flex-shrink: 0;
+  .samaya-date-day { font-size: var(--pf-t--global--font--size--heading--lg); font-weight: var(--pf-t--global--font--weight--heading--bold); line-height: 1; }
+  .samaya-date-dow { font-size: var(--pf-t--global--font--size--body--sm); color: var(--pf-t--global--text--color--subtle); text-transform: uppercase; letter-spacing: .06em; }
+  .samaya-date-col.samaya-today .samaya-date-day { color: var(--pf-t--global--color--brand--default); }
+  .samaya-event-meta { display: flex; flex-wrap: wrap; gap: var(--pf-t--global--spacer--md); align-items: center; }
+  .samaya-week-header { margin-block: var(--pf-t--global--spacer--lg) var(--pf-t--global--spacer--sm); text-transform: uppercase; letter-spacing: .08em; }
+  .samaya-week-header:first-of-type { margin-block-start: 0; }
+  /* The masthead's own internal layout mechanism (CSS grid, per its
+     grid-area:header) didn't shrink the title against the fixed-width
+     button next to it the way a plain flex-child override assumed —
+     forcing an explicit, guaranteed flex layout here instead of
+     continuing to guess at PatternFly's internal grid template. */
+  .pf-v6-c-masthead { display: flex !important; align-items: center !important; flex-wrap: nowrap !important; gap: var(--pf-t--global--spacer--md); }
+  .pf-v6-c-masthead__main { flex: 1 1 auto !important; min-width: 0 !important; overflow: hidden !important; }
+  .pf-v6-c-masthead__content { flex: 0 0 auto !important; }
+  #pageTitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  @media (max-width: 700px) {
+    /* Title and button genuinely can't share one row at this width —
+       wrap instead of letting nowrap force an overflow. */
+    .pf-v6-c-masthead { flex-wrap: wrap !important; row-gap: var(--pf-t--global--spacer--sm); }
+    .pf-v6-c-masthead__content { flex: 1 1 100% !important; }
   }
   @media (max-width: 600px) {
-    .date-col { min-width: 50px; }
-    .date-day  { font-size: 1.125rem; }
-    .event-name { font-size: var(--fs-sm); }
-    .subscribe-box { flex-direction: column; align-items: flex-start; }
+    .samaya-date-col { min-width: 3rem; }
+    .samaya-date-day { font-size: var(--pf-t--global--font--size--heading--md); }
   }
 </style>
 </head>
 <body>
 
-<header>
-  <div>
-    <h1 id="pageTitle">⏱ Kingshot Event Schedule</h1>
-    <p id="pageSubtitle">Upcoming events</p>
-  </div>
-  <a class="ics-btn" id="icsLink" href="#">📅 Subscribe to Calendar</a>
-</header>
+<div class="pf-v6-c-page">
 
-<main>
-  <div class="subscribe-box">
-    <div>
-      <p>
-        <strong>Subscribe to stay up to date.</strong>
-        Add our calendar to Google Calendar, Apple Calendar, or any app that supports ICS.
-        It updates automatically — no manual refresh needed.
-      </p>
+  <header class="pf-v6-c-masthead">
+    <div class="pf-v6-c-masthead__main">
+      <span class="pf-v6-c-masthead__brand">
+        <h1 id="pageTitle" style="color:var(--pf-t--global--text--color--inverse);margin:0;font-size:var(--pf-t--global--font--size--heading--lg);font-weight:var(--pf-t--global--font--weight--heading--bold)">⏱ Kingshot Event Schedule</h1>
+      </span>
     </div>
-    <a class="ics-btn" id="icsLinkBottom" href="#">📅 Get ICS Feed</a>
+    <div class="pf-v6-c-masthead__content">
+      <a class="pf-v6-c-button pf-m-primary" id="icsLink" href="#">📅 Subscribe to Calendar</a>
+    </div>
+  </header>
+
+  <div class="pf-v6-c-page__main-container">
+  <main class="pf-v6-c-page__main" tabindex="-1" id="main-content">
+    <section class="pf-v6-c-page__main-section">
+      <div class="pf-v6-c-card pf-v6-u-mb-lg">
+        <div class="pf-v6-c-card__body">
+          <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center">
+            <div class="pf-v6-l-flex__item">
+              <div class="pf-v6-c-content">
+                <p>
+                  <strong>Subscribe to stay up to date.</strong>
+                  Add our calendar to Google Calendar, Apple Calendar, or any app that supports ICS.
+                  It updates automatically — no manual refresh needed.
+                </p>
+              </div>
+            </div>
+            <div class="pf-v6-l-flex__item">
+              <a class="pf-v6-c-button pf-m-secondary" id="icsLinkBottom" href="#">📅 Get ICS Feed</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="content">
+        <div class="pf-v6-c-empty-state">
+          <div class="pf-v6-c-empty-state__content">
+            <div class="pf-v6-c-empty-state__body">Loading events…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
   </div>
+</div>
 
-  <div id="content"><div class="loading">Loading events…</div></div>
-</main>
-
-<footer>
-  <p id="footerText">All times are UTC · Powered by Samaya</p>
+<footer class="pf-v6-c-page__main-section pf-m-light" style="text-align:center;padding-block:var(--pf-t--global--spacer--xl)">
+  <div class="pf-v6-c-content">
+    <p id="footerText" style="color:var(--pf-t--global--text--color--subtle)">All times are UTC · Powered by Samaya</p>
+  </div>
 </footer>
 
 <script>
@@ -261,7 +135,6 @@ function escapeHtml(value) {
   }[c]));
 }
 
-
 function formatTime(iso) {
   return iso.slice(11, 16) + ' UTC';
 }
@@ -269,31 +142,43 @@ function formatTime(iso) {
 function formatDuration(hours) {
   if (hours === 24) return '24h (all day)';
   if (hours < 1)   return `${Math.round(hours * 60)}min`;
-  if (hours === Math.floor(hours)) return `${hours}h`;
   return `${hours}h`;
 }
 
+// PatternFly Label component (pf-v6-c-label) with its own fixed color
+// modifiers (pf-m-green/pf-m-blue/etc.) — these three badge kinds all map
+// to a fixed, small set of meanings, so they use real PatternFly labels
+// rather than one-off custom styling.
 function statusBadge(status) {
+  const label = (cls, text) =>
+    `<span class="pf-v6-c-label ${cls} pf-m-filled"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${text}</span></span></span>`;
   switch (status) {
-    case 'posted':    return '<span class="badge badge-posted">Announced</span>';
-    case 'active':    return '<span class="badge badge-active">Live Now</span>';
-    case 'completed': return '<span class="badge badge-completed">Completed</span>';
-    case 'cancelled': return '<span class="badge badge-cancelled">Cancelled</span>';
+    case 'posted':    return label('pf-m-green',  'Announced');
+    case 'active':    return label('pf-m-blue',   'Live Now');
+    case 'completed': return label('pf-m-grey',   'Completed');
+    case 'cancelled': return label('pf-m-red',    'Cancelled');
     case 'pending':
-    default:          return '<span class="badge badge-pending">Upcoming</span>';
+    default:          return label('pf-m-grey',   'Upcoming');
   }
 }
 
 function scopeBadge(scope) {
   if (scope !== 'kingdom-wide') return '';
-  return `<span class="alliance-badge" style="background:var(--accent);color:var(--bg)" title="Every alliance in this Kingdom plays this together">🌐 Kingdom-wide</span>`;
+  return `<span class="pf-v6-c-label pf-m-purple pf-m-filled" title="Every alliance in this Kingdom plays this together"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">🌐 Kingdom-wide</span></span></span>`;
 }
 
 function tenantBadge(ev) {
   // Only shown in combined mode — on a single alliance's own page every
   // event is obviously that alliance's, so the badge would be noise.
+  // Each alliance's own color is arbitrary (admin-configured per tenant),
+  // not one of PatternFly's fixed label colors — pf-m-custom is
+  // PatternFly's own designed-for-this mechanism: it remaps the label's
+  // base --pf-v6-c-label--BackgroundColor/Color variables from
+  // --pf-v6-c-label--m-custom--BackgroundColor/Color, which is exactly
+  // what an inline style below can override with an arbitrary hex.
   if (!COMBINED_MODE || !ev.tenant_name) return '';
-  return `<span class="alliance-badge" style="background:${escapeHtml(ev.tenant_color || 'var(--accent)')};color:var(--bg)">${escapeHtml(ev.tenant_name)}</span>`;
+  const color = escapeHtml(ev.tenant_color || '#6a6e73');
+  return `<span class="pf-v6-c-label pf-m-filled pf-m-custom" style="--pf-v6-c-label--m-custom--BackgroundColor:${color};--pf-v6-c-label--m-custom--Color:#fff"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${escapeHtml(ev.tenant_name)}</span></span></span>`;
 }
 
 function weekLabel(dateStr) {
@@ -305,7 +190,6 @@ function weekLabel(dateStr) {
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Tomorrow';
 
-  // Get start of week (Monday)
   const startOfWeek = new Date(today);
   const dayOfWeek   = (today.getUTCDay() + 6) % 7; // 0=Mon
   startOfWeek.setUTCDate(today.getUTCDate() - dayOfWeek);
@@ -318,6 +202,18 @@ function weekLabel(dateStr) {
   return `${monthName} ${d.getUTCDate()} week`;
 }
 
+function emptyState(title, body) {
+  return `
+    <div class="pf-v6-c-empty-state">
+      <div class="pf-v6-c-empty-state__content">
+        <div class="pf-v6-c-empty-state__header">
+          <h2 class="pf-v6-c-title pf-m-lg">${title}</h2>
+        </div>
+        <div class="pf-v6-c-empty-state__body">${body}</div>
+      </div>
+    </div>`;
+}
+
 async function loadEvents() {
   const content = document.getElementById('content');
   try {
@@ -325,17 +221,15 @@ async function loadEvents() {
     const events = await res.json();
 
     if (!events.length) {
-      content.innerHTML = `
-        <div class="empty">
-          <p>No events scheduled in the next 28 days.</p>
-          <p style="font-size:var(--fs-sm)">Check back soon or subscribe to the ICS feed to get notified automatically.</p>
-        </div>`;
+      content.innerHTML = emptyState(
+        'No events scheduled',
+        'Nothing in the next 28 days. Check back soon, or subscribe to the ICS feed to get notified automatically.'
+      );
       return;
     }
 
     const today = new Date().toISOString().slice(0, 10);
 
-    // Group by week label
     const groups = new Map();
     events.forEach(ev => {
       const label = weekLabel(ev.occurrence_date);
@@ -345,33 +239,36 @@ async function loadEvents() {
 
     let html = '';
     groups.forEach((evs, label) => {
-      html += `<div class="week-header">${label}</div>`;
+      html += `<h2 class="pf-v6-c-title pf-m-md samaya-week-header" style="color:var(--pf-t--global--text--color--subtle)">${label}</h2>`;
       evs.forEach(ev => {
-        const d           = new Date(ev.occurrence_date + 'T12:00:00Z');
-        const isToday     = ev.occurrence_date === today;
-        const dayNum      = d.getUTCDate();
-        const dowLabel    = DOW_FULL[d.getUTCDay()].slice(0, 3);
+        const d        = new Date(ev.occurrence_date + 'T12:00:00Z');
+        const isToday  = ev.occurrence_date === today;
+        const dayNum   = d.getUTCDate();
+        const dowLabel = DOW_FULL[d.getUTCDay()].slice(0, 3);
 
         html += `
-          <div class="event-card${isToday ? ' today' : ''}">
-            <div class="date-col${isToday ? ' today' : ''}">
-              <div class="date-day">${dayNum}</div>
-              <div class="date-dow">${dowLabel}</div>
-            </div>
-            <div class="alliance-bar" style="background:var(--accent)"></div>
-            <div class="event-body">
-              <div class="event-name-row">
-                <span class="event-name">${escapeHtml(ev.event_name)}</span>
-                ${tenantBadge(ev)}
-                ${scopeBadge(ev.scope)}
+          <div class="pf-v6-c-card pf-v6-u-mb-sm${isToday ? ' pf-m-selected' : ''}">
+            <div class="pf-v6-c-card__body">
+              <div class="samaya-event-row">
+                <div class="samaya-date-col${isToday ? ' samaya-today' : ''}">
+                  <div class="samaya-date-day">${dayNum}</div>
+                  <div class="samaya-date-dow">${dowLabel}</div>
+                </div>
+                <div style="flex:1;min-width:0">
+                  <div class="pf-v6-l-flex pf-m-align-items-center pf-m-space-items-sm pf-v6-u-mb-xs">
+                    <span><strong>${escapeHtml(ev.event_name)}</strong></span>
+                    ${tenantBadge(ev)}
+                    ${scopeBadge(ev.scope)}
+                  </div>
+                  <div class="samaya-event-meta pf-v6-u-mb-xs">
+                    <span class="pf-v6-u-font-size-sm">🕐 ${formatTime(ev.start_datetime_utc)}</span>
+                    <span class="pf-v6-u-font-size-sm">⏱ ${formatDuration(ev.duration_hours)}</span>
+                    ${ev.discord_channel ? `<span class="pf-v6-u-font-size-sm">💬 ${escapeHtml(ev.discord_channel)}</span>` : ''}
+                    ${statusBadge(ev.post_status)}
+                  </div>
+                  ${ev.description ? `<p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle)">${escapeHtml(ev.description)}</p>` : ''}
+                </div>
               </div>
-              <div class="event-meta">
-                <span>🕐 ${formatTime(ev.start_datetime_utc)}</span>
-                <span>⏱ ${formatDuration(ev.duration_hours)}</span>
-                ${ev.discord_channel ? `<span>💬 ${escapeHtml(ev.discord_channel)}</span>` : ''}
-                <span>${statusBadge(ev.post_status)}</span>
-              </div>
-              ${ev.description ? `<p style="margin-top:6px;font-size:var(--fs-sm);color:var(--muted);line-height:1.4">${escapeHtml(ev.description)}</p>` : ''}
             </div>
           </div>`;
       });
@@ -380,18 +277,12 @@ async function loadEvents() {
     content.innerHTML = html;
 
   } catch (e) {
-    content.innerHTML = `
-      <div class="empty">
-        <p>Could not load events.</p>
-        <p style="font-size:var(--fs-sm)">${escapeHtml(e.message)}</p>
-      </div>`;
+    content.innerHTML = emptyState('Could not load events', escapeHtml(e.message));
   }
 }
 
 loadEvents();
-// Auto-refresh every 10 minutes
 setInterval(loadEvents, 600000);
 </script>
 </body>
 </html>
-

@@ -62,6 +62,7 @@ async def lifespan(app: FastAPI):
     async with AsyncSessionLocal() as session:
         from sqlalchemy import select
         from models.db import SchedulerState, Tenant
+        from services.time_utils import ensure_utc
         tenants_result = await session.execute(select(Tenant))
         tenant_ids = [t.id for t in tenants_result.scalars().all()]
 
@@ -75,7 +76,7 @@ async def lifespan(app: FastAPI):
             )
             state = row.scalar_one_or_none()
             if state is None or state.last_run_utc is None or \
-               (datetime.now(timezone.utc) - state.last_run_utc).total_seconds() > 90000:
+               (datetime.now(timezone.utc) - ensure_utc(state.last_run_utc)).total_seconds() > 90000:
                 overdue = True
                 break
 
