@@ -24,6 +24,13 @@
     .pf-v6-c-masthead__content { flex: 1 1 100% !important; }
   }
   .pf-v6-c-tabs__item[style*="display: none"] { display: none !important; }
+  /* PatternFly's backdrop has no built-in show/hide state — it assumes
+     a JS framework conditionally mounts/unmounts it. This app instead
+     toggles a plain .open class (events.js openEventModal/closeModal),
+     so match that mechanism explicitly rather than switch the existing
+     JS to inline styles. */
+  #eventModal { display: none; }
+  #eventModal.open { display: block; }
   /* Page's own internal layout is CSS grid with template areas for
      header/sidebar/main — since this app has no sidebar, a bare
      .pf-v6-c-tabs div as a direct child got auto-placed into whatever
@@ -119,31 +126,27 @@
 
 <!-- EVENTS -->
 <div id="v-events" class="view">
-  <div class="flex mb-16">
-    <h2 style="margin:0">Event Definitions</h2>
-    <button class="btn btn-accent" onclick="openEventModal()" title="Create a new recurring event definition.">+ Add Event</button>
-    <button class="btn btn-ghost" onclick="openEventModal(null, true)" title="Create a new leadership-only event (channel notification only, not posted to Discord Scheduled Events or the public calendar).">+ Add Leadership Event</button>
+  <div class="pf-v6-l-flex pf-m-align-items-center pf-v6-u-mb-sm" style="gap:12px">
+    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Event Definitions</h2>
+    <button class="pf-v6-c-button pf-m-primary" onclick="openEventModal()" title="Create a new recurring event definition.">+ Add Event</button>
+    <button class="pf-v6-c-button pf-m-secondary" onclick="openEventModal(null, true)" title="Create a new leadership-only event (channel notification only, not posted to Discord Scheduled Events or the public calendar).">+ Add Leadership Event</button>
   </div>
-  <h2 style="font-size:var(--fs-sm);margin-bottom:8px">🛡️ Alliance Events</h2>
-  <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px">
-    <table id="eventsTable">
-      <thead><tr>
-        <th>Name</th><th>Alliance</th><th>Interval</th><th>Start (UTC)</th>
-        <th>Duration</th><th>Anchor</th><th>Status</th><th>Actions</th>
-      </tr></thead>
-      <tbody id="eventsBody"><tr><td colspan="8" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
-    </table>
-  </div>
-  <h2 style="font-size:var(--fs-sm);margin-bottom:8px;background:var(--bg3);padding:8px 10px;border-radius:4px">👑 Leadership Notifications</h2>
-  <div class="card" style="padding:0;overflow:hidden">
-    <table id="eventsTableLeadership">
-      <thead><tr>
-        <th>Name</th><th>Alliance</th><th>Interval</th><th>Start (UTC)</th>
-        <th>Duration</th><th>Anchor</th><th>Status</th><th>Actions</th>
-      </tr></thead>
-      <tbody id="eventsBodyLeadership"><tr><td colspan="8" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
-    </table>
-  </div>
+  <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">🛡️ Alliance Events</h2>
+  <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg" id="eventsTable">
+    <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
+      <th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Alliance</th><th class="pf-v6-c-table__th">Interval</th><th class="pf-v6-c-table__th">Start (UTC)</th>
+      <th class="pf-v6-c-table__th">Duration</th><th class="pf-v6-c-table__th">Anchor</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Actions</th>
+    </tr></thead>
+    <tbody id="eventsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="8" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+  </table>
+  <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs" style="background:var(--bg3);padding:8px 10px;border-radius:4px">👑 Leadership Notifications</h2>
+  <table class="pf-v6-c-table pf-m-grid-md" id="eventsTableLeadership">
+    <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
+      <th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Alliance</th><th class="pf-v6-c-table__th">Interval</th><th class="pf-v6-c-table__th">Start (UTC)</th>
+      <th class="pf-v6-c-table__th">Duration</th><th class="pf-v6-c-table__th">Anchor</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Actions</th>
+    </tr></thead>
+    <tbody id="eventsBodyLeadership"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="8" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+  </table>
 </div>
 
 <!-- SCHEDULE -->
@@ -302,96 +305,130 @@
 </div>
 
 <!-- EVENT MODAL -->
-<div class="modal-backdrop" id="eventModal">
-  <div class="modal">
-    <h3 id="modalTitle">Add Event</h3>
-    <input type="hidden" id="modalEventId">
-    <div class="form-grid">
-      <div class="full">
-        <label>Event Name</label>
-        <input type="text" id="mName" placeholder="Tri-Alliance Clash">
-      </div>
-      <div>
-        <label>Scope</label>
-        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;text-transform:none;letter-spacing:0">
-          <input type="checkbox" id="mKingdomWide" style="width:auto">
-          Kingdom-wide (every alliance's own server)
-        </label>
-      </div>
-      <div>
-        <label>Interval (days)</label>
-        <input type="number" id="mInterval" min="1" placeholder="7">
-      </div>
-      <div>
-        <label>Start Time (UTC) HH:MM</label>
-        <input type="text" id="mStartTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric">
-        <div style="font-size:var(--fs-xs);color:var(--muted);margin-top:4px;text-transform:none;letter-spacing:0">Your detected timezone: <span id="mDetectedTz">—</span></div>
-      </div>
-      <div>
-        <label>Display Timezone (admin UI)</label>
-        <select id="mTimezone" onchange="applyDisplayTzChange()">
-          <option value="UTC">UTC</option>
-          <option value="America/Toronto">America/Toronto</option>
-          <option value="America/New_York">America/New_York</option>
-          <option value="America/Chicago">America/Chicago</option>
-          <option value="America/Denver">America/Denver</option>
-          <option value="America/Los_Angeles">America/Los_Angeles</option>
-          <option value="Europe/London">Europe/London</option>
-          <option value="Europe/Paris">Europe/Paris</option>
-          <option value="Asia/Singapore">Asia/Singapore</option>
-          <option value="Asia/Tokyo">Asia/Tokyo</option>
-          <option value="Australia/Sydney">Australia/Sydney</option>
-        </select>
-        <div style="font-size:var(--fs-xs);color:var(--muted);margin-top:4px;text-transform:none;letter-spacing:0">Controls how times display across the admin UI. Times are always entered and stored above in UTC.</div>
-      </div>
-      <div>
-        <label>Duration (hours)</label>
-        <input type="number" id="mDuration" min="0.5" step="0.5" placeholder="2">
-      </div>
-      <div>
-        <label>Anchor Date (first occurrence)</label>
-        <input type="date" id="mAnchor">
-      </div>
-      <div>
-        <label>Discord Channel</label>
-        <select id="mChannel" style="display:none"></select>
-        <input type="text" id="mChannelFallback" placeholder="#alliance-war" style="display:none">
-      </div>
-      <div class="full">
-        <label>Description</label>
-        <textarea id="mDescription" rows="3" placeholder="Event description sent to Discord"></textarea>
-      </div>
-      <div>
-        <label>Notification Channel</label>
-        <select id="mNotifChannel" style="display:none"></select>
-        <input type="text" id="mNotifChannelFallback" placeholder="Discord channel ID (digits only)" style="display:none">
-      </div>
-      <div>
-        <label>Notification Role</label>
-        <select id="mNotifRole" style="display:none"></select>
-        <input type="text" id="mNotifRoleFallback" placeholder="Discord role ID (digits only)" style="display:none">
-      </div>
-      <div>
-        <label>Notify X Minutes Before (leave blank to disable)</label>
-        <input type="number" id="mNotifMinutes" min="1" placeholder="e.g. 60">
-      </div>
-      <div class="full">
-        <label style="text-transform:none;letter-spacing:0;font-size:var(--fs-sm);display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:16px">
-          <input type="checkbox" id="mLeadershipOnly" style="width:auto" onchange="toggleLeadershipNote()">
-          Leadership Only (👑 — channel notification only, not posted to Discord Scheduled Events or public calendar)
-        </label>
-        <div id="leadershipNote" style="display:none;font-size:var(--fs-xs);color:var(--muted);margin-top:6px;padding:8px;background:var(--bg2);border-radius:4px">
-          This event still recurs normally and appears in the admin views, but it only sends a channel message to the notification channel — no Discord Scheduled Event is created and it will not appear on the public calendar.
+<div class="pf-v6-c-backdrop" id="eventModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="modalTitle" style="max-height:90vh;overflow-y:auto">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="modalTitle"><span class="pf-v6-c-modal-box__title-text">Add Event</span></h2>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <input type="hidden" id="modalEventId">
+        <form class="pf-v6-c-form">
+          <div class="form-grid">
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mName"><span class="pf-v6-c-form__label-text">Event Name</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="text" id="mName" placeholder="Tri-Alliance Clash">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Scope</span></span></div>
+              <div class="pf-v6-c-form__group-control">
+                <span class="pf-v6-c-check">
+                  <input class="pf-v6-c-check__input" type="checkbox" id="mKingdomWide">
+                  <label class="pf-v6-c-check__label" for="mKingdomWide">Kingdom-wide (every alliance's own server)</label>
+                </span>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mInterval"><span class="pf-v6-c-form__label-text">Interval (days)</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="number" id="mInterval" min="1" placeholder="7">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mStartTime"><span class="pf-v6-c-form__label-text">Start Time (UTC) HH:MM</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="text" id="mStartTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric">
+                <div class="pf-v6-c-form__helper-text">Your detected timezone: <span id="mDetectedTz">—</span></div>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mTimezone"><span class="pf-v6-c-form__label-text">Display Timezone (admin UI)</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <select class="pf-v6-c-form-control" id="mTimezone" onchange="applyDisplayTzChange()">
+                  <option value="UTC">UTC</option>
+                  <option value="America/Toronto">America/Toronto</option>
+                  <option value="America/New_York">America/New_York</option>
+                  <option value="America/Chicago">America/Chicago</option>
+                  <option value="America/Denver">America/Denver</option>
+                  <option value="America/Los_Angeles">America/Los_Angeles</option>
+                  <option value="Europe/London">Europe/London</option>
+                  <option value="Europe/Paris">Europe/Paris</option>
+                  <option value="Asia/Singapore">Asia/Singapore</option>
+                  <option value="Asia/Tokyo">Asia/Tokyo</option>
+                  <option value="Australia/Sydney">Australia/Sydney</option>
+                </select>
+                <div class="pf-v6-c-form__helper-text">Controls how times display across the admin UI. Times are always entered and stored above in UTC.</div>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mDuration"><span class="pf-v6-c-form__label-text">Duration (hours)</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="number" id="mDuration" min="0.5" step="0.5" placeholder="2">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mAnchor"><span class="pf-v6-c-form__label-text">Anchor Date (first occurrence)</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="date" id="mAnchor">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mChannel"><span class="pf-v6-c-form__label-text">Discord Channel</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <select class="pf-v6-c-form-control" id="mChannel" style="display:none"></select>
+                <input class="pf-v6-c-form-control" type="text" id="mChannelFallback" placeholder="#alliance-war" style="display:none">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mDescription"><span class="pf-v6-c-form__label-text">Description</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <textarea class="pf-v6-c-form-control" id="mDescription" rows="3" placeholder="Event description sent to Discord"></textarea>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mNotifChannel"><span class="pf-v6-c-form__label-text">Notification Channel</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <select class="pf-v6-c-form-control" id="mNotifChannel" style="display:none"></select>
+                <input class="pf-v6-c-form-control" type="text" id="mNotifChannelFallback" placeholder="Discord channel ID (digits only)" style="display:none">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mNotifRole"><span class="pf-v6-c-form__label-text">Notification Role</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <select class="pf-v6-c-form-control" id="mNotifRole" style="display:none"></select>
+                <input class="pf-v6-c-form-control" type="text" id="mNotifRoleFallback" placeholder="Discord role ID (digits only)" style="display:none">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mNotifMinutes"><span class="pf-v6-c-form__label-text">Notify X Minutes Before (leave blank to disable)</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="number" id="mNotifMinutes" min="1" placeholder="e.g. 60">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-control">
+                <span class="pf-v6-c-check">
+                  <input class="pf-v6-c-check__input" type="checkbox" id="mLeadershipOnly" onchange="toggleLeadershipNote()">
+                  <label class="pf-v6-c-check__label" for="mLeadershipOnly">Leadership Only (👑 — channel notification only, not posted to Discord Scheduled Events or public calendar)</label>
+                </span>
+                <div id="leadershipNote" style="display:none;font-size:var(--fs-xs);color:var(--muted);margin-top:6px;padding:8px;background:var(--bg2);border-radius:4px">
+                  This event still recurs normally and appears in the admin views, but it only sends a channel message to the notification channel — no Discord Scheduled Event is created and it will not appear on the public calendar.
+                </div>
+              </div>
+            </div>
+          </div>
+        </form>
+        <div style="margin-top:12px">
+          <button class="pf-v6-c-button pf-m-link pf-m-inline" onclick="previewOccurrences()">Preview next 10 occurrences</button>
+          <div id="previewResult" style="margin-top:8px;font-size:var(--fs-sm);color:var(--muted)"></div>
         </div>
       </div>
-    </div>
-    <div style="margin-top:12px">
-      <button class="btn btn-ghost btn-sm" onclick="previewOccurrences()">Preview next 10 occurrences</button>
-      <div id="previewResult" style="margin-top:8px;font-size:var(--fs-sm);color:var(--muted)"></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-accent" onclick="saveEvent()">Save</button>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button class="pf-v6-c-button pf-m-primary" onclick="saveEvent()">Save</button>
+        <button class="pf-v6-c-button pf-m-link" onclick="closeModal()">Cancel</button>
+      </footer>
     </div>
   </div>
 </div>

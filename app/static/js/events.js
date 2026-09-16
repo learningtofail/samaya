@@ -8,8 +8,8 @@ async function loadEvents() {
     const tbody = document.getElementById('eventsBody');
     const tbodyLead = document.getElementById('eventsBodyLeadership');
     if (!events.length) {
-      tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);padding:20px">No events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
-      tbodyLead.innerHTML = '<tr><td colspan="8" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
+      tbody.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="8" style="color:var(--muted);padding:20px">No events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
+      tbodyLead.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="8" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
       return;
     }
     function intervalLabel(i) {
@@ -23,9 +23,8 @@ async function loadEvents() {
     function buildRow(e) {
       var allyColor = TENANT_COLORS[e.owning_tenant_id] || '#475569';
       var scopeLabel = e.scope === 'kingdom-wide' ? '🌐 Kingdom-wide' : 'Alliance';
-      var badgeCls  = e.active ? 'badge-ok' : 'badge-pending';
-      var badgeTxt  = e.active ? 'Active' : 'Inactive';
-      var btnCls    = e.active ? 'btn-danger' : 'btn-ghost';
+      var statusLabel = pfLabel(e.active ? 'Active' : 'Inactive', e.active ? 'pf-m-green' : 'pf-m-grey');
+      var btnCls    = e.active ? 'pf-m-danger' : 'pf-m-secondary';
       var btnTxt    = e.active ? 'Deactivate' : 'Activate';
       var btnTitle  = e.active
         ? 'Remove this event from schedule generation and Discord posting. The event remains in the database.'
@@ -36,23 +35,23 @@ async function loadEvents() {
       var deleteBtn = '';
       if (!e.active) {
         var safeName = escapeHtml(e.name);
-        deleteBtn = '<button class="btn btn-danger btn-sm" '
+        deleteBtn = '<button class="pf-v6-c-button pf-m-danger pf-m-small" '
           + 'title="Permanently delete this event. PostLog entries are preserved." '
           + 'data-id="' + e.id + '" data-name="' + safeName + '" '
           + 'onclick="permanentDelete(this)">Delete</button>';
       }
-      return '<tr style="border-left:3px solid ' + allyColor + '">'
-        + '<td><span class="cat-dot" style="background:' + allyColor + '"></span>' + escapeHtml(e.name) + '</td>'
-        + '<td>' + scopeLabel + '</td>'
-        + '<td>' + intervalLabel(e.interval_days) + '</td>'
-        + '<td>' + e.start_time_utc + ' UTC</td>'
-        + '<td>' + e.duration_hours + 'h</td>'
-        + '<td>' + e.anchor_date + '</td>'
-        + '<td><span class="badge ' + badgeCls + '">' + badgeTxt + '</span></td>'
-        + '<td>'
-        + '<button class="btn btn-ghost btn-sm" title="Edit this event definition." onclick="openEventModal(' + editData + ')">Edit</button> '
-        + '<button class="btn btn-ghost btn-sm" title="Create a new event pre-filled with these settings." onclick="duplicateEvent(' + editData + ')">Duplicate</button> '
-        + '<button class="btn ' + btnCls + ' btn-sm" title="' + btnTitle + '" onclick="toggleActive(' + e.id + ',' + e.active + ')">' + btnTxt + '</button> '
+      return '<tr class="pf-v6-c-table__tr" style="border-left:3px solid ' + allyColor + '">'
+        + '<td class="pf-v6-c-table__td"><span class="cat-dot" style="background:' + allyColor + '"></span>' + escapeHtml(e.name) + '</td>'
+        + '<td class="pf-v6-c-table__td">' + scopeLabel + '</td>'
+        + '<td class="pf-v6-c-table__td">' + intervalLabel(e.interval_days) + '</td>'
+        + '<td class="pf-v6-c-table__td">' + e.start_time_utc + ' UTC</td>'
+        + '<td class="pf-v6-c-table__td">' + e.duration_hours + 'h</td>'
+        + '<td class="pf-v6-c-table__td">' + e.anchor_date + '</td>'
+        + '<td class="pf-v6-c-table__td">' + statusLabel + '</td>'
+        + '<td class="pf-v6-c-table__td">'
+        + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" title="Edit this event definition." onclick="openEventModal(' + editData + ')">Edit</button> '
+        + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" title="Create a new event pre-filled with these settings." onclick="duplicateEvent(' + editData + ')">Duplicate</button> '
+        + '<button class="pf-v6-c-button ' + btnCls + ' pf-m-small" title="' + btnTitle + '" onclick="toggleActive(' + e.id + ',' + e.active + ')">' + btnTxt + '</button> '
         + deleteBtn
         + '</td>'
         + '</tr>';
@@ -61,10 +60,10 @@ async function loadEvents() {
     const leadership = events.filter(e => e.leadership_only);
     tbody.innerHTML = community.length
       ? community.map(buildRow).join('')
-      : '<tr><td colspan="8" style="color:var(--muted);padding:20px">No events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
+      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="8" style="color:var(--muted);padding:20px">No events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
     tbodyLead.innerHTML = leadership.length
       ? leadership.map(buildRow).join('')
-      : '<tr><td colspan="8" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
+      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="8" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
   } catch(e) { toast(e.message, true); }
 }
 
