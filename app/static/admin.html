@@ -74,21 +74,46 @@
 
 <!-- DASHBOARD -->
 <div id="v-dashboard" class="view active">
-  <h2>Dashboard</h2>
-  <div class="status-grid" id="statusGrid">
-    <div class="stat"><div class="stat-label">Service</div><div class="stat-value" id="st-service">—</div></div>
-    <div class="stat"><div class="stat-label">Discord</div><div class="stat-value" id="st-discord">—</div></div>
-    <div class="stat"><div class="stat-label">Last Regeneration</div><div class="stat-value" style="font-size:var(--fs-sm)" id="st-regen">—</div></div>
-    <div class="stat"><div class="stat-label">Regen Result</div><div class="stat-value" id="st-result">—</div></div>
+  <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-md">Dashboard</h2>
+
+  <div class="pf-v6-l-gallery pf-m-gutter pf-v6-u-mb-md" style="--pf-v6-l-gallery--GridTemplateColumns--min: 200px">
+    <div class="pf-v6-c-card">
+      <div class="pf-v6-c-card__body">
+        <p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle);text-transform:uppercase;letter-spacing:.04em">Service</p>
+        <div id="st-service">—</div>
+      </div>
+    </div>
+    <div class="pf-v6-c-card">
+      <div class="pf-v6-c-card__body">
+        <p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle);text-transform:uppercase;letter-spacing:.04em">Discord</p>
+        <div id="st-discord">—</div>
+      </div>
+    </div>
+    <div class="pf-v6-c-card">
+      <div class="pf-v6-c-card__body">
+        <p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle);text-transform:uppercase;letter-spacing:.04em">Last Regeneration</p>
+        <div id="st-regen" class="pf-v6-u-font-size-sm">—</div>
+      </div>
+    </div>
+    <div class="pf-v6-c-card">
+      <div class="pf-v6-c-card__body">
+        <p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle);text-transform:uppercase;letter-spacing:.04em">Regen Result</p>
+        <div id="st-result">—</div>
+      </div>
+    </div>
   </div>
-  <div id="syncSummaryCard" style="display:none;background:#fecaca;border:1px solid #f87171;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:var(--fs-sm);cursor:pointer" onclick="showView('sync',document.getElementById('syncTabBtn'))">
-    ⚠ <strong id="syncIssueCount">0</strong> sync issue(s) detected — click to review in Sync tab
+
+  <div id="syncSummaryCard" class="pf-v6-c-alert pf-m-warning pf-m-inline pf-v6-u-mb-md" style="display:none;cursor:pointer" onclick="showView('sync', document.querySelector('#syncTabItem .pf-v6-c-tabs__link'))">
+    <div class="pf-v6-c-alert__icon">⚠</div>
+    <p class="pf-v6-c-alert__title"><strong id="syncIssueCount">0</strong> sync issue(s) detected — click to review in Sync tab</p>
   </div>
-  <div class="flex mb-16">
-    <button class="btn btn-accent" onclick="triggerRegen()" title="Immediately regenerate the 28-day occurrence window. Use after adding or editing events — normally runs automatically at UTC 00:00.">↻ Regenerate Now</button>
-    <button class="btn btn-ghost" onclick="loadDashboard()" title="Reload dashboard status from the API.">Refresh</button>
+
+  <div class="pf-v6-u-mb-md">
+    <button class="pf-v6-c-button pf-m-primary" onclick="triggerRegen()" title="Immediately regenerate the 28-day occurrence window. Use after adding or editing events — normally runs automatically at UTC 00:00.">↻ Regenerate Now</button>
+    <button class="pf-v6-c-button pf-m-secondary" onclick="loadDashboard()" title="Reload dashboard status from the API.">Refresh</button>
   </div>
-  <h2>Today's Events</h2>
+
+  <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-sm">Today's Events</h2>
   <div id="todayEvents"><p style="color:var(--muted)">Loading…</p></div>
 </div>
 

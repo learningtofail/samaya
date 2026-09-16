@@ -37,11 +37,13 @@ router = APIRouter()
 async def list_occurrences(
     tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
 ):
+    from sqlalchemy.orm import selectinload
     from models.db import EventDefinition
     result = await db.execute(
         select(Occurrence)
         .join(Occurrence.event)
         .join(Tenant, EventDefinition.owning_tenant_id == Tenant.id)
+        .options(selectinload(Occurrence.event))
         .where(
             or_(
                 Occurrence.tenant_id == tenant.id,
