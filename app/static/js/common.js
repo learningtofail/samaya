@@ -63,17 +63,17 @@ function onTenantChange(slug) {
   applyRoleVisibility();
   // Reload whichever view is currently open under the new tenant.
   const activeView = document.querySelector('.view.active');
-  if (activeView) showView(activeView.id.replace('v-', ''), document.querySelector('nav button.active'));
+  if (activeView) showView(activeView.id.replace('v-', ''), document.querySelector('.pf-v6-c-tabs__item.pf-m-current .pf-v6-c-tabs__link'));
 }
 
 // Shows/hides the Access tab (current-tenant owner only) and Platform tab
 // (superadmin only) — called once after login and again on every tenant
 // switch, since "am I this tenant's owner" depends on which one is selected.
 function applyRoleVisibility() {
-  const accessBtn = document.getElementById('accessTabBtn');
-  const platformBtn = document.getElementById('platformTabBtn');
-  if (accessBtn)   accessBtn.style.display = isCurrentTenantOwner() ? '' : 'none';
-  if (platformBtn) platformBtn.style.display = (ME && ME.is_superadmin) ? '' : 'none';
+  const accessItem = document.getElementById('accessTabItem');
+  const platformItem = document.getElementById('platformTabItem');
+  if (accessItem)   accessItem.style.display = isCurrentTenantOwner() ? '' : 'none';
+  if (platformItem) platformItem.style.display = (ME && ME.is_superadmin) ? '' : 'none';
 }
 
 // ── HTML escaping ────────────────────────────────────────────
@@ -93,9 +93,9 @@ let occurrenceData = [];
 
 function showView(id, btn) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.pf-v6-c-tabs__item').forEach(li => li.classList.remove('pf-m-current'));
   document.getElementById('v-' + id).classList.add('active');
-  btn.classList.add('active');
+  btn.closest('.pf-v6-c-tabs__item').classList.add('pf-m-current');
   if (id === 'dashboard') loadDashboard();
   if (id === 'events')    loadEvents();
   if (id === 'schedule')  loadSchedule();

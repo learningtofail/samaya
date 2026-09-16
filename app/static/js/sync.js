@@ -111,11 +111,12 @@ async function loadSync() {
 
 function updateSyncBadge(issueCount) {
   var badge = document.getElementById('syncBadge');
+  var badgeText = document.getElementById('syncBadgeText');
   var card  = document.getElementById('syncSummaryCard');
   var countEl = document.getElementById('syncIssueCount');
   if (issueCount > 0) {
-    badge.textContent = issueCount;
-    badge.style.display = 'inline';
+    badgeText.textContent = issueCount;
+    badge.style.display = 'inline-flex';
     card.style.display = 'block';
     countEl.textContent = issueCount;
   } else {

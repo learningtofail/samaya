@@ -4,33 +4,73 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Samaya — Admin</title>
+<link rel="stylesheet" href="/static/vendor/patternfly/patternfly.min.css">
+<link rel="stylesheet" href="/static/vendor/patternfly/patternfly-addons.css">
 <link rel="stylesheet" href="/static/admin.css">
+<style>
+  /* Shell-only overrides — the individual views below still use admin.css's
+     own classes (.card, .btn, .view, etc.) for now; this is a transitional
+     state while the PatternFly conversion moves through the admin UI one
+     view at a time. Only the page/masthead/tabs shell is PatternFly so far. */
+  body { margin: 0; }
+  .pf-v6-c-masthead { display: flex !important; align-items: center !important; flex-wrap: nowrap !important; gap: var(--pf-t--global--spacer--md); }
+  .pf-v6-c-masthead__main { flex: 1 1 auto !important; min-width: 0 !important; overflow: hidden !important; display: flex !important; align-items: center !important; gap: var(--pf-t--global--spacer--md); }
+  .pf-v6-c-masthead__content { flex: 0 0 auto !important; display: flex !important; align-items: center !important; gap: var(--pf-t--global--spacer--sm); }
+  #headerTitle { color: var(--pf-t--global--text--color--inverse); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--pf-t--global--font--size--heading--md); }
+  #headerStatus { color: var(--pf-t--global--text--color--inverse); opacity: .7; font-size: var(--pf-t--global--font--size--body--sm); white-space: nowrap; }
+  @media (max-width: 900px) { #headerStatus { display: none; } }
+  @media (max-width: 700px) {
+    .pf-v6-c-masthead { flex-wrap: wrap !important; row-gap: var(--pf-t--global--spacer--sm); }
+    .pf-v6-c-masthead__content { flex: 1 1 100% !important; }
+  }
+  .pf-v6-c-tabs__item[style*="display: none"] { display: none !important; }
+  /* Page's own internal layout is CSS grid with template areas for
+     header/sidebar/main — since this app has no sidebar, a bare
+     .pf-v6-c-tabs div as a direct child got auto-placed into whatever
+     grid slot the browser's implicit grid flow assumed (looked like a
+     sidebar column), instead of spanning full width as a horizontal tab
+     bar. Forcing an explicit stacked layout instead of chasing the exact
+     grid-template-areas value. */
+  .pf-v6-c-page { display: flex !important; flex-direction: column !important; min-height: 100vh; }
+  .pf-v6-c-tabs { width: 100%; }
+  .pf-v6-c-page__main-container { flex: 1 1 auto !important; display: flex !important; flex-direction: column !important; align-self: stretch !important; width: 100% !important; }
+  .pf-v6-c-page__main { flex: 1 1 auto !important; width: 100% !important; }
+</style>
 </head>
 <body>
 
-<header>
-  <div>
-    <h1 style="display:inline">⏱ Samaya</h1>
-    <span id="headerStatus">Kingshot Alliance Event Scheduler</span>
+<div class="pf-v6-c-page">
+
+  <header class="pf-v6-c-masthead">
+    <div class="pf-v6-c-masthead__main">
+      <h1 id="headerTitle">⏱ Samaya</h1>
+      <span id="headerStatus">Kingshot Alliance Event Scheduler</span>
+    </div>
+    <div class="pf-v6-c-masthead__content">
+      <select id="tenantPicker" class="pf-v6-c-form-control" onchange="onTenantChange(this.value)" title="Which alliance's data you're viewing and editing"></select>
+      <form method="post" action="/auth/logout" style="margin:0">
+        <button type="submit" class="pf-v6-c-button pf-m-secondary pf-m-small">Log out</button>
+      </form>
+    </div>
+  </header>
+
+  <div class="pf-v6-c-tabs" style="background:var(--pf-t--global--background--color--primary--default);border-block-end:1px solid var(--pf-t--global--border--color--default)">
+    <ul class="pf-v6-c-tabs__list">
+      <li class="pf-v6-c-tabs__item pf-m-current"><button class="pf-v6-c-tabs__link" onclick="showView('dashboard',this)"><span class="pf-v6-c-tabs__item-text">Dashboard</span></button></li>
+      <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('events',this)"><span class="pf-v6-c-tabs__item-text">Events</span></button></li>
+      <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('schedule',this)"><span class="pf-v6-c-tabs__item-text">Schedule</span></button></li>
+      <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('gantt',this)"><span class="pf-v6-c-tabs__item-text">Gantt</span></button></li>
+      <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('postlog',this)"><span class="pf-v6-c-tabs__item-text">Post Log</span></button></li>
+      <li class="pf-v6-c-tabs__item" id="syncTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('sync',this)"><span class="pf-v6-c-tabs__item-text">Sync <span id="syncBadge" class="pf-v6-c-label pf-m-red pf-m-filled pf-m-compact" style="display:none;margin-inline-start:4px"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text" id="syncBadgeText">0</span></span></span></span></button></li>
+      <li class="pf-v6-c-tabs__item" id="accessTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('access',this)" title="Manage who has coordinator/owner access to this alliance"><span class="pf-v6-c-tabs__item-text">Access</span></button></li>
+      <li class="pf-v6-c-tabs__item" id="platformTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('platform',this)" title="Superadmin: manage Kingdoms and Tenants"><span class="pf-v6-c-tabs__item-text">Platform</span></button></li>
+      <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('config',this)"><span class="pf-v6-c-tabs__item-text">Config</span></button></li>
+    </ul>
   </div>
-  <select id="tenantPicker" onchange="onTenantChange(this.value)" title="Which alliance's data you're viewing and editing"></select>
-  <form method="post" action="/auth/logout" style="margin:0"><button type="submit" class="btn btn-ghost btn-sm">Log out</button></form>
-</header>
 
-<nav>
-  <button class="active" onclick="showView('dashboard',this)">Dashboard</button>
-  <button onclick="showView('events',this)">Events</button>
-  <button onclick="showView('schedule',this)">Schedule</button>
-  <button onclick="showView('gantt',this)">Gantt</button>
-  <button onclick="showView('postlog',this)">Post Log</button>
-  <button id="syncTabBtn" onclick="showView('sync',this)">Sync <span id="syncBadge" style="display:none;background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:var(--fs-2xs);margin-left:4px">0</span></button>
-  <button id="accessTabBtn" onclick="showView('access',this)" style="display:none" title="Manage who has coordinator/owner access to this alliance">Access</button>
-  <div style="flex:1"></div>
-  <button id="platformTabBtn" onclick="showView('platform',this)" style="display:none" title="Superadmin: manage Kingdoms and Tenants">Platform</button>
-  <button onclick="showView('config',this)">Config</button>
-</nav>
-
-<main>
+  <div class="pf-v6-c-page__main-container">
+  <main class="pf-v6-c-page__main" tabindex="-1" id="main-content">
+    <section class="pf-v6-c-page__main-section">
 
 <!-- DASHBOARD -->
 <div id="v-dashboard" class="view active">
@@ -233,7 +273,10 @@
   </table>
 </div>
 
-</main>
+    </section>
+  </main>
+  </div>
+</div>
 
 <!-- EVENT MODAL -->
 <div class="modal-backdrop" id="eventModal">
