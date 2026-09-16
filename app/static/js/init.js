@@ -1,9 +1,9 @@
 // Runs once, after every other admin script has loaded: confirms who's
 // logged in, loads the tenant list (populating the picker and
-// TENANT_COLORS), then paints the dashboard and theme picker under
-// whichever tenant was already selected (or the first one, on a fresh
-// browser). loadMe()'s own api() call redirects to /auth/login on a 401,
-// so there's nothing else to handle for "not logged in" here.
+// TENANT_COLORS), then paints the dashboard under whichever tenant was
+// already selected (or the first one, on a fresh browser). loadMe()'s own
+// api() call redirects to /auth/login on a 401, so there's nothing else
+// to handle for "not logged in" here.
 loadMe().then(() => loadTenants()).then(() => {
   if (!TENANTS.length) {
     document.querySelector('main').innerHTML =
@@ -17,5 +17,4 @@ loadMe().then(() => loadTenants()).then(() => {
   }
   applyRoleVisibility();
   loadDashboard();
-  renderThemeSwatches();
 });

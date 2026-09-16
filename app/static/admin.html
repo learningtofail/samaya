@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Samaya — Admin</title>
 <link rel="stylesheet" href="/static/admin.css">
-<script src="/static/js/theme.js"></script>
 </head>
 <body>
 
@@ -158,21 +157,26 @@
 <!-- CONFIG -->
 <div id="v-config" class="view">
   <h2>Discord Configuration</h2>
-  <div class="card" id="configForm">
-    <label>Bot Token</label>
-    <input type="password" id="cfgToken" placeholder="Discord bot token" oninput="markConfigDirty()">
-    <label>Guild ID</label>
-    <input type="text" id="cfgGuild" placeholder="Numeric guild ID" oninput="markConfigDirty()">
-    <label>Public Key (for webhook validation)</label>
-    <input type="text" id="cfgPublicKey" placeholder="Ed25519 public key from Discord Developer Portal" oninput="markConfigDirty()">
-    <div style="margin-top:16px">
-      <button class="btn btn-accent" onclick="saveDiscordConfig()" title="Save Discord credentials and verify the bot token against Discord's API before saving. Will not save if the token is invalid.">Save & Verify</button>
+  <p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:16px">
+    This alliance's own bot token and guild are set up by a superadmin on the Platform tab, not here.
+    This view just lists the current tenant's own Discord channels and roles, for reference when filling
+    in an event's notification settings.
+  </p>
+  <div class="card">
+    <div class="flex mb-16">
+      <h3 style="margin:0;font-size:var(--fs-md)">Channels</h3>
+      <button class="btn btn-ghost btn-sm" onclick="loadDiscordConfig()">↻ Refresh</button>
     </div>
-    <p id="cfgResult" style="margin-top:10px;font-size:var(--fs-sm);color:var(--muted)"></p>
-    <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border)">
-      <label>Theme</label>
-      <div class="theme-grid" id="themeSwatchGrid"></div>
-    </div>
+    <table class="mb-16">
+      <thead><tr><th>Name</th><th>ID</th></tr></thead>
+      <tbody id="discordChannelsBody"><tr><td colspan="2" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    </table>
+
+    <h3 style="font-size:var(--fs-md)">Roles</h3>
+    <table>
+      <thead><tr><th>Name</th><th>ID</th></tr></thead>
+      <tbody id="discordRolesBody"><tr><td colspan="2" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    </table>
   </div>
 </div>
 

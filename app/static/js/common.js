@@ -90,17 +90,8 @@ function escapeHtml(value) {
 const GANTT_PALETTE = ['#bbf7d0','#bfdbfe','#fed7aa','#fde68a','#e9d5ff','#99f6e4','#fecaca','#d9f99d','#fbcfe8','#a5f3fc','#c7d2fe','#fef08a'];
 const DOW3 = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 let occurrenceData = [];
-let configDirty = false;
-
-function markConfigDirty() { configDirty = true; }
 
 function showView(id, btn) {
-  const activeView = document.querySelector('.view.active');
-  const current = activeView ? activeView.id.replace('v-', '') : null;
-  if (current === 'config' && id !== 'config' && configDirty) {
-    if (!confirm('You have unsaved Discord config changes. Leave anyway?')) return;
-    configDirty = false;
-  }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
   document.getElementById('v-' + id).classList.add('active');
@@ -111,7 +102,7 @@ function showView(id, btn) {
   if (id === 'gantt')     loadGantt();
   if (id === 'postlog')   loadPostLog();
   if (id === 'sync')      loadSync();
-  if (id === 'config')    renderThemeSwatches();
+  if (id === 'config')    loadDiscordConfig();
   if (id === 'access')    loadAccess();
   if (id === 'platform')  loadPlatform();
 }
