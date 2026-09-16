@@ -181,19 +181,19 @@
 
 <!-- GANTT -->
 <div id="v-gantt" class="view">
-  <div class="flex mb-16">
-    <h2 style="margin:0">Gantt View</h2>
-    <button class="btn btn-ghost" onclick="loadGantt()" title="Reload and redraw the Gantt chart from current occurrence data.">Refresh</button>
+  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
+    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Gantt View</h2>
+    <button class="pf-v6-c-button pf-m-secondary" onclick="loadGantt()" title="Reload and redraw the Gantt chart from current occurrence data.">Refresh</button>
   </div>
-  <h2 style="font-size:var(--fs-sm);margin-bottom:8px">🛡️ Alliance Events Gantt</h2>
-  <div class="card gantt-wrap" id="ganttWrap">
-    <p style="color:var(--muted)">Loading…</p>
+  <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">🛡️ Alliance Events Gantt</h2>
+  <div class="pf-v6-c-card gantt-wrap" id="ganttWrap">
+    <p style="color:var(--muted);padding:1rem">Loading…</p>
   </div>
   <div id="ganttLegend" style="margin-top:12px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:10px"></div>
   <div id="ganttLeadershipWrap" style="display:none">
     <div style="border-top:2px solid var(--border);margin-bottom:16px"></div>
-    <h2 style="font-size:var(--fs-sm);margin-bottom:8px">👑 Leadership Notifications Gantt</h2>
-    <div class="card gantt-wrap" id="ganttWrapLeadership" style="background:var(--bg2)"></div>
+    <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">👑 Leadership Notifications Gantt</h2>
+    <div class="pf-v6-c-card gantt-wrap" id="ganttWrapLeadership" style="background:var(--bg2)"></div>
     <div id="ganttLegendLeadership" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px"></div>
   </div>
 </div>
