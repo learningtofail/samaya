@@ -263,17 +263,17 @@
 
 <!-- ACCESS -->
 <div id="v-access" class="view">
-  <div class="flex mb-16">
-    <h2 style="margin:0">Access</h2>
-    <button class="btn btn-accent" onclick="createInvite()">+ Invite Coordinator</button>
+  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
+    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Access</h2>
+    <button class="pf-v6-c-button pf-m-primary" onclick="createInvite()">+ Invite Coordinator</button>
   </div>
-  <p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:16px">
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
     Anyone with a link below can claim it via Discord login. Share it in a DM or an officer channel — it's a
     single-use link, not a password.
   </p>
-  <table>
-    <thead><tr><th>Role</th><th>Status</th><th>Expires</th><th></th></tr></thead>
-    <tbody id="invitesBody"><tr><td colspan="4" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+  <table class="pf-v6-c-table pf-m-grid-md">
+    <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Role</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Expires</th><th class="pf-v6-c-table__th"></th></tr></thead>
+    <tbody class="pf-v6-c-table__tbody" id="invitesBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="4" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
   </table>
 </div>
 
