@@ -250,11 +250,11 @@
 
 <!-- SYNC -->
 <div id="v-sync" class="view">
-  <div class="flex mb-16">
-    <h2 style="margin:0">Discord Sync</h2>
-    <button class="btn btn-accent" onclick="loadSync()" title="Fetch all current Discord scheduled events and compare against PostLog.">↻ Run Sync Check</button>
+  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
+    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Discord Sync</h2>
+    <button class="pf-v6-c-button pf-m-primary" onclick="loadSync()" title="Fetch all current Discord scheduled events and compare against PostLog.">↻ Run Sync Check</button>
   </div>
-  <p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:16px">
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
     Compares PostLog against live Discord events. Run manually whenever you suspect a mismatch.
     Field-level changes made directly in Discord are only visible here — they are not detected automatically.
   </p>

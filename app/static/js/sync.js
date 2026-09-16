@@ -17,96 +17,105 @@ async function loadSync() {
     var html = '';
 
     // Summary bar
-    html += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">';
-    html += '<div class="stat" style="padding:10px 16px"><div class="stat-label">Matched</div><div style="font-size:var(--fs-lg);font-weight:600;color:#166534">' + s.matched + '</div></div>';
-    html += '<div class="stat" style="padding:10px 16px"><div class="stat-label">Mismatched</div><div style="font-size:var(--fs-lg);font-weight:600;color:#b45309">' + s.mismatched + '</div></div>';
-    html += '<div class="stat" style="padding:10px 16px"><div class="stat-label">Discord Only</div><div style="font-size:var(--fs-lg);font-weight:600;color:#1d4ed8">' + s.discord_only + '</div></div>';
-    html += '<div class="stat" style="padding:10px 16px"><div class="stat-label">PostLog Only</div><div style="font-size:var(--fs-lg);font-weight:600;color:#991b1b">' + s.postlog_only + '</div></div>';
+    html += '<div class="pf-v6-l-gallery pf-m-gutter pf-v6-u-mb-lg" style="--pf-v6-l-gallery--GridTemplateColumns--min: 140px">';
+    html += statCard('Matched', s.matched, '#166534');
+    html += statCard('Mismatched', s.mismatched, '#b45309');
+    html += statCard('Discord Only', s.discord_only, '#1d4ed8');
+    html += statCard('PostLog Only', s.postlog_only, '#991b1b');
     html += '</div>';
 
     // Mismatched section
     if (data.mismatched.length) {
-      html += '<h2 style="margin-bottom:8px">⚠ Mismatched (' + data.mismatched.length + ')</h2>';
-      html += '<p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:10px">In both PostLog and Discord, but fields differ from the current event definition.</p>';
-      html += '<div class="card" style="padding:0;overflow:hidden;margin-bottom:20px"><table>';
-      html += '<thead><tr><th>Event</th><th>Date</th><th>Field</th><th>Samaya Value</th><th>Discord Value</th><th>Action</th></tr></thead><tbody>';
+      html += '<h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">⚠ Mismatched (' + data.mismatched.length + ')</h2>';
+      html += '<p class="pf-v6-u-font-size-sm pf-v6-u-mb-sm" style="color:var(--pf-t--global--text--color--subtle)">In both PostLog and Discord, but fields differ from the current event definition.</p>';
+      html += '<table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg">';
+      html += '<thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Event</th><th class="pf-v6-c-table__th">Date</th><th class="pf-v6-c-table__th">Field</th><th class="pf-v6-c-table__th">Samaya Value</th><th class="pf-v6-c-table__th">Discord Value</th><th class="pf-v6-c-table__th">Action</th></tr></thead><tbody class="pf-v6-c-table__tbody">';
       data.mismatched.forEach(function(m) {
         m.diffs.forEach(function(d, i) {
-          html += '<tr>';
+          html += '<tr class="pf-v6-c-table__tr">';
           if (i === 0) {
-            html += '<td rowspan="' + m.diffs.length + '">' + escapeHtml(m.event_name) + '</td>';
-            html += '<td rowspan="' + m.diffs.length + '">' + m.occurrence_date + '</td>';
+            html += '<td class="pf-v6-c-table__td" rowspan="' + m.diffs.length + '">' + escapeHtml(m.event_name) + '</td>';
+            html += '<td class="pf-v6-c-table__td" rowspan="' + m.diffs.length + '">' + m.occurrence_date + '</td>';
           }
-          html += '<td>' + escapeHtml(d.field) + '</td>';
-          html += '<td style="font-size:var(--fs-sm);color:var(--muted)">' + escapeHtml(d.samaya || '—') + '</td>';
-          html += '<td style="font-size:var(--fs-sm);color:#991b1b">' + escapeHtml(d.discord || '—') + '</td>';
+          html += '<td class="pf-v6-c-table__td">' + escapeHtml(d.field) + '</td>';
+          html += '<td class="pf-v6-c-table__td" style="font-size:var(--fs-sm);color:var(--muted)">' + escapeHtml(d.samaya || '—') + '</td>';
+          html += '<td class="pf-v6-c-table__td" style="font-size:var(--fs-sm);color:#991b1b">' + escapeHtml(d.discord || '—') + '</td>';
           if (i === 0) {
-            html += '<td rowspan="' + m.diffs.length + '">'
-              + '<button class="btn btn-accent btn-sm" title="Push Samaya values to Discord — updates the Discord event to match the current event definition." onclick="syncPush(' + m.post_log_id + ')">Push to Discord</button>'
+            html += '<td class="pf-v6-c-table__td" rowspan="' + m.diffs.length + '">'
+              + '<button class="pf-v6-c-button pf-m-primary pf-m-small" title="Push Samaya values to Discord — updates the Discord event to match the current event definition." onclick="syncPush(' + m.post_log_id + ')">Push to Discord</button>'
               + '</td>';
           }
           html += '</tr>';
         });
       });
-      html += '</tbody></table></div>';
+      html += '</tbody></table>';
     }
 
     // PostLog only section
     if (data.postlog_only.length) {
-      html += '<h2 style="margin-bottom:8px">🔴 PostLog Only (' + data.postlog_only.length + ')</h2>';
-      html += '<p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:10px">In PostLog as posted but not found on Discord — may have been deleted directly in Discord.</p>';
-      html += '<div class="card" style="padding:0;overflow:hidden;margin-bottom:20px"><table>';
-      html += '<thead><tr><th>Event</th><th>Date</th><th>Discord ID</th><th>Posted At</th><th>Action</th></tr></thead><tbody>';
+      html += '<h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">🔴 PostLog Only (' + data.postlog_only.length + ')</h2>';
+      html += '<p class="pf-v6-u-font-size-sm pf-v6-u-mb-sm" style="color:var(--pf-t--global--text--color--subtle)">In PostLog as posted but not found on Discord — may have been deleted directly in Discord.</p>';
+      html += '<table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg">';
+      html += '<thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Event</th><th class="pf-v6-c-table__th">Date</th><th class="pf-v6-c-table__th">Discord ID</th><th class="pf-v6-c-table__th">Posted At</th><th class="pf-v6-c-table__th">Action</th></tr></thead><tbody class="pf-v6-c-table__tbody">';
       data.postlog_only.forEach(function(p) {
-        html += '<tr>';
-        html += '<td>' + escapeHtml(p.event_name) + '</td>';
-        html += '<td>' + p.occurrence_date + '</td>';
-        html += '<td style="font-size:var(--fs-xs);font-family:monospace">' + escapeHtml(p.discord_event_id.slice(0,18)) + '…</td>';
-        html += '<td style="font-size:var(--fs-sm)">' + (p.posted_at_utc ? p.posted_at_utc.slice(0,16).replace('T',' ') + ' UTC' : '—') + '</td>';
-        html += '<td><button class="btn btn-ghost btn-sm" title="Mark this PostLog entry as cancelled — the Discord event no longer exists." onclick="syncMarkCancelled(' + p.post_log_id + ')">Mark Cancelled</button></td>';
+        html += '<tr class="pf-v6-c-table__tr">';
+        html += '<td class="pf-v6-c-table__td">' + escapeHtml(p.event_name) + '</td>';
+        html += '<td class="pf-v6-c-table__td">' + p.occurrence_date + '</td>';
+        html += '<td class="pf-v6-c-table__td" style="font-size:var(--fs-xs);font-family:monospace">' + escapeHtml(p.discord_event_id.slice(0,18)) + '…</td>';
+        html += '<td class="pf-v6-c-table__td" style="font-size:var(--fs-sm)">' + (p.posted_at_utc ? p.posted_at_utc.slice(0,16).replace('T',' ') + ' UTC' : '—') + '</td>';
+        html += '<td class="pf-v6-c-table__td"><button class="pf-v6-c-button pf-m-secondary pf-m-small" title="Mark this PostLog entry as cancelled — the Discord event no longer exists." onclick="syncMarkCancelled(' + p.post_log_id + ')">Mark Cancelled</button></td>';
         html += '</tr>';
       });
-      html += '</tbody></table></div>';
+      html += '</tbody></table>';
     }
 
     // Discord only section
     if (data.discord_only.length) {
-      html += '<h2 style="margin-bottom:8px">🔵 Discord Only (' + data.discord_only.length + ')</h2>';
-      html += '<p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:10px">On Discord but not in PostLog — created manually or outside Samaya.</p>';
-      html += '<div class="card" style="padding:0;overflow:hidden;margin-bottom:20px"><table>';
-      html += '<thead><tr><th>Event Name</th><th>Status</th><th>Start Time</th><th>Action</th></tr></thead><tbody>';
+      html += '<h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">🔵 Discord Only (' + data.discord_only.length + ')</h2>';
+      html += '<p class="pf-v6-u-font-size-sm pf-v6-u-mb-sm" style="color:var(--pf-t--global--text--color--subtle)">On Discord but not in PostLog — created manually or outside Samaya.</p>';
+      html += '<table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg">';
+      html += '<thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Event Name</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Start Time</th><th class="pf-v6-c-table__th">Action</th></tr></thead><tbody class="pf-v6-c-table__tbody">';
       data.discord_only.forEach(function(d) {
-        html += '<tr>';
-        html += '<td>' + escapeHtml(d.name) + '</td>';
-        html += '<td>' + escapeHtml(STATUS_LABELS[d.status] || d.status) + '</td>';
-        html += '<td style="font-size:var(--fs-sm)">' + (d.scheduled_start ? d.scheduled_start.slice(0,16).replace('T',' ') + ' UTC' : '—') + '</td>';
-        html += '<td><button class="btn btn-ghost btn-sm" title="Add this Discord event to PostLog." ' + 'data-discord-id="' + escapeHtml(d.discord_event_id) + '" onclick="syncAcknowledge(this)">Acknowledge</button></td>';
+        html += '<tr class="pf-v6-c-table__tr">';
+        html += '<td class="pf-v6-c-table__td">' + escapeHtml(d.name) + '</td>';
+        html += '<td class="pf-v6-c-table__td">' + escapeHtml(STATUS_LABELS[d.status] || d.status) + '</td>';
+        html += '<td class="pf-v6-c-table__td" style="font-size:var(--fs-sm)">' + (d.scheduled_start ? d.scheduled_start.slice(0,16).replace('T',' ') + ' UTC' : '—') + '</td>';
+        html += '<td class="pf-v6-c-table__td"><button class="pf-v6-c-button pf-m-secondary pf-m-small" title="Add this Discord event to PostLog." ' + 'data-discord-id="' + escapeHtml(d.discord_event_id) + '" onclick="syncAcknowledge(this)">Acknowledge</button></td>';
         html += '</tr>';
       });
-      html += '</tbody></table></div>';
+      html += '</tbody></table>';
     }
 
     // Matched section (collapsible)
     if (data.matched.length) {
-      html += '<details style="margin-bottom:16px"><summary style="cursor:pointer;font-size:var(--fs-base);font-weight:500;padding:8px 0">✅ Matched (' + data.matched.length + ') — all good</summary>';
-      html += '<div class="card" style="padding:0;overflow:hidden;margin-top:8px"><table>';
-      html += '<thead><tr><th>Event</th><th>Date</th><th>Discord ID</th><th>Discord Status</th></tr></thead><tbody>';
+      html += '<details class="pf-v6-u-mb-md"><summary style="cursor:pointer;font-weight:500;padding:8px 0">✅ Matched (' + data.matched.length + ') — all good</summary>';
+      html += '<table class="pf-v6-c-table pf-m-grid-md">';
+      html += '<thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Event</th><th class="pf-v6-c-table__th">Date</th><th class="pf-v6-c-table__th">Discord ID</th><th class="pf-v6-c-table__th">Discord Status</th></tr></thead><tbody class="pf-v6-c-table__tbody">';
       data.matched.forEach(function(m) {
-        html += '<tr><td>' + escapeHtml(m.event_name) + '</td><td>' + m.occurrence_date + '</td>';
-        html += '<td style="font-size:var(--fs-xs);font-family:monospace">' + escapeHtml(m.discord_event_id.slice(0,18)) + '…</td>';
-        html += '<td>' + escapeHtml(STATUS_LABELS[m.discord_status] || m.discord_status) + '</td></tr>';
+        html += '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td">' + escapeHtml(m.event_name) + '</td><td class="pf-v6-c-table__td">' + m.occurrence_date + '</td>';
+        html += '<td class="pf-v6-c-table__td" style="font-size:var(--fs-xs);font-family:monospace">' + escapeHtml(m.discord_event_id.slice(0,18)) + '…</td>';
+        html += '<td class="pf-v6-c-table__td">' + escapeHtml(STATUS_LABELS[m.discord_status] || m.discord_status) + '</td></tr>';
       });
-      html += '</tbody></table></div></details>';
+      html += '</tbody></table></details>';
     }
 
     if (!data.mismatched.length && !data.discord_only.length && !data.postlog_only.length) {
-      html += '<div style="text-align:center;padding:40px;color:#166534;background:#f0fdf4;border-radius:8px;border:1px solid #86efac">';
-      html += '<p style="font-size:var(--fs-md);font-weight:500">✅ Everything is in sync</p>';
-      html += '<p style="font-size:var(--fs-sm);margin-top:4px">All PostLog entries match their Discord counterparts.</p></div>';
+      html += '<div class="pf-v6-c-alert pf-m-success pf-m-inline">';
+      html += '<div class="pf-v6-c-alert__icon">✅</div>';
+      html += '<p class="pf-v6-c-alert__title">Everything is in sync</p>';
+      html += '<p class="pf-v6-c-alert__description">All PostLog entries match their Discord counterparts.</p>';
+      html += '</div>';
     }
 
     el.innerHTML = html;
   } catch(e) { el.innerHTML = '<p style="color:#991b1b">Error: ' + escapeHtml(e.message) + '</p>'; }
+}
+
+function statCard(label, value, color) {
+  return '<div class="pf-v6-c-card"><div class="pf-v6-c-card__body">'
+    + '<p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle);text-transform:uppercase;letter-spacing:.04em">' + label + '</p>'
+    + '<div style="font-size:var(--pf-t--global--font--size--heading--lg);font-weight:600;color:' + color + '">' + value + '</div>'
+    + '</div></div>';
 }
 
 function updateSyncBadge(issueCount) {
