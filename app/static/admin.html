@@ -148,38 +148,34 @@
 
 <!-- SCHEDULE -->
 <div id="v-schedule" class="view">
-  <div class="flex mb-16">
-    <h2 style="margin:0">28-Day Schedule</h2>
-    <button class="btn btn-ghost" onclick="loadSchedule()" title="Reload the 28-day occurrence list from the database.">Refresh</button>
+  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
+    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">28-Day Schedule</h2>
+    <button class="pf-v6-c-button pf-m-secondary" onclick="loadSchedule()" title="Reload the 28-day occurrence list from the database.">Refresh</button>
   </div>
-  <div class="flex mb-16">
-    <h2 style="margin:0;font-size:var(--fs-sm)">🛡️ Alliance Events</h2>
-    <button class="btn btn-accent" onclick="postSelected('Alliance')" title="Post all checked alliance occurrences to Discord Scheduled Events sequentially.">▶ Post Selected to Discord</button>
+  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
+    <h2 class="pf-v6-c-title pf-m-md" style="margin:0">🛡️ Alliance Events</h2>
+    <button class="pf-v6-c-button pf-m-primary" onclick="postSelected('Alliance')" title="Post all checked alliance occurrences to Discord Scheduled Events sequentially.">▶ Post Selected to Discord</button>
   </div>
-  <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px">
-    <table id="schedTable">
-      <thead><tr>
-        <th>Date</th><th>Day</th><th>Event</th><th>Start (UTC)</th>
-        <th>Duration</th><th>Channel</th><th>Post?</th><th>Status</th><th>Actions</th>
-      </tr></thead>
-      <tbody id="schedBody"><tr><td colspan="9" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
-    </table>
-  </div>
+  <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg" id="schedTable">
+    <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
+      <th class="pf-v6-c-table__th">Date</th><th class="pf-v6-c-table__th">Day</th><th class="pf-v6-c-table__th">Event</th><th class="pf-v6-c-table__th">Start (UTC)</th>
+      <th class="pf-v6-c-table__th">Duration</th><th class="pf-v6-c-table__th">Channel</th><th class="pf-v6-c-table__th">Post?</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Actions</th>
+    </tr></thead>
+    <tbody id="schedBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="9" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+  </table>
   <div id="schedLeadershipWrap" style="display:none">
-    <div class="flex mb-16">
-      <h2 style="margin:0;font-size:var(--fs-sm);background:var(--amber);padding:6px 10px;border-radius:4px">👑 Leadership Notifications</h2>
-      <button class="btn btn-accent" onclick="postSelected('Leadership')" title="Send all checked leadership occurrences as channel notifications.">▶ Post Selected to Discord</button>
+    <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
+      <h2 class="pf-v6-c-title pf-m-md" style="margin:0;background:var(--amber);padding:6px 10px;border-radius:4px">👑 Leadership Notifications</h2>
+      <button class="pf-v6-c-button pf-m-primary" onclick="postSelected('Leadership')" title="Send all checked leadership occurrences as channel notifications.">▶ Post Selected to Discord</button>
     </div>
-    <p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:10px">These events post to the leadership channel only — not visible on Discord Scheduled Events or the public calendar.</p>
-    <div class="card" style="padding:0;overflow:hidden">
-      <table id="schedTableLeadership">
-        <thead><tr>
-          <th>Date</th><th>Day</th><th>Event</th><th>Start (UTC)</th>
-          <th>Duration</th><th>Channel</th><th>Post?</th><th>Status</th><th>Actions</th>
-        </tr></thead>
-        <tbody id="schedBodyLeadership"></tbody>
-      </table>
-    </div>
+    <p class="pf-v6-u-font-size-sm pf-v6-u-mb-sm" style="color:var(--pf-t--global--text--color--subtle)">These events post to the leadership channel only — not visible on Discord Scheduled Events or the public calendar.</p>
+    <table class="pf-v6-c-table pf-m-grid-md" id="schedTableLeadership">
+      <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
+        <th class="pf-v6-c-table__th">Date</th><th class="pf-v6-c-table__th">Day</th><th class="pf-v6-c-table__th">Event</th><th class="pf-v6-c-table__th">Start (UTC)</th>
+        <th class="pf-v6-c-table__th">Duration</th><th class="pf-v6-c-table__th">Channel</th><th class="pf-v6-c-table__th">Post?</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Actions</th>
+      </tr></thead>
+      <tbody id="schedBodyLeadership"></tbody>
+    </table>
   </div>
 </div>
 

@@ -14,10 +14,12 @@ function renderSchedule() {
   const tbodyLead = document.getElementById('schedBodyLeadership');
   const leadWrap = document.getElementById('schedLeadershipWrap');
   if (!occurrenceData.length) {
-    tbody.innerHTML = '<tr><td colspan="9" style="color:var(--muted);padding:20px">No occurrences. Run "Regenerate Now" from the Dashboard.</td></tr>';
+    tbody.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="9" style="color:var(--muted);padding:20px">No occurrences. Run "Regenerate Now" from the Dashboard.</td></tr>';
     leadWrap.style.display = 'none';
     return;
   }
+
+  const statusColor = { posted: 'pf-m-green', active: 'pf-m-blue', completed: 'pf-m-grey', cancelled: 'pf-m-red', pending: 'pf-m-grey', queued: 'pf-m-blue', error: 'pf-m-red' };
 
   function buildRow(o, sectionScope) {
     // sectionScope is 'Alliance' or 'Leadership' (which table section this
@@ -26,28 +28,29 @@ function renderSchedule() {
     const isToday = o.occurrence_date === today;
     const allyColor = TENANT_COLORS[o.owning_tenant_id] || '#475569';
     const rowStyle = 'border-left:3px solid ' + allyColor + (isToday ? ';background:var(--amber)' : '');
-    const badgeClass = `badge-${escapeHtml(o.post_status)}`;
-    return `<tr style="${rowStyle}">
-      <td style="${isToday?'font-weight:600':''}">${o.occurrence_date}</td>
-      <td>${DOW3[new Date(o.occurrence_date+'T12:00:00Z').getUTCDay()]}</td>
-      <td><span class="cat-dot" style="background:${allyColor}"></span>${escapeHtml(o.event_name)}${o.scope === 'kingdom-wide' ? ' 🌐' : ''}${o.leadership_only ? ' 👑' : ' 🛡️'}</td>
-      <td>${fmtTime(o.start_datetime_utc)}</td>
-      <td>${o.duration_hours}h</td>
-      <td style="color:var(--muted);font-size:var(--fs-sm)">${escapeHtml(o.discord_channel)}</td>
-      <td style="text-align:center">
-        <input type="checkbox" data-occ-id="${o.id}" data-scope="${sectionScope}"
-          ${o.post_to_discord?'checked':''}
-          ${['posted','cancelled'].includes(o.post_status)?'disabled':''}
-          onchange="togglePostFlag(${o.id},this.checked)">
+    return `<tr class="pf-v6-c-table__tr" style="${rowStyle}">
+      <td class="pf-v6-c-table__td" style="${isToday?'font-weight:600':''}">${o.occurrence_date}</td>
+      <td class="pf-v6-c-table__td">${DOW3[new Date(o.occurrence_date+'T12:00:00Z').getUTCDay()]}</td>
+      <td class="pf-v6-c-table__td"><span class="cat-dot" style="background:${allyColor}"></span>${escapeHtml(o.event_name)}${o.scope === 'kingdom-wide' ? ' 🌐' : ''}${o.leadership_only ? ' 👑' : ' 🛡️'}</td>
+      <td class="pf-v6-c-table__td">${fmtTime(o.start_datetime_utc)}</td>
+      <td class="pf-v6-c-table__td">${o.duration_hours}h</td>
+      <td class="pf-v6-c-table__td" style="color:var(--muted);font-size:var(--fs-sm)">${escapeHtml(o.discord_channel)}</td>
+      <td class="pf-v6-c-table__td" style="text-align:center">
+        <span class="pf-v6-c-check pf-m-standalone">
+          <input class="pf-v6-c-check__input" type="checkbox" data-occ-id="${o.id}" data-scope="${sectionScope}"
+            ${o.post_to_discord?'checked':''}
+            ${['posted','cancelled'].includes(o.post_status)?'disabled':''}
+            onchange="togglePostFlag(${o.id},this.checked)">
+        </span>
       </td>
-      <td>
-        <span class="badge ${badgeClass}">${escapeHtml(o.post_status)}</span>
+      <td class="pf-v6-c-table__td">
+        ${pfLabel(escapeHtml(o.post_status), statusColor[o.post_status] || 'pf-m-grey')}
         ${o.status_detail?`<span title="${escapeHtml(o.status_detail)}" style="cursor:help;margin-left:4px">⚠</span>`:''}
       </td>
-      <td>
+      <td class="pf-v6-c-table__td">
         ${o.post_status==='posted'
-          ? `<button class="btn btn-danger btn-sm" onclick="cancelOccurrence(${o.id})">Cancel</button>`
-          : `<button class="btn btn-accent btn-sm" onclick="postOne(${o.id})" ${['posted','queued'].includes(o.post_status)?'disabled':''}>Post</button>`
+          ? `<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="cancelOccurrence(${o.id})">Cancel</button>`
+          : `<button class="pf-v6-c-button pf-m-primary pf-m-small" onclick="postOne(${o.id})" ${['posted','queued'].includes(o.post_status)?'disabled':''}>Post</button>`
         }
       </td>
     </tr>`;
@@ -58,7 +61,7 @@ function renderSchedule() {
 
   tbody.innerHTML = community.length
     ? community.map(o => buildRow(o, 'Alliance')).join('')
-    : '<tr><td colspan="9" style="color:var(--muted);padding:20px">No occurrences in this window.</td></tr>';
+    : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="9" style="color:var(--muted);padding:20px">No occurrences in this window.</td></tr>';
 
   if (leadership.length) {
     leadWrap.style.display = 'block';
