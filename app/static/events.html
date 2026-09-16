@@ -230,16 +230,24 @@
 </footer>
 
 <script>
-// This page is served at /t/{tenant_slug}/events — every API and ICS
-// call below is scoped to that same tenant, read straight from the
-// page's own URL rather than templated server-side.
-const TENANT_SLUG = window.location.pathname.split('/')[2] || '';
+// This page is served two ways: /t/{tenant_slug}/events (one alliance)
+// or bare /events (every alliance combined) — mode is read straight from
+// the page's own URL rather than templated server-side, since it's the
+// same static file either way.
+const PATH_PARTS   = window.location.pathname.split('/').filter(Boolean); // ['t','mod','events'] or ['events']
+const COMBINED_MODE = PATH_PARTS[0] !== 't';
+const TENANT_SLUG   = COMBINED_MODE ? '' : (PATH_PARTS[1] || '');
 
-document.getElementById('pageTitle').textContent = `⏱ ${TENANT_SLUG.toUpperCase()} — Kingshot Event Schedule`;
-document.getElementById('icsLink').href = `/t/${TENANT_SLUG}/ics/events.ics`;
-document.getElementById('icsLinkBottom').href = `/t/${TENANT_SLUG}/ics/events.ics`;
+const API_URL = COMBINED_MODE ? '/api/events' : `/t/${TENANT_SLUG}/api/events`;
+const ICS_URL = COMBINED_MODE ? '/ics/events.ics' : `/t/${TENANT_SLUG}/ics/events.ics`;
+
+document.getElementById('pageTitle').textContent = COMBINED_MODE
+  ? '⏱ Kingshot Event Schedule — All Alliances'
+  : `⏱ ${TENANT_SLUG.toUpperCase()} — Kingshot Event Schedule`;
+document.getElementById('icsLink').href = ICS_URL;
+document.getElementById('icsLinkBottom').href = ICS_URL;
 document.getElementById('footerText').innerHTML =
-  `All times are UTC · <a href="/t/${TENANT_SLUG}/ics/events.ics">ICS Calendar Feed</a> · Powered by Samaya`;
+  `All times are UTC · <a href="${ICS_URL}">ICS Calendar Feed</a> · Powered by Samaya`;
 
 const DOW_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MONTH    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -281,6 +289,13 @@ function scopeBadge(scope) {
   return `<span class="alliance-badge" style="background:var(--accent);color:var(--bg)" title="Every alliance in this Kingdom plays this together">🌐 Kingdom-wide</span>`;
 }
 
+function tenantBadge(ev) {
+  // Only shown in combined mode — on a single alliance's own page every
+  // event is obviously that alliance's, so the badge would be noise.
+  if (!COMBINED_MODE || !ev.tenant_name) return '';
+  return `<span class="alliance-badge" style="background:${escapeHtml(ev.tenant_color || 'var(--accent)')};color:var(--bg)">${escapeHtml(ev.tenant_name)}</span>`;
+}
+
 function weekLabel(dateStr) {
   const d = new Date(dateStr + 'T12:00:00Z');
   const today = new Date();
@@ -306,7 +321,7 @@ function weekLabel(dateStr) {
 async function loadEvents() {
   const content = document.getElementById('content');
   try {
-    const res    = await fetch(`/t/${TENANT_SLUG}/api/events`);
+    const res    = await fetch(API_URL);
     const events = await res.json();
 
     if (!events.length) {
@@ -347,6 +362,7 @@ async function loadEvents() {
             <div class="event-body">
               <div class="event-name-row">
                 <span class="event-name">${escapeHtml(ev.event_name)}</span>
+                ${tenantBadge(ev)}
                 ${scopeBadge(ev.scope)}
               </div>
               <div class="event-meta">

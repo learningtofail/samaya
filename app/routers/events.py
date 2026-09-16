@@ -69,3 +69,59 @@ async def events_page(tenant_slug: str, db: AsyncSession = Depends(get_db)):
     await _get_tenant_by_slug(tenant_slug, db)  # 404s early for an unknown slug
     with open("/app/static/events.html") as f:
         return HTMLResponse(f.read())
+
+
+@router.get("/api/events")
+async def list_events_all(db: AsyncSession = Depends(get_db)):
+    """The bare, combined calendar — every tenant's events on one page,
+    the pre-multi-tenant /events behavior, kept alongside (not instead
+    of) the per-alliance /t/{slug}/events pages since some members want
+    one shared view rather than switching between alliance pages.
+
+    Scoped to every tenant in this deployment's database, not "every
+    tenant in every Kingdom that might ever exist here" — this instance
+    is specifically ks138.taraka.dev, one Kingdom's deployment. A second,
+    unrelated Kingdom sharing this same database would need this route
+    revisited rather than assumed to still mean "everyone."
+    """
+    today = date.today()
+    end   = today + timedelta(days=WINDOW_DAYS)
+
+    result = await db.execute(
+        select(Occurrence, EventDefinition, Tenant)
+        .join(EventDefinition, Occurrence.event_id == EventDefinition.id)
+        .join(Tenant, EventDefinition.owning_tenant_id == Tenant.id)
+        .where(
+            Occurrence.occurrence_date >= today,
+            Occurrence.occurrence_date <= end,
+            EventDefinition.active == True,
+            EventDefinition.leadership_only == False,
+        )
+        .order_by(Occurrence.occurrence_date, EventDefinition.name)
+    )
+    rows = result.all()
+
+    return JSONResponse([
+        {
+            "id":                 occ.id,
+            "event_name":         event.name,
+            "scope":              event.scope,
+            "tenant_name":        tenant.name,
+            "tenant_slug":        tenant.slug,
+            "tenant_color":       tenant.color,
+            "occurrence_date":    str(occ.occurrence_date),
+            "start_datetime_utc": occ.start_datetime_utc.isoformat(),
+            "end_datetime_utc":   occ.end_datetime_utc.isoformat(),
+            "discord_channel":    event.discord_channel,
+            "description":        event.description,
+            "post_status":        occ.post_status,
+            "duration_hours":     float(event.duration_hours),
+        }
+        for occ, event, tenant in rows
+    ])
+
+
+@router.get("/events", response_class=HTMLResponse)
+async def events_page_all():
+    with open("/app/static/events.html") as f:
+        return HTMLResponse(f.read())
