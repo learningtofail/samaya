@@ -11,11 +11,11 @@ async function loadPlatformKingdoms() {
     const kingdoms = await api('GET', '/api/kingdoms', null, /*skipTenantHeader=*/true);
     document.getElementById('kingdomsBody').innerHTML = kingdoms.length
       ? kingdoms.map(k =>
-          '<tr><td>' + escapeHtml(k.name) + '</td><td>' + escapeHtml(k.slug) + '</td>'
-          + '<td><button class="btn btn-ghost btn-sm" onclick="createKingdomInvite(' + k.id + ')" '
+          '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td">' + escapeHtml(k.name) + '</td><td class="pf-v6-c-table__td">' + escapeHtml(k.slug) + '</td>'
+          + '<td class="pf-v6-c-table__td"><button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="createKingdomInvite(' + k.id + ')" '
           + 'title="Invite someone as kingdom coordinator for this kingdom">+ Kingdom Coordinator Invite</button></td></tr>'
         ).join('')
-      : '<tr><td colspan="3" style="color:var(--muted);padding:20px">No kingdoms yet.</td></tr>';
+      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="3" style="color:var(--muted);padding:20px">No kingdoms yet.</td></tr>';
   } catch(e) { toast(e.message, true); }
 }
 
@@ -24,16 +24,16 @@ async function loadPlatformTenants() {
     const tenants = await api('GET', '/api/tenants', null, /*skipTenantHeader=*/true);
     document.getElementById('tenantsBody').innerHTML = tenants.length
       ? tenants.map(t =>
-          '<tr>'
-          + '<td><span class="cat-dot" style="background:' + escapeHtml(t.color) + '"></span>' + escapeHtml(t.name) + '</td>'
-          + '<td>' + escapeHtml(t.slug) + '</td>'
-          + '<td>' + t.kingdom_id + '</td>'
-          + '<td style="font-size:var(--fs-sm);color:var(--muted)">' + escapeHtml(t.guild_id) + '</td>'
-          + '<td>' + (t.has_own_bot_token ? 'Own bot' : 'Platform bot') + '</td>'
-          + '<td></td>'
+          '<tr class="pf-v6-c-table__tr">'
+          + '<td class="pf-v6-c-table__td"><span class="cat-dot" style="background:' + escapeHtml(t.color) + '"></span>' + escapeHtml(t.name) + '</td>'
+          + '<td class="pf-v6-c-table__td">' + escapeHtml(t.slug) + '</td>'
+          + '<td class="pf-v6-c-table__td">' + t.kingdom_id + '</td>'
+          + '<td class="pf-v6-c-table__td" style="font-size:var(--fs-sm);color:var(--muted)">' + escapeHtml(t.guild_id) + '</td>'
+          + '<td class="pf-v6-c-table__td">' + (t.has_own_bot_token ? 'Own bot' : 'Platform bot') + '</td>'
+          + '<td class="pf-v6-c-table__td"></td>'
           + '</tr>'
         ).join('')
-      : '<tr><td colspan="6" style="color:var(--muted);padding:20px">No tenants yet.</td></tr>';
+      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="6" style="color:var(--muted);padding:20px">No tenants yet.</td></tr>';
   } catch(e) { toast(e.message, true); }
 }
 

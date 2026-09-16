@@ -279,24 +279,24 @@
 
 <!-- PLATFORM -->
 <div id="v-platform" class="view">
-  <h2 style="margin-bottom:16px">Platform</h2>
+  <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-md">Platform</h2>
 
-  <div class="flex mb-16">
-    <h3 style="margin:0;font-size:var(--fs-md)">Kingdoms</h3>
-    <button class="btn btn-ghost btn-sm" onclick="createKingdom()">+ New Kingdom</button>
+  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
+    <h3 class="pf-v6-c-title pf-m-md" style="margin:0">Kingdoms</h3>
+    <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="createKingdom()">+ New Kingdom</button>
   </div>
-  <table class="mb-16">
-    <thead><tr><th>Name</th><th>Slug</th><th></th></tr></thead>
-    <tbody id="kingdomsBody"><tr><td colspan="3" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+  <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg">
+    <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Slug</th><th class="pf-v6-c-table__th"></th></tr></thead>
+    <tbody class="pf-v6-c-table__tbody" id="kingdomsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="3" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
   </table>
 
-  <div class="flex mb-16">
-    <h3 style="margin:0;font-size:var(--fs-md)">Tenants (Alliances)</h3>
-    <button class="btn btn-ghost btn-sm" onclick="createTenant()">+ New Tenant</button>
+  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
+    <h3 class="pf-v6-c-title pf-m-md" style="margin:0">Tenants (Alliances)</h3>
+    <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="createTenant()">+ New Tenant</button>
   </div>
-  <table>
-    <thead><tr><th>Name</th><th>Slug</th><th>Kingdom</th><th>Guild ID</th><th>Bot</th><th></th></tr></thead>
-    <tbody id="tenantsBody"><tr><td colspan="6" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+  <table class="pf-v6-c-table pf-m-grid-md">
+    <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Slug</th><th class="pf-v6-c-table__th">Kingdom</th><th class="pf-v6-c-table__th">Guild ID</th><th class="pf-v6-c-table__th">Bot</th><th class="pf-v6-c-table__th"></th></tr></thead>
+    <tbody class="pf-v6-c-table__tbody" id="tenantsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="6" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
   </table>
 </div>
 
