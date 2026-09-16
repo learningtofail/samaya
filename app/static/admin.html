@@ -204,19 +204,21 @@
 
 <!-- POST LOG -->
 <div id="v-postlog" class="view">
-  <div class="flex mb-16">
-    <h2 style="margin:0">Post Log</h2>
-    <button onclick="exportPostLogCsv()" title="Download all PostLog entries as a CSV file." class="btn btn-ghost btn-sm">⬇ Export CSV</button>
+  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-md">
+    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Post Log</h2>
+    <button onclick="exportPostLogCsv()" title="Download all PostLog entries as a CSV file." class="pf-v6-c-button pf-m-secondary pf-m-small">⬇ Export CSV</button>
   </div>
-  <div class="card" style="padding:0;overflow:hidden">
-    <table id="logTable">
-      <thead><tr>
-        <th>Event</th><th>Date</th><th>Timing</th><th>Posted At (UTC)</th>
-        <th>By</th><th>Status</th><th>Discord ID</th>
-      </tr></thead>
-      <tbody id="logBody"><tr><td colspan="7" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
-    </table>
-  </div>
+  <table class="pf-v6-c-table pf-m-grid-md">
+    <thead class="pf-v6-c-table__thead">
+      <tr class="pf-v6-c-table__tr">
+        <th class="pf-v6-c-table__th">Event</th><th class="pf-v6-c-table__th">Date</th><th class="pf-v6-c-table__th">Timing</th><th class="pf-v6-c-table__th">Posted At (UTC)</th>
+        <th class="pf-v6-c-table__th">By</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Discord ID</th>
+      </tr>
+    </thead>
+    <tbody class="pf-v6-c-table__tbody" id="logBody">
+      <tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">Loading…</td></tr>
+    </tbody>
+  </table>
 </div>
 
 <!-- CONFIG -->
