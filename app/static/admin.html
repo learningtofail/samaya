@@ -13,7 +13,7 @@
      state while the PatternFly conversion moves through the admin UI one
      view at a time. Only the page/masthead/tabs shell is PatternFly so far. */
   body { margin: 0; }
-  .pf-v6-c-masthead { display: flex !important; align-items: center !important; flex-wrap: nowrap !important; gap: var(--pf-t--global--spacer--md); }
+  .pf-v6-c-masthead { display: flex !important; align-items: center !important; flex-wrap: nowrap !important; gap: var(--pf-t--global--spacer--md); background-color: #151515 !important; }
   .pf-v6-c-masthead__main { flex: 1 1 auto !important; min-width: 0 !important; overflow: hidden !important; display: flex !important; align-items: center !important; gap: var(--pf-t--global--spacer--md); }
   .pf-v6-c-masthead__content { flex: 0 0 auto !important; display: flex !important; align-items: center !important; gap: var(--pf-t--global--spacer--sm); }
   #headerTitle { color: var(--pf-t--global--text--color--inverse); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--pf-t--global--font--size--heading--md); }
@@ -39,9 +39,18 @@
      bar. Forcing an explicit stacked layout instead of chasing the exact
      grid-template-areas value. */
   .pf-v6-c-page { display: flex !important; flex-direction: column !important; min-height: 100vh; }
-  .pf-v6-c-tabs { width: 100%; }
-  .pf-v6-c-page__main-container { flex: 1 1 auto !important; display: flex !important; flex-direction: column !important; align-self: stretch !important; width: 100% !important; }
-  .pf-v6-c-page__main { flex: 1 1 auto !important; width: 100% !important; }
+  /* The masthead and tabs must never shrink — without flex-shrink:0 they're
+     treated like any other flex child, so once page content (e.g. a long
+     Discord channel list on Config) pushed the page taller than the
+     viewport, the browser started shrinking the whole flex column to fit
+     rather than letting the page grow and scroll normally, squeezing the
+     tab bar down to ~18px and clipping it. Protecting their height and
+     letting main-container flow/scroll normally (not force-fit into
+     whatever space is left) fixes it. */
+  .pf-v6-c-masthead { flex-shrink: 0 !important; }
+  .pf-v6-c-tabs { width: 100%; flex-shrink: 0 !important; overflow: visible !important; }
+  .pf-v6-c-page__main-container { flex: 1 1 auto !important; display: flex !important; flex-direction: column !important; align-self: stretch !important; width: 100% !important; overflow: visible !important; height: auto !important; }
+  .pf-v6-c-page__main { flex: 1 1 auto !important; width: 100% !important; overflow: visible !important; height: auto !important; }
 </style>
 </head>
 <body>
