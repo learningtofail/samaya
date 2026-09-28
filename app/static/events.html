@@ -58,7 +58,8 @@
         <h1 id="pageTitle" style="color:var(--pf-t--global--text--color--inverse);margin:0;font-size:var(--pf-t--global--font--size--heading--lg);font-weight:var(--pf-t--global--font--weight--heading--bold)">⏱ Kingshot Event Schedule</h1>
       </span>
     </div>
-    <div class="pf-v6-c-masthead__content">
+    <div class="pf-v6-c-masthead__content" style="display:flex;align-items:center;gap:var(--pf-t--global--spacer--md)">
+      <select class="pf-v6-c-form-control" id="displayTzPicker" onchange="onDisplayTzChange(this.value)" title="Local time zone used for the second time shown next to each UTC time" style="width:auto"></select>
       <a class="pf-v6-c-button pf-m-primary" id="icsLink" href="#">📅 Subscribe to Calendar</a>
     </div>
   </header>
@@ -121,10 +122,46 @@ document.getElementById('pageTitle').textContent = COMBINED_MODE
 document.getElementById('icsLink').href = ICS_URL;
 document.getElementById('icsLinkBottom').href = ICS_URL;
 document.getElementById('footerText').innerHTML =
-  `All times are UTC · <a href="${ICS_URL}">ICS Calendar Feed</a> · Powered by Samaya`;
+  `Times shown in UTC and your local time · <a href="${ICS_URL}">ICS Calendar Feed</a> · Powered by Samaya`;
 
 const DOW_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MONTH    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// ── Display time zone (spec §15.4) ──────────────────────────────
+// This page has no shared JS with admin.html (it's served standalone, no
+// <script src> chain), so the picker/format logic is duplicated here
+// rather than imported — same 'samaya_display_tz' localStorage key as the
+// admin masthead, so a visitor's choice carries over if they use both.
+const DISPLAY_TZ_OPTIONS = [
+  'UTC', 'America/Toronto', 'America/New_York', 'America/Chicago',
+  'America/Denver', 'America/Los_Angeles', 'Europe/London', 'Europe/Paris',
+  'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney',
+];
+
+function getDisplayTz() {
+  return localStorage.getItem('samaya_display_tz')
+    || Intl.DateTimeFormat().resolvedOptions().timeZone
+    || 'UTC';
+}
+
+function setDisplayTz(tz) {
+  localStorage.setItem('samaya_display_tz', tz);
+}
+
+function initDisplayTzPicker() {
+  const picker = document.getElementById('displayTzPicker');
+  if (!picker) return;
+  const current = getDisplayTz();
+  const options = DISPLAY_TZ_OPTIONS.includes(current) ? DISPLAY_TZ_OPTIONS : [current, ...DISPLAY_TZ_OPTIONS];
+  picker.innerHTML = options.map(tz => `<option value="${tz}" ${tz === current ? 'selected' : ''}>${tz}</option>`).join('');
+}
+
+function onDisplayTzChange(tz) {
+  setDisplayTz(tz);
+  loadEvents();
+}
+
+initDisplayTzPicker();
 
 // This page is public and unauthenticated — every field below comes from
 // the database (admin-editable event names/descriptions/channels), so it
@@ -135,8 +172,16 @@ function escapeHtml(value) {
   }[c]));
 }
 
+// Dual-time display (spec §15.2/§15.4) — mirrors admin's events.js
+// dualTimeString(), duplicated here for the same no-shared-JS reason as
+// the time zone picker above.
 function formatTime(iso) {
-  return iso.slice(11, 16) + ' UTC';
+  const d = new Date(iso.endsWith('Z') || /[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z');
+  const utcPart = new Intl.DateTimeFormat('en-GB', { hour:'2-digit', minute:'2-digit', hour12:false, timeZone:'UTC' }).format(d) + ' UTC';
+  const tz = getDisplayTz();
+  if (tz === 'UTC') return utcPart;
+  const localPart = new Intl.DateTimeFormat('en-US', { hour:'numeric', minute:'2-digit', hour12:true, timeZoneName:'short', timeZone: tz }).format(d);
+  return utcPart + ' · ' + localPart;
 }
 
 function formatDuration(hours) {

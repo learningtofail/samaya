@@ -104,8 +104,6 @@ function openEventModal(event) {
   document.getElementById('mNotifMinutes').value      = event?.notify_minutes_before || '';
   document.getElementById('mLeadershipOnly').checked  = !!event?.leadership_only;
   toggleLeadershipNote();
-  document.getElementById('mDetectedTz').textContent = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  document.getElementById('mTimezone').value = getDisplayTz();
   document.getElementById('previewResult').textContent = '';
   populateDiscordFields(event);
   document.getElementById('eventModal').classList.add('open');
@@ -124,30 +122,34 @@ function toggleLeadershipNote() {
   document.getElementById('leadershipNote').style.display = checked ? 'block' : 'none';
 }
 
-// ── Display timezone (persists across the admin UI via localStorage) ──
-
-function getDisplayTz() {
-  return localStorage.getItem('samaya_display_tz') || 'UTC';
-}
-
-function applyDisplayTzChange() {
-  localStorage.setItem('samaya_display_tz', document.getElementById('mTimezone').value);
-  if (document.getElementById('v-dashboard').classList.contains('active')) loadDashboard();
-  if (document.getElementById('v-schedule').classList.contains('active')) renderSchedule();
-  if (document.getElementById('v-gantt').classList.contains('active')) loadGantt();
-  if (document.getElementById('v-postlog').classList.contains('active')) loadPostLog();
-}
+// ── Time formatting ─────────────────────────────────────────
+// getDisplayTz()/setDisplayTz() and the header time zone picker live in
+// common.js (spec §15) — the control is global, not Events-specific,
+// so it moved out of this file's old buried-in-the-modal version.
 
 function toUtcDate(isoStr) {
   const hasTz = /Z$|[+-]\d{2}:\d{2}$/.test(isoStr);
   return new Date(hasTz ? isoStr : isoStr + 'Z');
 }
 
-function fmtTime(utcIso) {
+// The building block for "show both" (spec §15.2): UTC stays in its
+// existing 24-hour HH:MM form (the value everything else in the app
+// already keys off); the local half uses 12-hour + a short zone
+// abbreviation (e.g. EDT, not the raw IANA name) so the two read as
+// visually distinct values rather than two numbers that only differ by
+// an hour count. Collapses to a single value when the display zone IS
+// UTC — "19:00 UTC · 19:00 UTC" would be noise, not information.
+function dualTimeString(utcIso) {
   const d = toUtcDate(utcIso);
+  const utcPart = new Intl.DateTimeFormat('en-GB', { hour:'2-digit', minute:'2-digit', hour12:false, timeZone:'UTC' }).format(d) + ' UTC';
   const tz = getDisplayTz();
-  const t = new Intl.DateTimeFormat('en-GB', { hour:'2-digit', minute:'2-digit', hour12:false, timeZone: tz }).format(d);
-  return tz === 'UTC' ? t + ' UTC' : t + ' ' + tz;
+  if (tz === 'UTC') return utcPart;
+  const localPart = new Intl.DateTimeFormat('en-US', { hour:'numeric', minute:'2-digit', hour12:true, timeZoneName:'short', timeZone: tz }).format(d);
+  return utcPart + ' · ' + localPart;
+}
+
+function fmtTime(utcIso) {
+  return dualTimeString(utcIso);
 }
 
 function fmtTimeShort(utcIso) {
@@ -155,14 +157,42 @@ function fmtTimeShort(utcIso) {
   return new Intl.DateTimeFormat('en-GB', { hour:'2-digit', minute:'2-digit', hour12:false, timeZone: getDisplayTz() }).format(d);
 }
 
+// Post Log's "Posted At" column and Announcements' "Scheduled for"
+// column (spec §13.4/§15.2). Dates can differ across the UTC/local
+// split, not just times — an event at 01:00 UTC on the 28th is 9:00 PM
+// on the 27th in an American zone — so each half is computed against
+// its OWN correct calendar date rather than one date reused for both.
+// The local date prefix is shown only when it actually differs from the
+// UTC date, to avoid clutter in the (overwhelmingly common) case where
+// it doesn't.
 function fmtDateTime(utcIso) {
   const d = toUtcDate(utcIso);
-  const tz = getDisplayTz();
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false, timeZone: tz
+
+  const utcParts = new Intl.DateTimeFormat('en-CA', {
+    year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false, timeZone:'UTC'
   }).formatToParts(d).reduce((a,p) => (a[p.type]=p.value, a), {});
-  const s = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
-  return tz === 'UTC' ? s + ' UTC' : s + ' ' + tz;
+  const utcDateKey = `${utcParts.year}-${utcParts.month}-${utcParts.day}`;
+  const utcStr = `${utcDateKey} ${utcParts.hour}:${utcParts.minute} UTC`;
+
+  const tz = getDisplayTz();
+  if (tz === 'UTC') return utcStr;
+
+  // en-CA reliably formats as YYYY-MM-DD regardless of locale display
+  // conventions — used here purely as a stable comparison key, not shown.
+  const localKeyParts = new Intl.DateTimeFormat('en-CA', {
+    year:'numeric', month:'2-digit', day:'2-digit', timeZone: tz
+  }).formatToParts(d).reduce((a,p) => (a[p.type]=p.value, a), {});
+  const localDateKey = `${localKeyParts.year}-${localKeyParts.month}-${localKeyParts.day}`;
+
+  const localTimeStr = new Intl.DateTimeFormat('en-US', {
+    hour:'numeric', minute:'2-digit', hour12:true, timeZoneName:'short', timeZone: tz
+  }).format(d);
+
+  if (localDateKey === utcDateKey) {
+    return `${utcStr} · ${localTimeStr}`;
+  }
+  const localDateStr = new Intl.DateTimeFormat('en-US', { month:'short', day:'numeric', timeZone: tz }).format(d);
+  return `${utcStr} · ${localDateStr}, ${localTimeStr}`;
 }
 
 // ── Discord channel/role dropdowns ─────────────────────────────

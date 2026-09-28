@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from models.db import Announcement, AnnouncementTarget
 from scheduler.announcements import send_scheduled_announcements
+from services.time_utils import ensure_utc
 
 
 def _future_iso(minutes=0):
@@ -74,6 +75,55 @@ class TestCreateAnnouncement:
         })
         assert r.status_code == 201, r.text
         assert len(r.json()["targets"]) == 2
+
+    async def test_leadership_only_and_recurring_round_trip(self, client: AsyncClient, tenant: dict):
+        r = await client.post("/admin/api/announcements", json={
+            "title": "Weekly reminder", "body_markdown": "Don't forget.",
+            "scheduled_for": _future_iso(),
+            "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
+            "leadership_only": True, "recurring": True, "interval_days": 7,
+        })
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["leadership_only"] is True
+        assert body["recurring"] is True
+        assert body["interval_days"] == 7
+
+    async def test_defaults_are_false_and_null(self, client: AsyncClient, tenant: dict):
+        r = await client.post("/admin/api/announcements", json={
+            "title": "Plain", "body_markdown": "hi", "scheduled_for": _future_iso(),
+            "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
+        })
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["leadership_only"] is False
+        assert body["recurring"] is False
+        assert body["interval_days"] is None
+
+    async def test_recurring_without_interval_days_rejected(self, client: AsyncClient, tenant: dict):
+        r = await client.post("/admin/api/announcements", json={
+            "title": "Bad recurring", "body_markdown": "hi", "scheduled_for": _future_iso(),
+            "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
+            "recurring": True,
+        })
+        assert r.status_code == 422
+
+    async def test_recurring_with_non_positive_interval_days_rejected(self, client: AsyncClient, tenant: dict):
+        r = await client.post("/admin/api/announcements", json={
+            "title": "Bad recurring", "body_markdown": "hi", "scheduled_for": _future_iso(),
+            "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
+            "recurring": True, "interval_days": 0,
+        })
+        assert r.status_code == 422
+
+    async def test_interval_days_nulled_when_not_recurring(self, client: AsyncClient, tenant: dict):
+        r = await client.post("/admin/api/announcements", json={
+            "title": "Ignored interval", "body_markdown": "hi", "scheduled_for": _future_iso(),
+            "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
+            "recurring": False, "interval_days": 7,
+        })
+        assert r.status_code == 201, r.text
+        assert r.json()["interval_days"] is None
 
 
 class TestAnnouncementPermissions:
@@ -195,6 +245,72 @@ class TestAnnouncementDelivery:
         assert calls == []
         announcement = await db_session.get(Announcement, announcement_id)
         assert announcement.status == "scheduled"
+
+
+    async def test_recurring_announcement_rearms_instead_of_going_terminal(
+        self, client: AsyncClient, db_session, db_engine, tenant: dict, monkeypatch
+    ):
+        created = await client.post("/admin/api/announcements", json={
+            "title": "Weekly check-in", "body_markdown": "Reminder",
+            "scheduled_for": _future_iso(minutes=5),
+            "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
+            "recurring": True, "interval_days": 7,
+        })
+        announcement_id = created.json()["id"]
+        original_scheduled_for = datetime.fromisoformat(created.json()["scheduled_for"])
+
+        calls = []
+        async def fake_send(token, channel_id, message):
+            calls.append(channel_id)
+            return True, ""
+        monkeypatch.setattr("scheduler.announcements.send_channel_message", fake_send)
+
+        await _run_delivery_job(db_engine)
+
+        announcement = await db_session.get(Announcement, announcement_id)
+        # Still scheduled, not posted/failed — recurring rows never go
+        # terminal (spec §13.5).
+        assert announcement.status == "scheduled"
+        assert announcement.posted_at is not None
+        assert calls == ["chan-1"]
+        new_scheduled_for = ensure_utc(announcement.scheduled_for)
+        assert new_scheduled_for > original_scheduled_for
+        # Advanced by (a whole number of) 7-day intervals from the
+        # original anchor, not from whenever the tick happened to run.
+        delta_days = (new_scheduled_for - original_scheduled_for).days
+        assert delta_days % 7 == 0 and delta_days > 0
+
+        targets = (await db_session.execute(
+            select(AnnouncementTarget).where(AnnouncementTarget.announcement_id == announcement_id)
+        )).scalars().all()
+        assert all(t.post_status == "pending" for t in targets)
+
+        # And it's due again once the next tick catches up to the new time.
+        await db_session.refresh(announcement)
+        announcement.scheduled_for = datetime.now(timezone.utc) - timedelta(minutes=1)
+        await db_session.commit()
+
+        await _run_delivery_job(db_engine)
+        assert calls == ["chan-1", "chan-1"]
+
+    async def test_one_time_announcement_still_goes_terminal(
+        self, client: AsyncClient, db_session, db_engine, tenant: dict, monkeypatch
+    ):
+        created = await client.post("/admin/api/announcements", json={
+            "title": "Once", "body_markdown": "hi",
+            "scheduled_for": _future_iso(minutes=5),
+            "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
+        })
+        announcement_id = created.json()["id"]
+
+        async def fake_send(token, channel_id, message):
+            return True, ""
+        monkeypatch.setattr("scheduler.announcements.send_channel_message", fake_send)
+
+        await _run_delivery_job(db_engine)
+
+        announcement = await db_session.get(Announcement, announcement_id)
+        assert announcement.status == "posted"
 
 
 class TestCancelAnnouncement:

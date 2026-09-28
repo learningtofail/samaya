@@ -76,6 +76,7 @@
     </div>
     <div class="pf-v6-c-masthead__content">
       <select id="tenantPicker" class="pf-v6-c-form-control" onchange="onTenantChange(this.value)" title="Which alliance's data you're viewing and editing"></select>
+      <select id="displayTzPicker" class="pf-v6-c-form-control" onchange="onDisplayTzChange(this.value)" title="Your time zone — controls the local half of every time shown alongside UTC. Defaults to your browser's detected zone."></select>
       <form method="post" action="/auth/logout" style="margin:0">
         <button type="submit" class="pf-v6-c-button pf-m-secondary pf-m-small">Log out</button>
       </form>
@@ -384,26 +385,6 @@
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mStartTime"><span class="pf-v6-c-form__label-text">Start Time (UTC) HH:MM</span></label></div>
               <div class="pf-v6-c-form__group-control">
                 <input class="pf-v6-c-form-control" type="text" id="mStartTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric">
-                <div class="pf-v6-c-form__helper-text">Your detected timezone: <span id="mDetectedTz">—</span></div>
-              </div>
-            </div>
-            <div class="pf-v6-c-form__group">
-              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mTimezone"><span class="pf-v6-c-form__label-text">Display Timezone (admin UI)</span></label></div>
-              <div class="pf-v6-c-form__group-control">
-                <select class="pf-v6-c-form-control" id="mTimezone" onchange="applyDisplayTzChange()">
-                  <option value="UTC">UTC</option>
-                  <option value="America/Toronto">America/Toronto</option>
-                  <option value="America/New_York">America/New_York</option>
-                  <option value="America/Chicago">America/Chicago</option>
-                  <option value="America/Denver">America/Denver</option>
-                  <option value="America/Los_Angeles">America/Los_Angeles</option>
-                  <option value="Europe/London">Europe/London</option>
-                  <option value="Europe/Paris">Europe/Paris</option>
-                  <option value="Asia/Singapore">Asia/Singapore</option>
-                  <option value="Asia/Tokyo">Asia/Tokyo</option>
-                  <option value="Australia/Sydney">Australia/Sydney</option>
-                </select>
-                <div class="pf-v6-c-form__helper-text">Controls how times display across the admin UI. Times are always entered and stored above in UTC.</div>
               </div>
             </div>
             <div class="pf-v6-c-form__group">
@@ -504,7 +485,29 @@
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aScheduledFor"><span class="pf-v6-c-form__label-text">Send At (UTC)</span></label></div>
               <div class="pf-v6-c-form__group-control">
                 <input class="pf-v6-c-form-control" type="datetime-local" id="aScheduledFor">
-                <div class="pf-v6-c-form__helper-text">Your detected timezone: <span id="aDetectedTz">—</span>. Entered here in UTC, same as event start times.</div>
+                <div class="pf-v6-c-form__helper-text">Entered here in UTC, same as event start times.</div>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-control">
+                <span class="pf-v6-c-check">
+                  <input class="pf-v6-c-check__input" type="checkbox" id="aRecurring" onchange="toggleAnnouncementRecurringNote()">
+                  <label class="pf-v6-c-check__label" for="aRecurring">Recurring</label>
+                </span>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group" id="aIntervalGroup" style="display:none">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aIntervalDays"><span class="pf-v6-c-form__label-text">Repeat Every (days)</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="number" id="aIntervalDays" min="1" placeholder="e.g. 7">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-control">
+                <span class="pf-v6-c-check">
+                  <input class="pf-v6-c-check__input" type="checkbox" id="aLeadershipOnly">
+                  <label class="pf-v6-c-check__label" for="aLeadershipOnly">Leadership Only (👑 — display/categorization only; targets below still control where it's actually posted)</label>
+                </span>
               </div>
             </div>
             <div class="pf-v6-c-form__group full">
@@ -512,7 +515,7 @@
               <div class="pf-v6-c-form__group-control">
                 <div id="aTargetsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
                 <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="addAnnouncementTargetRow()">+ Add another target</button>
-                <div class="pf-v6-c-form__helper-text">One row per alliance you want this posted to, each with that alliance's own Discord channel ID.</div>
+                <div class="pf-v6-c-form__helper-text">One row per alliance you want this posted to, with that alliance's Discord channel chosen from its own server.</div>
               </div>
             </div>
           </div>

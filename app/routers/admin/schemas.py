@@ -7,7 +7,7 @@ unchanged" rather than "invalid".
 """
 from typing import Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from services.validators import (
     parse_interval_days, parse_duration_hours, parse_scope,
@@ -128,6 +128,9 @@ class AnnouncementIn(BaseModel):
     body_markdown: str
     scheduled_for: str  # ISO datetime, UTC
     targets: list[AnnouncementTargetIn]
+    leadership_only: bool = False
+    recurring: bool = False
+    interval_days: Optional[int] = None
 
     @field_validator("body_markdown")
     @classmethod
@@ -145,6 +148,16 @@ class AnnouncementIn(BaseModel):
         if not v:
             raise ValueError("At least one target is required")
         return v
+
+    @model_validator(mode="after")
+    def _validate_recurring_interval(self):
+        # Mirrors EventDefinition's ck_interval_positive constraint —
+        # required when recurring, meaningless (and left null) otherwise.
+        if self.recurring and (self.interval_days is None or self.interval_days <= 0):
+            raise ValueError("interval_days must be a positive integer when recurring is true")
+        if not self.recurring:
+            self.interval_days = None
+        return self
 
 
 class OccurrencePatch(BaseModel):

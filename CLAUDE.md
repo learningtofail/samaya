@@ -14,6 +14,7 @@ added, removed, or renamed — not on every logic change inside a file.
 - `.env.example` — required env vars (`DB_PASSWORD`, `SECRET_KEY`, `DISCORD_OAUTH_CLIENT_ID`/`_SECRET`/`_REDIRECT_URI`, `SUPERADMIN_DISCORD_IDS`, `PLATFORM_BOT_TOKEN`, `PLATFORM_PUBLIC_KEY`, SMTP settings)
 - `package.json` / `eslint.config.mjs` — lints `app/static/` JS only; no JS build step, no bundler
 - `migrate_to_multitenant.py` (repo root, one level up from `app/`) — one-time hand-written production migration (this repo has never actually used Alembic despite listing it as a dependency); already run once for the Kingdom/Tenant model — check with whoever deployed last before assuming it still needs running
+- `migrate_add_announcement_recurring.py` (`app/`) — one-time hand-written migration adding `leadership_only`/`recurring`/`interval_days` to `announcements`; same no-Alembic caveat as above — check whether it's already been run before assuming it still needs running
 
 ## `app/main.py`
 

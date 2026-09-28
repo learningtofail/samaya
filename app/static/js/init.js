@@ -4,6 +4,12 @@
 // already selected (or the first one, on a fresh browser). loadMe()'s own
 // api() call redirects to /auth/login on a 401, so there's nothing else
 // to handle for "not logged in" here.
+// The time zone picker (spec §15) needs no login or tenant context, so
+// it initializes immediately rather than waiting on the loadMe() chain
+// below — a logged-out visitor briefly seeing the login redirect still
+// gets a correctly-populated picker if the redirect is ever delayed.
+initDisplayTzPicker();
+
 loadMe().then(() => loadTenants()).then(() => {
   if (!TENANTS.length) {
     document.querySelector('main').innerHTML =

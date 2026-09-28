@@ -115,10 +115,15 @@ function buildGanttGrid(occs, wrapId, legendId, emptyMsg) {
       const occ = occDates.has(ds);
       let bg = occ ? color : isT ? 'var(--amber)' : isW ? 'var(--bg3)' : 'var(--bg)';
       const border = isWeekSep ? 'border-left:2px solid #94A3B8' : '';
-      html += `<td class="gantt-cell ${occ?'gantt-occ':''}" style="background:${bg};${border}" title="${escapeHtml(name)} — ${ds}">`;
-      if (occ) {
-        const occObj = occs.find(o => o.event_name===name && o.occurrence_date===ds);
-        html += occObj ? fmtTimeShort(occObj.start_datetime_utc) : '';
+      // Cell space is too tight for a full dual-time string (spec §15.5)
+      // — the visible label stays a single short local time
+      // (fmtTimeShort), and the full "UTC · local" pairing goes in the
+      // tooltip instead, where hovering is the "shown" for this view.
+      const occObj = occ ? occs.find(o => o.event_name===name && o.occurrence_date===ds) : null;
+      const title = occObj ? `${escapeHtml(name)} — ${ds} — ${dualTimeString(occObj.start_datetime_utc)}` : `${escapeHtml(name)} — ${ds}`;
+      html += `<td class="gantt-cell ${occ?'gantt-occ':''}" style="background:${bg};${border}" title="${title}">`;
+      if (occObj) {
+        html += fmtTimeShort(occObj.start_datetime_utc);
       }
       html += '</td>';
     });

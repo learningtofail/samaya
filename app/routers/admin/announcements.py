@@ -28,6 +28,9 @@ def _announcement_dict(a: Announcement) -> dict:
         "body_markdown":    a.body_markdown,
         "scheduled_for":    a.scheduled_for.isoformat(),
         "status":           a.status,
+        "leadership_only":  a.leadership_only,
+        "recurring":        a.recurring,
+        "interval_days":    a.interval_days,
         "posted_at":        a.posted_at.isoformat() if a.posted_at else None,
         "targets": [
             {
@@ -103,6 +106,8 @@ async def create_announcement(
     announcement = Announcement(
         owning_tenant_id=tenant.id, title=payload.title, body_markdown=payload.body_markdown,
         scheduled_for=scheduled_for, status="scheduled", created_by=user.id,
+        leadership_only=payload.leadership_only, recurring=payload.recurring,
+        interval_days=payload.interval_days,
     )
     db.add(announcement)
     await db.flush()

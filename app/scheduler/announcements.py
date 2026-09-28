@@ -3,7 +3,7 @@ scheduler/regeneration.py's module docstring for why this was split out
 of the old scheduler/jobs.py.
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -92,8 +92,29 @@ async def send_scheduled_announcements(session_factory=None):
                         select(AnnouncementTarget).where(AnnouncementTarget.announcement_id == announcement.id)
                     )
                     all_targets = all_targets_result.scalars().all()
-                    announcement.status = "posted" if any(t.post_status == "posted" for t in all_targets) else "failed"
+                    any_posted = any(t.post_status == "posted" for t in all_targets)
                     announcement.posted_at = now
+
+                    if announcement.recurring:
+                        # Re-arm rather than go terminal (spec §13.5): same
+                        # interval-days-from-anchor idea EventDefinition
+                        # already uses for occurrences, just applied to a
+                        # single row instead of generating new ones. Advance
+                        # from the announcement's own scheduled_for (its
+                        # anchor), not from `now`, so a delayed tick doesn't
+                        # compound drift into the next delivery time.
+                        anchor = ensure_utc(announcement.scheduled_for)
+                        next_run = anchor + timedelta(days=announcement.interval_days)
+                        while next_run <= now:
+                            next_run += timedelta(days=announcement.interval_days)
+                        announcement.scheduled_for = next_run
+                        announcement.status = "scheduled"
+                        for t in all_targets:
+                            t.post_status = "pending"
+                            t.status_detail = None
+                            t.discord_message_id = None
+                    else:
+                        announcement.status = "posted" if any_posted else "failed"
 
                 await session.commit()
 

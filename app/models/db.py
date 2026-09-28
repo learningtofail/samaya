@@ -271,9 +271,24 @@ class PostLog(Base):
 class Announcement(Base):
     """A scheduled markdown-text announcement — not built on
     EventDefinition/Occurrence since the shape is fundamentally
-    different (no start/end time, no recurrence). Delivery fans out to
-    one or more AnnouncementTargets, each an independent post, since
-    targets may be different Discord guilds with different bot tokens."""
+    different (no start/end time). Delivery fans out to one or more
+    AnnouncementTargets, each an independent post, since targets may be
+    different Discord guilds with different bot tokens.
+
+    leadership_only mirrors EventDefinition.leadership_only exactly — a
+    display/categorization flag only (drives the 👑/🛡️ badge in the
+    admin list), not a targeting mechanism or a permission gate.
+
+    recurring/interval_days reuse EventDefinition's "interval in days"
+    concept rather than a parallel occurrence-generation system: when a
+    recurring announcement's delivery job (scheduler/announcements.py)
+    finishes attempting all targets, instead of going terminal it resets
+    every AnnouncementTarget back to pending and advances scheduled_for
+    by interval_days, so it fires again next cycle. A non-recurring
+    announcement (the default, matching every row created before this
+    field existed) still goes terminal (posted/failed) after one send.
+    Cancelling a recurring announcement ends the whole series, not just
+    the next occurrence — see spec §13.5."""
     __tablename__ = "announcements"
 
     id               = Column(Integer, primary_key=True)
@@ -282,6 +297,9 @@ class Announcement(Base):
     body_markdown    = Column(Text, nullable=False)
     scheduled_for    = Column(DateTime(timezone=True), nullable=False)
     status           = Column(Text, nullable=False, default="scheduled")
+    leadership_only  = Column(Boolean, nullable=False, default=False)
+    recurring        = Column(Boolean, nullable=False, default=False)
+    interval_days    = Column(Integer, nullable=True)
     created_by       = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at       = Column(DateTime(timezone=True), server_default=func.now())
     posted_at        = Column(DateTime(timezone=True))
@@ -292,6 +310,10 @@ class Announcement(Base):
         CheckConstraint(
             "status IN ('draft', 'scheduled', 'posted', 'failed', 'cancelled')",
             name="ck_announcement_status",
+        ),
+        CheckConstraint(
+            "NOT recurring OR interval_days > 0",
+            name="ck_announcement_interval_positive_if_recurring",
         ),
     )
 

@@ -136,6 +136,62 @@ const GANTT_PALETTE = ['#bbf7d0','#bfdbfe','#fed7aa','#fde68a','#e9d5ff','#99f6e
 const DOW3 = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 let occurrenceData = [];
 
+// ── Display time zone (spec §15) ────────────────────────────
+// Governs the "local" half of every dual-time display (dualTimeString/
+// fmtTime/fmtDateTime in events.js) across the whole admin UI — global,
+// not tied to any one view, hence living here rather than in events.js
+// where it used to be buried inside the Add/Edit Event modal.
+//
+// Same IANA zone list the old mTimezone dropdown offered.
+const DISPLAY_TZ_OPTIONS = [
+  'UTC', 'America/Toronto', 'America/New_York', 'America/Chicago',
+  'America/Denver', 'America/Los_Angeles', 'Europe/London', 'Europe/Paris',
+  'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney',
+];
+
+function getDisplayTz() {
+  // Falls back to the browser-detected zone, not a hardcoded 'UTC' —
+  // the old version's default was the actual bug this section fixes:
+  // a new user saw their own zone named right next to the control and
+  // still got UTC everywhere until they opened the Event modal and
+  // picked it themselves.
+  return localStorage.getItem('samaya_display_tz')
+    || Intl.DateTimeFormat().resolvedOptions().timeZone
+    || 'UTC';
+}
+
+function setDisplayTz(tz) {
+  localStorage.setItem('samaya_display_tz', tz);
+}
+
+function initDisplayTzPicker() {
+  const picker = document.getElementById('displayTzPicker');
+  if (!picker) return;
+  const current = getDisplayTz();
+  // The detected zone can be anything in the IANA database, not just
+  // one of our curated common ones — if it's not in the list, prepend
+  // it rather than silently falling back to whatever option happens to
+  // render first, which would make the picker's visible selection lie
+  // about what's actually being applied.
+  const options = DISPLAY_TZ_OPTIONS.includes(current) ? DISPLAY_TZ_OPTIONS : [current, ...DISPLAY_TZ_OPTIONS];
+  picker.innerHTML = options.map(tz => `<option value="${tz}" ${tz === current ? 'selected' : ''}>${tz}</option>`).join('');
+}
+
+function onDisplayTzChange(tz) {
+  setDisplayTz(tz);
+  // Reload whichever view is currently open so its times re-render
+  // under the new zone — same set of views that read getDisplayTz()
+  // through fmtTime/fmtTimeShort/fmtDateTime.
+  const activeView = document.querySelector('.view.active');
+  if (!activeView) return;
+  const id = activeView.id.replace('v-', '');
+  if (id === 'dashboard')     loadDashboard();
+  if (id === 'schedule')      renderSchedule();
+  if (id === 'gantt')         loadGantt();
+  if (id === 'postlog')       loadPostLog();
+  if (id === 'announcements') loadAnnouncements();
+}
+
 function showView(id, btn) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.pf-v6-c-tabs__item').forEach(li => li.classList.remove('pf-m-current'));
