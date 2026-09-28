@@ -14,8 +14,24 @@ from scheduler.announcements import send_scheduled_announcements
 from services.time_utils import ensure_utc
 
 
-def _future_iso(minutes=0):
-    return (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+def _future_iso(minutes=60):
+    """A genuinely future ISO timestamp for a create-announcement payload —
+    routers/admin/announcements.py now rejects scheduled_for <= now, so
+    every create call needs a real future time, not just 'now' (which
+    would already be in the past by the time the request is processed)."""
+    return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
+
+
+async def _backdate_to_due(db_session, announcement_id):
+    """Simulates a 'due' announcement for a delivery-job test: create it
+    with a valid future scheduled_for via the API (satisfying the new
+    past-date guard), then move it into the past directly on the ORM
+    object — the same technique test_recurring_announcement_rearms_...
+    already used below to make a re-armed announcement due a second
+    time, now pulled out since four tests need it."""
+    announcement = await db_session.get(Announcement, announcement_id)
+    announcement.scheduled_for = datetime.now(timezone.utc) - timedelta(minutes=1)
+    await db_session.commit()
 
 
 async def _run_delivery_job(db_engine):
@@ -48,6 +64,15 @@ class TestCreateAnnouncement:
         })
         assert r.status_code == 422
         assert "2000" in r.json()["detail"]
+
+    async def test_past_scheduled_for_rejected(self, client: AsyncClient, tenant: dict):
+        r = await client.post("/admin/api/announcements", json={
+            "title": "Too late", "body_markdown": "hi",
+            "scheduled_for": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+            "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
+        })
+        assert r.status_code == 422
+        assert "future" in r.json()["detail"]
 
     async def test_no_targets_rejected(self, client: AsyncClient):
         r = await client.post("/admin/api/announcements", json={
@@ -173,10 +198,11 @@ class TestAnnouncementDelivery:
     ):
         created = await client.post("/admin/api/announcements", json={
             "title": "Now", "body_markdown": "Delivering now",
-            "scheduled_for": _future_iso(minutes=5),  # 5 minutes in the past — due
+            "scheduled_for": _future_iso(),
             "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
         })
         announcement_id = created.json()["id"]
+        await _backdate_to_due(db_session, announcement_id)
 
         calls = []
         async def fake_send(token, channel_id, message):
@@ -196,13 +222,14 @@ class TestAnnouncementDelivery:
     ):
         created = await client.post("/admin/api/announcements", json={
             "title": "Partial failure", "body_markdown": "Testing resilience",
-            "scheduled_for": _future_iso(minutes=5),
+            "scheduled_for": _future_iso(),
             "targets": [
                 {"tenant_slug": tenant["slug"], "discord_channel_id": "chan-mod"},
                 {"tenant_slug": second_tenant["slug"], "discord_channel_id": "chan-nsr"},
             ],
         })
         announcement_id = created.json()["id"]
+        await _backdate_to_due(db_session, announcement_id)
 
         async def flaky_send(token, channel_id, message):
             if channel_id == "chan-nsr":
@@ -252,12 +279,13 @@ class TestAnnouncementDelivery:
     ):
         created = await client.post("/admin/api/announcements", json={
             "title": "Weekly check-in", "body_markdown": "Reminder",
-            "scheduled_for": _future_iso(minutes=5),
+            "scheduled_for": _future_iso(),
             "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
             "recurring": True, "interval_days": 7,
         })
         announcement_id = created.json()["id"]
-        original_scheduled_for = datetime.fromisoformat(created.json()["scheduled_for"])
+        await _backdate_to_due(db_session, announcement_id)
+        original_scheduled_for = ensure_utc((await db_session.get(Announcement, announcement_id)).scheduled_for)
 
         calls = []
         async def fake_send(token, channel_id, message):
@@ -298,10 +326,11 @@ class TestAnnouncementDelivery:
     ):
         created = await client.post("/admin/api/announcements", json={
             "title": "Once", "body_markdown": "hi",
-            "scheduled_for": _future_iso(minutes=5),
+            "scheduled_for": _future_iso(),
             "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
         })
         announcement_id = created.json()["id"]
+        await _backdate_to_due(db_session, announcement_id)
 
         async def fake_send(token, channel_id, message):
             return True, ""

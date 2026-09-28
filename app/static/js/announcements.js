@@ -145,6 +145,13 @@ async function saveAnnouncement() {
     toast('Send time must be 24-hour HH:MM (e.g. 19:00)', true);
     return;
   }
+  // Same rule the server enforces (routers/admin/announcements.py) —
+  // checked here too so a past date/time is caught before the round
+  // trip, not just after.
+  if (new Date(scheduledDate + 'T' + scheduledTime + ':00Z').getTime() <= Date.now()) {
+    toast('Send date/time must be in the future', true);
+    return;
+  }
   if (recurring && (!intervalRaw || parseInt(intervalRaw) <= 0)) {
     toast('Recurring announcements need a positive "Repeat every (days)" value', true);
     return;

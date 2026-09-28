@@ -3,7 +3,7 @@
 // alliance" surface. Depends on common.js.
 
 async function loadPlatform() {
-  await Promise.all([loadPlatformKingdoms(), loadPlatformTenants(), loadPlatformUsers()]);
+  await Promise.all([loadPlatformKingdoms(), loadPlatformKingdomCoordinators(), loadPlatformTenants(), loadPlatformUsers()]);
 }
 
 async function loadPlatformKingdoms() {
@@ -41,6 +41,42 @@ async function editKingdom(k) {
     await api('PATCH', `/api/kingdoms/${k.id}`, payload, /*skipTenantHeader=*/true);
     toast('Kingdom updated');
     loadPlatformKingdoms();
+  } catch(e) { toast(e.message, true); }
+}
+
+// The standing counterpart to the "+ Kingdom Coordinator Invite" button
+// above — GET /api/kingdom-coordinators is scoped to one kingdom at a
+// time (routers/admin/invites.py), so this fetches the kingdom list
+// first and fans out one request per kingdom to build a flat table.
+async function loadPlatformKingdomCoordinators() {
+  try {
+    const kingdoms = await api('GET', '/api/kingdoms', null, /*skipTenantHeader=*/true);
+    const perKingdom = await Promise.all(kingdoms.map(async k => {
+      const coords = await api('GET', `/api/kingdom-coordinators?kingdom_id=${k.id}`, null, /*skipTenantHeader=*/true);
+      return coords.map(c => ({ ...c, kingdom_name: k.name }));
+    }));
+    const rows = perKingdom.flat();
+    document.getElementById('kingdomCoordinatorsBody').innerHTML = rows.length
+      ? rows.map(c =>
+          '<tr class="pf-v6-c-table__tr">'
+          + '<td class="pf-v6-c-table__td">' + escapeHtml(c.discord_username) + '</td>'
+          + '<td class="pf-v6-c-table__td">' + escapeHtml(c.kingdom_name) + '</td>'
+          + '<td class="pf-v6-c-table__td">'
+          + '<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="removeKingdomCoordinator(' + c.id + ',\'' + escapeHtml(c.discord_username).replace(/'/g, "\\'") + '\',\'' + escapeHtml(c.kingdom_name).replace(/'/g, "\\'") + '\')">Remove</button>'
+          + '</td>'
+          + '</tr>'
+        ).join('')
+      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="3" style="color:var(--muted);padding:20px">No kingdom coordinators yet.</td></tr>';
+  } catch(e) { toast(e.message, true); }
+}
+
+async function removeKingdomCoordinator(grantId, username, kingdomName) {
+  if (!confirm('Remove ' + username + '\'s kingdom-coordinator access to ' + kingdomName + '? '
+    + 'This does not affect their membership on any individual alliance.')) return;
+  try {
+    await api('DELETE', `/api/kingdom-coordinators/${grantId}`, null, /*skipTenantHeader=*/true);
+    toast('Kingdom coordinator access removed');
+    loadPlatformKingdomCoordinators();
   } catch(e) { toast(e.message, true); }
 }
 

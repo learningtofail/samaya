@@ -3,7 +3,7 @@ in scheduler/jobs.py's per-minute tick, reusing services/discord_api's
 send_channel_message — the same function that posts the "event has been
 scheduled" ping for occurrences (see routers/admin/occurrences.py).
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -76,6 +76,8 @@ async def create_announcement(
         scheduled_for = datetime.fromisoformat(payload.scheduled_for)
     except ValueError:
         raise HTTPException(status_code=422, detail="scheduled_for must be a valid ISO 8601 datetime")
+    if scheduled_for <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=422, detail="scheduled_for must be in the future")
 
     announcement = Announcement(
         owning_tenant_id=tenant.id, title=payload.title, body_markdown=payload.body_markdown,
