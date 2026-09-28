@@ -78,8 +78,8 @@ function tenantName(id) {
   return t ? t.name : ('#' + id);
 }
 
-function openEventModal(event, presetLeadership) {
-  document.getElementById('modalTitle').textContent = event ? 'Edit Event' : (presetLeadership ? 'Add Leadership Event' : 'Add Event');
+function openEventModal(event) {
+  document.getElementById('modalTitle').textContent = event ? 'Edit Event' : 'Add Event';
   document.getElementById('modalEventId').value = event && event.id ? event.id : '';
 
   // While combined mode is selected, there's no ambient tenant for a new
@@ -102,7 +102,7 @@ function openEventModal(event, presetLeadership) {
   document.getElementById('mAnchor').value      = event?.anchor_date || '';
   document.getElementById('mDescription').value       = event?.description || '';
   document.getElementById('mNotifMinutes').value      = event?.notify_minutes_before || '';
-  document.getElementById('mLeadershipOnly').checked  = event ? !!event.leadership_only : !!presetLeadership;
+  document.getElementById('mLeadershipOnly').checked  = !!event?.leadership_only;
   toggleLeadershipNote();
   document.getElementById('mDetectedTz').textContent = Intl.DateTimeFormat().resolvedOptions().timeZone;
   document.getElementById('mTimezone').value = getDisplayTz();

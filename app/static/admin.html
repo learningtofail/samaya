@@ -51,7 +51,17 @@
      whatever space is left) fixes it. */
   .pf-v6-c-masthead { flex-shrink: 0 !important; }
   .pf-v6-c-tabs { width: 100%; flex-shrink: 0 !important; overflow: visible !important; }
-  .pf-v6-c-page__main-container { flex: 1 1 auto !important; display: flex !important; flex-direction: column !important; align-self: stretch !important; width: 100% !important; overflow: visible !important; height: auto !important; }
+  /* PatternFly's default .pf-v6-c-page__main-container carries a
+     "page chrome inset" margin on BOTH inline-start and inline-end (same
+     token, symmetric by design — meant for the gap around a floating
+     card layout). Forcing width:100% above without zeroing that margin
+     made it look asymmetric: the start-side margin renders as a visible
+     gap, while the same margin on the end side pushes the container past
+     the viewport edge, where PatternFly's own overflow-x:hidden on this
+     element silently clips it — so one side shows a gap and the other
+     doesn't, even though the value is identical on both. Zero it here
+     instead of fighting the token. */
+  .pf-v6-c-page__main-container { flex: 1 1 auto !important; display: flex !important; flex-direction: column !important; align-self: stretch !important; width: 100% !important; margin: 0 !important; overflow: visible !important; height: auto !important; }
   .pf-v6-c-page__main { flex: 1 1 auto !important; width: 100% !important; overflow: visible !important; height: auto !important; }
 </style>
 </head>
@@ -140,8 +150,7 @@
 <div id="v-events" class="view">
   <div class="pf-v6-l-flex pf-m-align-items-center pf-v6-u-mb-sm" style="gap:12px">
     <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Event Definitions</h2>
-    <button class="pf-v6-c-button pf-m-primary" onclick="openEventModal()" title="Create a new recurring event definition.">+ Add Event</button>
-    <button class="pf-v6-c-button pf-m-secondary" onclick="openEventModal(null, true)" title="Create a new leadership-only event (channel notification only, not posted to Discord Scheduled Events or the public calendar).">+ Add Leadership Event</button>
+    <button class="pf-v6-c-button pf-m-primary" onclick="openEventModal()" title="Create a new recurring event definition. Check &quot;Leadership Only&quot; inside to make it a channel-notification-only event.">+ Add Event</button>
   </div>
   <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">🛡️ Alliance Events</h2>
   <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg" id="eventsTable">
