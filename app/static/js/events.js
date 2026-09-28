@@ -106,7 +106,19 @@ function openEventModal(event) {
   toggleLeadershipNote();
   document.getElementById('previewResult').textContent = '';
   populateDiscordFields(event);
+
+  document.getElementById('mTargetsList').innerHTML = '';
+  (event?.targets || []).forEach(t => addEventTargetRow(tenantSlugFor(t.tenant_id), t.notification_channel_id, t.notification_role_id));
+
   document.getElementById('eventModal').classList.add('open');
+}
+
+// Reverse of the tenant_id the API stores a target as — the target-row
+// UI keys off slug (same as TENANTS/the tenant picker everywhere else),
+// same reasoning as tenantName() just above.
+function tenantSlugFor(tenantId) {
+  const t = TENANTS.find(t => t.id === tenantId);
+  return t ? t.slug : '';
 }
 
 function duplicateEvent(event) {
@@ -235,6 +247,76 @@ async function populateDiscordFields(event) {
   }
 }
 
+// ── Extra Notification Targets (spec §20) ───────────────────────
+// One target row = one (tenant, notification channel, notification
+// role) triple — an EXTRA destination beyond the owning tenant's own
+// bare notification fields above and beyond kingdom-wide's automatic
+// same-Kingdom fan-out (EventTenantNotification, set via the "ping
+// settings" action on a kingdom-wide event from another alliance).
+// Mirrors Announcements' addAnnouncementTargetRow (announcements.js)
+// with one addition: a role dropdown, since an event's ping always
+// carries a role mention where an announcement doesn't need one.
+function addEventTargetRow(tenantSlug, channelId, roleId) {
+  const list = document.getElementById('mTargetsList');
+  const row = document.createElement('div');
+  row.className = 'event-target-row';
+  row.style = 'display:flex;gap:8px;align-items:center';
+  const tenantOptions = TENANTS.map(t =>
+    `<option value="${escapeHtml(t.slug)}" ${t.slug === tenantSlug ? 'selected' : ''}>${escapeHtml(t.name)}</option>`
+  ).join('');
+  row.innerHTML = `
+    <select class="pf-v6-c-form-control target-tenant" style="flex:1">${tenantOptions}</select>
+    <select class="pf-v6-c-form-control target-channel" style="flex:1"><option>Loading…</option></select>
+    <input class="pf-v6-c-form-control target-channel-fallback" type="text" style="flex:1;display:none" placeholder="Channel ID">
+    <select class="pf-v6-c-form-control target-role" style="flex:1"><option>Loading…</option></select>
+    <input class="pf-v6-c-form-control target-role-fallback" type="text" style="flex:1;display:none" placeholder="Role ID (optional)">
+    <button type="button" class="pf-v6-c-button pf-m-danger pf-m-small" onclick="this.closest('.event-target-row').remove()">Remove</button>
+  `;
+  list.appendChild(row);
+  const select = row.querySelector('.target-tenant');
+  select.addEventListener('change', () => populateEventTargetFields(row, select.value));
+  populateEventTargetFields(row, tenantSlug || select.value, channelId, roleId);
+}
+
+async function populateEventTargetFields(row, tenantSlug, channelId, roleId) {
+  const chanSelect   = row.querySelector('.target-channel');
+  const chanFallback = row.querySelector('.target-channel-fallback');
+  const roleSelect   = row.querySelector('.target-role');
+  const roleFallback = row.querySelector('.target-role-fallback');
+  [chanSelect, roleSelect].forEach(s => { s.innerHTML = '<option>Loading…</option>'; s.disabled = true; s.style.display = ''; });
+  [chanFallback, roleFallback].forEach(f => f.style.display = 'none');
+  try {
+    const [channels, roles] = await Promise.all([
+      api('GET', '/api/discord/channels', null, false, tenantSlug),
+      api('GET', '/api/discord/roles', null, false, tenantSlug),
+    ]);
+    fillSelect(chanSelect, channels.map(c => ({ value: c.id, label: '#' + c.name })), channelId);
+    fillSelect(roleSelect, roles.map(r => ({ value: r.id, label: '@' + r.name })), roleId);
+    chanSelect.disabled = false;
+    roleSelect.disabled = false;
+  } catch (e) {
+    chanSelect.style.display = 'none';
+    roleSelect.style.display = 'none';
+    chanFallback.style.display = '';
+    roleFallback.style.display = '';
+    chanFallback.value = channelId || '';
+    roleFallback.value = roleId || '';
+    toast(`Could not load Discord channels/roles for ${tenantSlug} — enter values manually`, true);
+  }
+}
+
+function eventTargetRowValue(row) {
+  const chanSelect   = row.querySelector('.target-channel');
+  const chanFallback = row.querySelector('.target-channel-fallback');
+  const roleSelect   = row.querySelector('.target-role');
+  const roleFallback = row.querySelector('.target-role-fallback');
+  return {
+    tenant_slug:              row.querySelector('.target-tenant').value,
+    notification_channel_id:  (chanSelect.style.display !== 'none' ? chanSelect.value : chanFallback.value).trim(),
+    notification_role_id:     (roleSelect.style.display !== 'none' ? roleSelect.value : roleFallback.value).trim(),
+  };
+}
+
 function fillSelect(selectEl, options, currentValue) {
   let matched = false;
   let optionsHtml = options.map(o => {
@@ -282,6 +364,12 @@ async function saveEvent() {
     notify_minutes_before:   document.getElementById('mNotifMinutes').value
                              ? parseInt(document.getElementById('mNotifMinutes').value)
                              : null,
+    // Always sent, even empty — the modal shows the full current target
+    // list every time it's opened (see openEventModal), so the full list
+    // is what gets saved back, same convention as every other field here.
+    targets: Array.from(document.querySelectorAll('#mTargetsList .event-target-row'))
+      .map(eventTargetRowValue)
+      .filter(t => t.notification_channel_id),
     description:     document.getElementById('mDescription').value,
   };
   // Only relevant for a new event while combined mode is selected (the

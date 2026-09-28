@@ -11,10 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from models import get_db
-from models.db import Announcement, AnnouncementTarget, Tenant, User, UserTenant
+from models.db import Announcement, AnnouncementTarget, Tenant, User
 from services.audit import log_change
 
-from .deps import get_current_tenant, get_current_user
+from .deps import get_current_tenant, get_current_user, resolve_target_tenants
 from .schemas import AnnouncementIn
 
 router = APIRouter()
@@ -45,24 +45,6 @@ def _announcement_dict(a: Announcement) -> dict:
     }
 
 
-async def _check_target_access(db: AsyncSession, user: User, tenant_ids: list[int]):
-    """A coordinator can only select tenants they hold UserTenant access
-    to — matching the invite system's own access list (see the
-    multi-tenant design doc, §6), not a separately-invented permission."""
-    if user.is_superadmin:
-        return
-    result = await db.execute(
-        select(UserTenant.tenant_id).where(UserTenant.user_id == user.id, UserTenant.tenant_id.in_(tenant_ids))
-    )
-    accessible = {row[0] for row in result.all()}
-    missing = set(tenant_ids) - accessible
-    if missing:
-        raise HTTPException(
-            status_code=403,
-            detail=f"You don't have access to tenant id(s) {sorted(missing)} to target them",
-        )
-
-
 @router.get("/api/announcements")
 async def list_announcements(
     tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
@@ -88,15 +70,7 @@ async def create_announcement(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    slug_result = await db.execute(
-        select(Tenant).where(Tenant.slug.in_([t.tenant_slug for t in payload.targets]))
-    )
-    tenants_by_slug = {t.slug: t for t in slug_result.scalars().all()}
-    missing_slugs = set(t.tenant_slug for t in payload.targets) - set(tenants_by_slug.keys())
-    if missing_slugs:
-        raise HTTPException(status_code=404, detail=f"Unknown tenant slug(s): {sorted(missing_slugs)}")
-
-    await _check_target_access(db, user, [t.id for t in tenants_by_slug.values()])
+    tenants_by_slug = await resolve_target_tenants(db, user, [t.tenant_slug for t in payload.targets])
 
     try:
         scheduled_for = datetime.fromisoformat(payload.scheduled_for)

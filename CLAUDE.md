@@ -15,6 +15,7 @@ added, removed, or renamed — not on every logic change inside a file.
 - `package.json` / `eslint.config.mjs` — lints `app/static/` JS only; no JS build step, no bundler
 - `migrate_to_multitenant.py` (repo root, one level up from `app/`) — one-time hand-written production migration (this repo has never actually used Alembic despite listing it as a dependency); already run once for the Kingdom/Tenant model — check with whoever deployed last before assuming it still needs running
 - `migrate_add_announcement_recurring.py` (`app/`) — one-time hand-written migration adding `leadership_only`/`recurring`/`interval_days` to `announcements`; same no-Alembic caveat as above — check whether it's already been run before assuming it still needs running
+- `migrate_add_event_targets.py` (`app/`) — one-time hand-written migration creating the `event_targets` table (spec §20); same no-Alembic caveat, same check-before-assuming-it's-needed caveat
 
 ## `app/main.py`
 
@@ -38,8 +39,8 @@ route logic itself.
   - `ui.py` — serves `static/admin.html`, nothing else, no auth dependency (deliberately — see its own docstring)
   - `me.py` — `GET /api/me`: who's logged in, their tenant roles, superadmin flag — drives which UI tabs the frontend shows
   - `status.py` — `GET /api/status`
-  - `events.py` — admin event CRUD, plus `PUT /api/events/{id}/notification-override` (a non-owning tenant's own ping channel for a kingdom-wide event — see `EventTenantNotification` in `models/db.py`)
-  - `occurrences.py` — occurrence list/patch, and the two Discord-posting endpoints (`post`, `delete .../discord`) — this is where kingdom-wide fan-out lives (`_post_to_one_tenant`, called once per tenant in the Kingdom)
+  - `events.py` — admin event CRUD (including its `targets` field, spec §20 — explicit extra destinations independent of Kingdom membership, see `EventTarget` in `models/db.py`), plus `PUT /api/events/{id}/notification-override` (a non-owning tenant's own ping channel for a kingdom-wide event — see `EventTenantNotification` in `models/db.py`, the *automatic*-fan-out counterpart to `EventTarget`)
+  - `occurrences.py` — occurrence list/patch, and the two Discord-posting endpoints (`post`, `delete .../discord`) — this is where kingdom-wide fan-out AND explicit `EventTarget` posting both live, deduplicated against each other (`_post_to_one_tenant`, `_resolve_notification`)
   - `scheduler_control.py` — manual `preview` and per-tenant `regenerate`
   - `post_log.py` — PostLog list + CSV export, tenant-scoped
   - `discord_config.py` — per-tenant channel/role listing (setting a tenant's own bot token/guild now happens via `tenants.py`, not here)
@@ -50,7 +51,7 @@ route logic itself.
   - `announcements.py` — scheduled-announcement create/list/cancel; delivery itself is in `scheduler/announcements.py`, not here
   - `schemas.py` — shared Pydantic request models
   - `serializers.py` — shared `_event_dict`/`_occurrence_dict`/`_log_dict` response shaping
-  - `deps.py` — shared FastAPI dependencies: `get_current_user`, `get_current_tenant` (checks real `UserTenant` access, not just "does this tenant exist"), `require_tenant_owner`, `require_superadmin`, `check_kingdom_coordinator` (a plain function, not a `Depends` — only some events need it), `get_discord_config`, `get_occurrence_with_event`, `find_post_log`. Check here before writing yet another inline lookup or permission check
+  - `deps.py` — shared FastAPI dependencies: `get_current_user`, `get_current_tenant` (checks real `UserTenant` access, not just "does this tenant exist"), `require_tenant_owner`, `require_superadmin`, `check_kingdom_coordinator` (a plain function, not a `Depends` — only some events need it), `get_discord_config`, `get_occurrence_with_event`, `find_post_log`, `resolve_target_tenants`/`check_target_access` (slug-resolution + access-check for an explicit multi-target list — shared by Announcements and Events' `targets` field, spec §13.3/§20). Check here before writing yet another inline lookup or permission check
   - `__init__.py` — just wires the above into one `router` (no logic to change here)
 
 ## `app/services/` — business logic, no HTTP
@@ -112,6 +113,7 @@ Organized by what's tested, not by router file:
 - `test_routes_public.py` — unauthenticated, tenant-scoped public routes (`events.py`, `ics.py`), including cross-tenant isolation
 - `test_routes_events.py` — admin event CRUD, `scope` field validation, kingdom-wide read visibility across tenants
 - `test_post_occurrence.py` — the Discord-posting race-condition/error-path tests, plus kingdom-wide fan-out (`TestKingdomWidePost`); monkeypatches `routers.admin.occurrences.create_discord_event` (patch target must match wherever a name is actually imported, not where it's defined)
+- `test_event_targets.py` — spec §20's explicit `EventTarget` rows: the API surface (create/patch/access-control), posting fan-out generalization, dedup against kingdom-wide's automatic fan-out, and notification-resolution isolation between targets
 - `test_auth.py` — session token round-trip/tamper rejection, `_claim_invite`'s atomic race guard, the full HTTP invite-claim round-trip (not just the unit-level function)
 - `test_auth_permissions.py` — the permission model itself: no-session→401, no-tenant-access→403, coordinator-vs-owner, kingdom-coordinator (an alliance owner does NOT automatically get this), superadmin-only tenant/kingdom CRUD
 - `test_announcements.py` — creation validation (2000-char Discord limit, empty targets), permission scoping to the creator's own tenant access, delivery (including one-target-failure not blocking another), cancellation. Delivery tests use `_run_delivery_job` to inject a test session factory — see that helper's docstring if a delivery test needs to call the job function itself

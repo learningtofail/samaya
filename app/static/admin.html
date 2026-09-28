@@ -452,6 +452,19 @@
                 <input class="pf-v6-c-form-control" type="text" id="mNotifRoleFallback" placeholder="Discord role ID (digits only)" style="display:none">
               </div>
             </div>
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Extra Notification Targets (spec §20)</span></span></div>
+              <div class="pf-v6-c-form__group-control">
+                <p class="pf-v6-u-font-size-sm" style="color:var(--muted);margin:0 0 8px">
+                  Optional — additional Discord servers/channels/roles to ping when this event is posted, beyond
+                  the alliance's own channel/role above and (for a kingdom-wide event) the automatic fan-out to
+                  every alliance in the kingdom. Use this for a server that isn't in the same kingdom at all
+                  (e.g. a community-wide hub server).
+                </p>
+                <div id="mTargetsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
+                <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="addEventTargetRow()">+ Add Target</button>
+              </div>
+            </div>
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mNotifMinutes"><span class="pf-v6-c-form__label-text">Notify X Minutes Before (leave blank to disable)</span></label></div>
               <div class="pf-v6-c-form__group-control">

@@ -188,6 +188,7 @@ class EventDefinition(Base):
     tenant_notifications = relationship(
         "EventTenantNotification", back_populates="event", cascade="all, delete-orphan"
     )
+    targets = relationship("EventTarget", back_populates="event", cascade="all, delete-orphan")
 
     __table_args__ = (
         CheckConstraint("interval_days > 0",    name="ck_interval_positive"),
@@ -219,6 +220,37 @@ class EventTenantNotification(Base):
 
     __table_args__ = (
         UniqueConstraint("event_id", "tenant_id", name="uq_event_tenant_notification"),
+    )
+
+
+class EventTarget(Base):
+    """An explicit extra (tenant, channel, role) destination for an
+    event — see spec §20. Independent of `scope`'s automatic same-Kingdom
+    fan-out (EventTenantNotification above): that mechanism only reaches
+    tenants sharing the owning tenant's Kingdom, whereas a target here can
+    be any tenant at all, regardless of Kingdom. The motivating case is
+    HTD — a community-wide server that isn't necessarily in the same
+    Kingdom as the alliances whose events should also reach it.
+
+    Each target gets its own Discord Scheduled Event post (via that
+    tenant's own Discord config, same _post_to_one_tenant() kingdom-wide
+    fan-out already uses) *and* its own notification channel/role for the
+    pre-event ping — this is what lets one event reach several Discord
+    servers, channels, and roles instead of only the owning tenant's one
+    channel and one role.
+    """
+    __tablename__ = "event_targets"
+
+    id                       = Column(Integer, primary_key=True)
+    event_id                 = Column(Integer, ForeignKey("event_definitions.id", ondelete="CASCADE"), nullable=False)
+    tenant_id                = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    notification_channel_id  = Column(Text, nullable=False, default="")
+    notification_role_id     = Column(Text, nullable=False, default="")
+
+    event = relationship("EventDefinition", back_populates="targets")
+
+    __table_args__ = (
+        UniqueConstraint("event_id", "tenant_id", name="uq_event_target"),
     )
 
 

@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
-from models.db import EventTenantNotification, Occurrence, PostLog, Tenant
+from models.db import EventTarget, EventTenantNotification, Occurrence, PostLog, Tenant
 from services.discord_api import (
     cancel_discord_event, create_discord_event, send_channel_message,
 )
@@ -89,27 +89,41 @@ async def update_occurrence(
 async def _resolve_notification(db, event, target_tenant: Tenant):
     """Which channel/role to ping for this target tenant, if any.
 
-    For an alliance-scope event there's exactly one tenant and the bare
-    columns on EventDefinition already are that tenant's own channel/role.
-    For kingdom-wide, those bare columns belong to the owning tenant only —
-    every other target needs its own override row (see
-    models.db.EventTenantNotification), since a channel/role ID from one
-    guild is meaningless (or wrong) in another. No override row for a
-    target = no announcement/reminder for that target, not an error — the
-    Discord Scheduled Event itself still gets created for them regardless.
+    The owning tenant's bare columns on EventDefinition are always the
+    answer for itself. Every other target's channel/role ID belongs to a
+    different guild, so it needs its own row somewhere — either:
+    - models.db.EventTenantNotification, for a tenant reached via
+      kingdom-wide's automatic same-Kingdom fan-out, or
+    - models.db.EventTarget (spec §20), for an explicit extra destination
+      independent of Kingdom membership (the HTD case: a server that
+      isn't necessarily in the owning tenant's Kingdom at all).
+    No row in either place for a given target = no ping for that target,
+    not an error — the Discord Scheduled Event itself still gets created
+    for them regardless (see _post_to_one_tenant).
     """
-    if event.scope == "alliance" or target_tenant.id == event.owning_tenant_id:
+    if target_tenant.id == event.owning_tenant_id:
         return event.notification_channel_id, event.notification_role_id
-    result = await db.execute(
-        select(EventTenantNotification).where(
-            EventTenantNotification.event_id == event.id,
-            EventTenantNotification.tenant_id == target_tenant.id,
+
+    if event.scope == "kingdom-wide":
+        result = await db.execute(
+            select(EventTenantNotification).where(
+                EventTenantNotification.event_id == event.id,
+                EventTenantNotification.tenant_id == target_tenant.id,
+            )
+        )
+        override = result.scalar_one_or_none()
+        if override:
+            return override.notification_channel_id, override.notification_role_id
+
+    target_result = await db.execute(
+        select(EventTarget).where(
+            EventTarget.event_id == event.id, EventTarget.tenant_id == target_tenant.id
         )
     )
-    override = result.scalar_one_or_none()
-    if not override:
+    target = target_result.scalar_one_or_none()
+    if not target:
         return "", ""
-    return override.notification_channel_id, override.notification_role_id
+    return target.notification_channel_id, target.notification_role_id
 
 
 async def _post_to_one_tenant(db: AsyncSession, occ: Occurrence, event, target_tenant: Tenant) -> dict:
@@ -200,9 +214,34 @@ async def post_occurrence(
     if (start - now).total_seconds() < 900:
         raise HTTPException(status_code=400, detail="Event starts in less than 15 minutes")
 
-    if event.scope == "alliance":
-        owning = await db.get(Tenant, event.owning_tenant_id)
-        result = await _post_to_one_tenant(db, occ, event, owning)
+    owning = await db.get(Tenant, event.owning_tenant_id)
+
+    # Kingdom-wide's automatic same-Kingdom fan-out — unchanged from
+    # before §20: every tenant sharing the owning tenant's Kingdom row,
+    # re-evaluated fresh on every post rather than a stored snapshot.
+    if event.scope == "kingdom-wide":
+        kingdom_result = await db.execute(select(Tenant).where(Tenant.kingdom_id == owning.kingdom_id))
+        base_targets = list(kingdom_result.scalars().all())
+    else:
+        base_targets = [owning]
+
+    # Explicit extra targets (spec §20) — additive, independent of scope
+    # and of Kingdom membership entirely (the HTD case). A tenant that's
+    # both an automatic fan-out recipient *and* an explicit target is
+    # deduplicated below rather than posted to twice.
+    explicit_result = await db.execute(
+        select(Tenant).join(EventTarget, EventTarget.tenant_id == Tenant.id)
+        .where(EventTarget.event_id == event.id)
+    )
+    seen_ids = {t.id for t in base_targets}
+    all_targets = base_targets + [t for t in explicit_result.scalars().all() if t.id not in seen_ids]
+
+    if len(all_targets) == 1:
+        # Preserves the original single-target response shape/semantics
+        # (a bare 409/502 rather than the multi-target {"targets": [...]}
+        # shape) for the common case: an alliance-scope event with no
+        # explicit targets attached.
+        result = await _post_to_one_tenant(db, occ, event, all_targets[0])
         if result["status"] == "skipped":
             raise HTTPException(status_code=409, detail="Already posted — see PostLog")
         if result["status"] == "error":
@@ -215,12 +254,7 @@ async def post_occurrence(
         await db.commit()
         return {"discord_event_id": result["discord_event_id"], "status": "posted"}
 
-    # kingdom-wide: fan out to every tenant in the owning tenant's kingdom
-    owning = await db.get(Tenant, event.owning_tenant_id)
-    targets_result = await db.execute(select(Tenant).where(Tenant.kingdom_id == owning.kingdom_id))
-    targets = targets_result.scalars().all()
-
-    results = [await _post_to_one_tenant(db, occ, event, target) for target in targets]
+    results = [await _post_to_one_tenant(db, occ, event, target) for target in all_targets]
 
     any_posted = any(r["status"] == "posted" for r in results)
     occ.post_status = "posted" if any_posted else "error"

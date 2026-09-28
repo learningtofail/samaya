@@ -17,12 +17,16 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from models import get_db
-from models.db import EventDefinition, PostLog, Tenant, User
+from models.db import EventDefinition, EventTarget, PostLog, Tenant, User
 from services.audit import log_change
 
-from .deps import check_kingdom_coordinator, get_current_tenant, get_current_tenants, get_current_user
+from .deps import (
+    check_kingdom_coordinator, get_current_tenant, get_current_tenants, get_current_user,
+    resolve_target_tenants,
+)
 from .schemas import EventIn, EventPatch, EventTenantNotificationIn
 from .serializers import _event_dict
 
@@ -44,6 +48,7 @@ async def list_events(
     result = await db.execute(
         select(EventDefinition)
         .join(Tenant, EventDefinition.owning_tenant_id == Tenant.id)
+        .options(selectinload(EventDefinition.targets))
         .where(
             or_(
                 EventDefinition.owning_tenant_id.in_(tenant_ids),
@@ -68,6 +73,11 @@ async def create_event(
     if payload.scope == "kingdom-wide":
         await check_kingdom_coordinator(db, user, tenant.kingdom_id)
 
+    # Resolve/validate targets before touching EventDefinition at all, so
+    # a bad target slug fails clean rather than leaving a half-created
+    # event behind.
+    targets_by_slug = await resolve_target_tenants(db, user, [t.tenant_slug for t in payload.targets])
+
     from datetime import time as dtime
     try:
         h, m = map(int, payload.start_time_utc.split(":"))
@@ -90,6 +100,14 @@ async def create_event(
         notification_role_id    = payload.notification_role_id,
         notify_minutes_before   = payload.notify_minutes_before,
     )
+    event.targets = [
+        EventTarget(
+            tenant_id=targets_by_slug[t.tenant_slug].id,
+            notification_channel_id=t.notification_channel_id,
+            notification_role_id=t.notification_role_id,
+        )
+        for t in payload.targets
+    ]
     db.add(event)
     try:
         await db.flush()
@@ -111,6 +129,11 @@ async def create_event(
     )
     await db.commit()
     await db.refresh(event)
+    # commit() expires every attribute by default, including the `targets`
+    # collection this function set in-memory above — without this, the
+    # relationship access in _event_dict() would trigger a lazy load,
+    # which raises under async SQLAlchemy rather than working silently.
+    await db.refresh(event, attribute_names=["targets"])
     return _event_dict(event)
 
 
@@ -123,9 +146,14 @@ async def update_event(
 ):
     from datetime import time as dtime
     result = await db.execute(
-        select(EventDefinition).where(
-            EventDefinition.id == event_id, EventDefinition.owning_tenant_id == tenant.id
-        )
+        select(EventDefinition)
+        # Eager-loaded because replacing event.targets below (when the
+        # patch includes a targets list) needs the CURRENT collection
+        # loaded first to diff old vs. new — an unloaded relationship
+        # would otherwise lazy-load here, which raises under async
+        # SQLAlchemy rather than working silently.
+        .options(selectinload(EventDefinition.targets))
+        .where(EventDefinition.id == event_id, EventDefinition.owning_tenant_id == tenant.id)
     )
     event = result.scalar_one_or_none()
     if not event:
@@ -134,6 +162,13 @@ async def update_event(
     target_scope = payload.scope if payload.scope is not None else event.scope
     if target_scope == "kingdom-wide":
         await check_kingdom_coordinator(db, user, tenant.kingdom_id)
+
+    # Resolve/validate before mutating the event — same reasoning as
+    # create_event: a bad target slug should fail clean, not leave a
+    # half-applied patch behind.
+    targets_by_slug = None
+    if payload.targets is not None:
+        targets_by_slug = await resolve_target_tenants(db, user, [t.tenant_slug for t in payload.targets])
 
     before = {"name": event.name, "scope": event.scope, "active": event.active}
 
@@ -156,6 +191,25 @@ async def update_event(
         except (ValueError, TypeError) as e:
             raise HTTPException(status_code=422, detail=f"Invalid start time: {e}")
 
+    if targets_by_slug is not None:
+        # Full replace, not a merge — the modal always shows and saves
+        # back the complete target list (see events.js's openEventModal/
+        # saveEvent), so there's no partial-update case to reconcile here.
+        # Explicit delete-then-add rather than reassigning event.targets
+        # wholesale: SQLAlchemy's collection-replacement diffing can
+        # schedule the new rows' INSERT before the old rows' DELETE
+        # within the same flush, which trips uq_event_target when a
+        # tenant is re-targeted with the same (event_id, tenant_id) pair.
+        for old in list(event.targets):
+            await db.delete(old)
+        await db.flush()
+        for t in payload.targets:
+            db.add(EventTarget(
+                event_id=event.id, tenant_id=targets_by_slug[t.tenant_slug].id,
+                notification_channel_id=t.notification_channel_id,
+                notification_role_id=t.notification_role_id,
+            ))
+
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id,
         table_name="event_definitions", row_id=event.id, action="update",
@@ -163,6 +217,7 @@ async def update_event(
     )
     await db.commit()
     await db.refresh(event)
+    await db.refresh(event, attribute_names=["targets"])
     return _event_dict(event)
 
 

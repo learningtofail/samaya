@@ -26,6 +26,18 @@ def _event_dict(e: EventDefinition) -> dict:
         "notification_channel_id":  e.notification_channel_id,
         "notification_role_id":     e.notification_role_id,
         "notify_minutes_before":    e.notify_minutes_before,
+        # Requires e.targets to already be loaded (selectinload in
+        # list_events, or populated in-memory by create/update_event) —
+        # accessing an unloaded relationship here would raise under async
+        # SQLAlchemy rather than silently lazy-loading.
+        "targets": [
+            {
+                "tenant_id":               t.tenant_id,
+                "notification_channel_id": t.notification_channel_id,
+                "notification_role_id":    t.notification_role_id,
+            }
+            for t in e.targets
+        ],
     }
 
 def _occurrence_dict(occ: Occurrence, ev: EventDefinition) -> dict:

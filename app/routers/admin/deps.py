@@ -172,6 +172,42 @@ async def get_occurrence_with_event(
     return row
 
 
+async def check_target_access(db: AsyncSession, user: User, tenant_ids: list[int]):
+    """A coordinator can only select tenants they hold UserTenant access
+    to — matching the invite system's own access list, not a separately
+    invented permission. Shared by Announcements' and Events' explicit
+    multi-target features (spec §13.3/§20), which previously each had
+    their own copy of this exact check."""
+    if user.is_superadmin:
+        return
+    result = await db.execute(
+        select(UserTenant.tenant_id).where(UserTenant.user_id == user.id, UserTenant.tenant_id.in_(tenant_ids))
+    )
+    accessible = {row[0] for row in result.all()}
+    missing = set(tenant_ids) - accessible
+    if missing:
+        raise HTTPException(
+            status_code=403,
+            detail=f"You don't have access to tenant id(s) {sorted(missing)} to target them",
+        )
+
+
+async def resolve_target_tenants(db: AsyncSession, user: User, target_slugs: list[str]) -> dict[str, Tenant]:
+    """Resolves a list of target tenant slugs to Tenant rows and checks
+    access on all of them in one call — the two steps every multi-target
+    create/update endpoint (Announcements, Events) needs before building
+    its target rows. Returns {} for an empty list without hitting the DB."""
+    if not target_slugs:
+        return {}
+    result = await db.execute(select(Tenant).where(Tenant.slug.in_(target_slugs)))
+    tenants_by_slug = {t.slug: t for t in result.scalars().all()}
+    missing = set(target_slugs) - set(tenants_by_slug.keys())
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Unknown tenant slug(s): {sorted(missing)}")
+    await check_target_access(db, user, [t.id for t in tenants_by_slug.values()])
+    return tenants_by_slug
+
+
 async def find_post_log(db: AsyncSession, tenant_id: int, event_name: str, occurrence_date) -> PostLog | None:
     """Not a FastAPI dependency — callers need different behavior when no
     row is found (some treat it as fine, some as a 404), so this stays a

@@ -15,6 +15,20 @@ from services.validators import (
 )
 
 
+class EventTargetIn(BaseModel):
+    """One explicit extra (tenant, notification channel, notification
+    role) destination for an event — see spec §20 and models.db.EventTarget.
+    Distinct from AnnouncementTargetIn: an announcement target's channel is
+    where the message itself is posted, whereas an event target's channel/
+    role is purely for the pre-event ping — the event's own Discord
+    Scheduled Event post goes to that target tenant's guild automatically,
+    using the event's own discord_channel as the location text (same as
+    kingdom-wide fan-out already does)."""
+    tenant_slug:              str
+    notification_channel_id:  str = ""
+    notification_role_id:     str = ""
+
+
 class EventIn(BaseModel):
     name:                    str
     interval_days:           int
@@ -28,6 +42,7 @@ class EventIn(BaseModel):
     notification_channel_id: str = ""
     notification_role_id:    str = ""
     notify_minutes_before:   Optional[int] = None
+    targets:                 list[EventTargetIn] = []
 
     _validate_interval = field_validator("interval_days", mode="before")(parse_interval_days)
     _validate_duration = field_validator("duration_hours", mode="before")(parse_duration_hours)
@@ -51,6 +66,11 @@ class EventPatch(BaseModel):
     notification_channel_id: Optional[str]  = None
     notification_role_id:    Optional[str]  = None
     notify_minutes_before:   Optional[int]  = None
+    # None = leave the current target list alone; [] = explicitly clear it.
+    # The admin UI always sends one or the other (never omits the key), so
+    # in practice this is always a full replace when the modal saves — see
+    # events.js's saveEvent().
+    targets:                 Optional[list[EventTargetIn]] = None
 
     # Same parsing rules as EventIn, but None means "leave this field
     # unchanged" on a partial update rather than "invalid".
