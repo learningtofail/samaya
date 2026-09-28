@@ -8,7 +8,7 @@ from fastapi import APIRouter
 
 from . import (
     ui, status, events, occurrences, scheduler_control,
-    post_log, discord_config, discord_sync, tenants, invites, me, announcements,
+    post_log, discord_config, discord_sync, tenants, invites, me, announcements, users,
 )
 
 router = APIRouter()
@@ -25,3 +25,4 @@ router.include_router(tenants.router)
 router.include_router(invites.router)
 router.include_router(me.router)
 router.include_router(announcements.router)
+router.include_router(users.router)

@@ -103,6 +103,11 @@ class KingdomIn(BaseModel):
     slug: str
 
 
+class KingdomPatch(BaseModel):
+    name: Optional[str] = None
+    slug: Optional[str] = None
+
+
 class TenantInviteIn(BaseModel):
     role: str  # owner | coordinator
 
@@ -112,6 +117,27 @@ class TenantInviteIn(BaseModel):
         if v not in ("owner", "coordinator"):
             raise ValueError("role must be 'owner' or 'coordinator'")
         return v
+
+
+class UserTenantPatch(BaseModel):
+    """Changes an existing UserTenant grant's role — e.g. promoting a
+    coordinator to owner. Distinct from TenantInviteIn: this edits a grant
+    that already exists, rather than creating a new pending invite."""
+    role: str  # owner | coordinator
+
+    @field_validator("role")
+    @classmethod
+    def _validate_role(cls, v):
+        if v not in ("owner", "coordinator"):
+            raise ValueError("role must be 'owner' or 'coordinator'")
+        return v
+
+
+class UserPatch(BaseModel):
+    """Superadmin-only: toggles a User's platform-wide is_superadmin flag.
+    No other User fields are editable here — discord_id/discord_username
+    come from Discord OAuth and aren't ours to change."""
+    is_superadmin: bool
 
 
 class KingdomInviteIn(BaseModel):

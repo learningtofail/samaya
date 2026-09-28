@@ -1,8 +1,15 @@
 // Access view (#v-access, owner-only — see applyRoleVisibility in
-// common.js): invite creation, the pending-invites list, and revocation
-// for the current tenant. Depends on common.js.
+// common.js): invite creation, the pending-invites list and revocation,
+// plus the roster of everyone who has already claimed access (members)
+// and the ability to change their role or remove them outright — the
+// invites list alone can't do either, since revoke only works on a
+// still-pending invite. Depends on common.js.
 
 async function loadAccess() {
+  await Promise.all([loadAccessInvites(), loadAccessMembers()]);
+}
+
+async function loadAccessInvites() {
   try {
     const invites = await api('GET', '/api/invites');
     const tbody = document.getElementById('invitesBody');
@@ -11,6 +18,46 @@ async function loadAccess() {
       return;
     }
     tbody.innerHTML = invites.map(buildInviteRow).join('');
+  } catch(e) { toast(e.message, true); }
+}
+
+async function loadAccessMembers() {
+  try {
+    const members = await api('GET', '/api/members');
+    const tbody = document.getElementById('membersBody');
+    tbody.innerHTML = members.length
+      ? members.map(buildMemberRow).join('')
+      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="3" style="color:var(--muted);padding:20px">No one has claimed access yet.</td></tr>';
+  } catch(e) { toast(e.message, true); }
+}
+
+function buildMemberRow(m) {
+  return '<tr class="pf-v6-c-table__tr">'
+    + '<td class="pf-v6-c-table__td">' + escapeHtml(m.discord_username) + '</td>'
+    + '<td class="pf-v6-c-table__td">' + escapeHtml(m.role) + '</td>'
+    + '<td class="pf-v6-c-table__td">'
+    + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="changeMemberRole(' + m.id + ',\'' + m.role + '\')" title="Promote/demote between owner and coordinator">Change role</button> '
+    + '<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="removeMember(' + m.id + ',\'' + escapeHtml(m.discord_username).replace(/'/g, "\\'") + '\')">Remove</button>'
+    + '</td>'
+    + '</tr>';
+}
+
+async function changeMemberRole(id, currentRole) {
+  const next = currentRole === 'owner' ? 'coordinator' : 'owner';
+  if (!confirm('Change this person\'s role from ' + currentRole + ' to ' + next + '?')) return;
+  try {
+    await api('PATCH', '/api/members/' + id, {role: next});
+    toast('Role updated');
+    loadAccessMembers();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function removeMember(id, name) {
+  if (!confirm('Remove ' + name + '\'s access to this tenant? They will need a new invite to get back in.')) return;
+  try {
+    await api('DELETE', '/api/members/' + id);
+    toast('Access removed');
+    loadAccessMembers();
   } catch(e) { toast(e.message, true); }
 }
 

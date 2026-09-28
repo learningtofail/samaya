@@ -18,7 +18,7 @@ from services.audit import log_change
 from services.discord_api import verify_token
 
 from .deps import get_current_user, require_superadmin
-from .schemas import KingdomIn, TenantIn, TenantPatch
+from .schemas import KingdomIn, KingdomPatch, TenantIn, TenantPatch
 
 router = APIRouter()
 
@@ -57,6 +57,33 @@ async def create_kingdom(
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=422, detail=f"Could not create kingdom: {e}")
+    return _kingdom_dict(kingdom)
+
+
+@router.patch("/api/kingdoms/{kingdom_id}")
+async def update_kingdom(
+    kingdom_id: int, payload: KingdomPatch,
+    user: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db),
+):
+    kingdom = await db.get(Kingdom, kingdom_id)
+    if not kingdom:
+        raise HTTPException(status_code=404, detail="Kingdom not found")
+
+    before = {"name": kingdom.name, "slug": kingdom.slug}
+    if payload.name is not None: kingdom.name = payload.name
+    if payload.slug is not None: kingdom.slug = payload.slug
+
+    try:
+        await log_change(
+            db, user_id=user.id, tenant_id=None,
+            table_name="kingdoms", row_id=kingdom.id, action="update",
+            before=before, after={"name": kingdom.name, "slug": kingdom.slug},
+        )
+        await db.commit()
+        await db.refresh(kingdom)
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=f"Could not update kingdom: {e}")
     return _kingdom_dict(kingdom)
 
 

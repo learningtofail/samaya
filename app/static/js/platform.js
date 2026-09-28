@@ -3,7 +3,7 @@
 // alliance" surface. Depends on common.js.
 
 async function loadPlatform() {
-  await Promise.all([loadPlatformKingdoms(), loadPlatformTenants()]);
+  await Promise.all([loadPlatformKingdoms(), loadPlatformTenants(), loadPlatformUsers()]);
 }
 
 async function loadPlatformKingdoms() {
@@ -12,10 +12,74 @@ async function loadPlatformKingdoms() {
     document.getElementById('kingdomsBody').innerHTML = kingdoms.length
       ? kingdoms.map(k =>
           '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td">' + escapeHtml(k.name) + '</td><td class="pf-v6-c-table__td">' + escapeHtml(k.slug) + '</td>'
-          + '<td class="pf-v6-c-table__td"><button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="createKingdomInvite(' + k.id + ')" '
+          + '<td class="pf-v6-c-table__td">'
+          + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="editKingdom(' + escapeHtml(JSON.stringify(k)) + ')" title="Edit this kingdom\'s name or slug">Edit</button> '
+          + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="createKingdomInvite(' + k.id + ')" '
           + 'title="Invite someone as kingdom coordinator for this kingdom">+ Kingdom Coordinator Invite</button></td></tr>'
         ).join('')
       : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="3" style="color:var(--muted);padding:20px">No kingdoms yet.</td></tr>';
+  } catch(e) { toast(e.message, true); }
+}
+
+// Same prompt-based editing convention as editTenant() below — Cancel on
+// any one field leaves it unchanged rather than aborting the whole edit.
+async function editKingdom(k) {
+  const name = prompt('Kingdom name:', k.name);
+  if (name === null) return;
+  const slug = prompt('URL slug:', k.slug);
+  if (slug === null) return;
+
+  const payload = {};
+  if (name !== k.name) payload.name = name;
+  if (slug !== k.slug) payload.slug = slug;
+  if (!Object.keys(payload).length) {
+    toast('No changes made');
+    return;
+  }
+
+  try {
+    await api('PATCH', `/api/kingdoms/${k.id}`, payload, /*skipTenantHeader=*/true);
+    toast('Kingdom updated');
+    loadPlatformKingdoms();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function loadPlatformUsers() {
+  try {
+    const users = await api('GET', '/api/users', null, /*skipTenantHeader=*/true);
+    document.getElementById('usersBody').innerHTML = users.length
+      ? users.map(buildUserRow).join('')
+      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="4" style="color:var(--muted);padding:20px">No users yet.</td></tr>';
+  } catch(e) { toast(e.message, true); }
+}
+
+function buildUserRow(u) {
+  const isSelf = ME && ME.id === u.id;
+  const lastLogin = u.last_login_at ? new Date(u.last_login_at).toUTCString().slice(0, 16) : '—';
+  const toggleLabel = u.is_superadmin ? 'Revoke superadmin' : 'Make superadmin';
+  const toggleBtn = isSelf && u.is_superadmin
+    ? '<span style="color:var(--muted);font-size:var(--fs-sm)" title="You can\'t remove your own superadmin access">(you)</span>'
+    : '<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="toggleSuperadmin(' + u.id + ',' + (u.is_superadmin ? 'true' : 'false') + ',\'' + escapeHtml(u.discord_username).replace(/'/g, "\\'") + '\')">' + toggleLabel + '</button>';
+  return '<tr class="pf-v6-c-table__tr">'
+    + '<td class="pf-v6-c-table__td">' + escapeHtml(u.discord_username) + '</td>'
+    + '<td class="pf-v6-c-table__td">' + (u.is_superadmin ? pfLabel('Superadmin', 'pf-m-red') : '') + '</td>'
+    + '<td class="pf-v6-c-table__td" style="color:var(--muted);font-size:var(--fs-sm)">' + lastLogin + '</td>'
+    + '<td class="pf-v6-c-table__td">' + toggleBtn + '</td>'
+    + '</tr>';
+}
+
+// Superadmin grants full access to every tenant and kingdom platform-wide
+// — confirm explicitly before flipping it either direction. Revoking your
+// own flag is blocked server-side (see routers/admin/users.py) since
+// there'd be no UI path back in.
+async function toggleSuperadmin(userId, currentlySuperadmin, username) {
+  const verb = currentlySuperadmin ? 'Revoke' : 'Grant';
+  if (!confirm(verb + ' superadmin access ' + (currentlySuperadmin ? 'from' : 'to') + ' ' + username + '? '
+    + 'Superadmin can see and edit every tenant and kingdom in this deployment.')) return;
+  try {
+    await api('PATCH', `/api/users/${userId}`, {is_superadmin: !currentlySuperadmin}, /*skipTenantHeader=*/true);
+    toast('Superadmin ' + (currentlySuperadmin ? 'revoked' : 'granted'));
+    loadPlatformUsers();
   } catch(e) { toast(e.message, true); }
 }
 

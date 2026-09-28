@@ -44,8 +44,9 @@ route logic itself.
   - `post_log.py` — PostLog list + CSV export, tenant-scoped
   - `discord_config.py` — per-tenant channel/role listing (setting a tenant's own bot token/guild now happens via `tenants.py`, not here)
   - `discord_sync.py` — the Discord↔PostLog reconciliation endpoints, tenant-scoped
-  - `tenants.py` — Kingdom/Tenant CRUD, the actual "onboard a new alliance" surface; create/update is superadmin-only, `list_tenants` is scoped to what the caller actually has access to
-  - `invites.py` — tenant invites (owner-issued) and kingdom-coordinator invites (superadmin-issued), both with revocation
+  - `tenants.py` — Kingdom/Tenant CRUD (including `PATCH /api/kingdoms/{id}`), the actual "onboard a new alliance" surface; create/update is superadmin-only, `list_tenants` is scoped to what the caller actually has access to
+  - `invites.py` — tenant invites (owner-issued) and kingdom-coordinator invites (superadmin-issued), both with revocation; also owns editing/removing grants that already exist (`/api/members` for UserTenant, `/api/kingdom-coordinators` for UserKingdom) — the standing-access counterpart to the invite lifecycle above
+  - `users.py` — platform-wide user listing and superadmin-flag toggling, superadmin-only; separate from `invites.py` because it edits the `User` row itself, not a per-tenant/per-kingdom grant
   - `announcements.py` — scheduled-announcement create/list/cancel; delivery itself is in `scheduler/announcements.py`, not here
   - `schemas.py` — shared Pydantic request models
   - `serializers.py` — shared `_event_dict`/`_occurrence_dict`/`_log_dict` response shaping
@@ -114,6 +115,7 @@ Organized by what's tested, not by router file:
 - `test_auth.py` — session token round-trip/tamper rejection, `_claim_invite`'s atomic race guard, the full HTTP invite-claim round-trip (not just the unit-level function)
 - `test_auth_permissions.py` — the permission model itself: no-session→401, no-tenant-access→403, coordinator-vs-owner, kingdom-coordinator (an alliance owner does NOT automatically get this), superadmin-only tenant/kingdom CRUD
 - `test_announcements.py` — creation validation (2000-char Discord limit, empty targets), permission scoping to the creator's own tenant access, delivery (including one-target-failure not blocking another), cancellation. Delivery tests use `_run_delivery_job` to inject a test session factory — see that helper's docstring if a delivery test needs to call the job function itself
+- `test_access_management.py` — editing/removing an already-claimed UserTenant or UserKingdom grant, Kingdom editing, and platform-wide user/superadmin management, including the sole-owner and can't-self-demote guards
 - `test_recurrence.py` — `services/recurrence.py` math, no HTTP
 - `test_validation.py` — `services/validators.py` / schema validation, including the `scope` field
 
