@@ -508,10 +508,16 @@
               </div>
             </div>
             <div class="pf-v6-c-form__group">
-              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aScheduledFor"><span class="pf-v6-c-form__label-text">Send At (UTC)</span></label></div>
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aScheduledDate"><span class="pf-v6-c-form__label-text">Send Date (UTC)</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <input class="pf-v6-c-form-control" type="datetime-local" id="aScheduledFor">
-                <div class="pf-v6-c-form__helper-text">Entered here in UTC, same as event start times.</div>
+                <input class="pf-v6-c-form-control" type="date" id="aScheduledDate">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aScheduledTime"><span class="pf-v6-c-form__label-text">Send Time (UTC) HH:MM</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="text" id="aScheduledTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric">
+                <div class="pf-v6-c-form__helper-text">24-hour clock, same as event start times.</div>
               </div>
             </div>
             <div class="pf-v6-c-form__group">

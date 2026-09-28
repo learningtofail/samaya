@@ -108,7 +108,8 @@ function openAnnouncementModal() {
   document.getElementById('aTitle').value = '';
   document.getElementById('aBody').value = '';
   updateAnnouncementCharCount();
-  document.getElementById('aScheduledFor').value = '';
+  document.getElementById('aScheduledDate').value = '';
+  document.getElementById('aScheduledTime').value = '';
   document.getElementById('aRecurring').checked = false;
   document.getElementById('aIntervalDays').value = '';
   document.getElementById('aIntervalGroup').style.display = 'none';
@@ -128,11 +129,20 @@ function closeAnnouncementModal() {
 async function saveAnnouncement() {
   const title = document.getElementById('aTitle').value.trim();
   const body = document.getElementById('aBody').value;
-  const scheduledLocal = document.getElementById('aScheduledFor').value; // "YYYY-MM-DDTHH:MM", entered as UTC
+  const scheduledDate = document.getElementById('aScheduledDate').value; // "YYYY-MM-DD"
+  const scheduledTime = document.getElementById('aScheduledTime').value.trim(); // "HH:MM", 24-hour, entered as UTC
   const recurring = document.getElementById('aRecurring').checked;
   const intervalRaw = document.getElementById('aIntervalDays').value;
-  if (!title || !body || !scheduledLocal) {
-    toast('Title, body, and send time are all required', true);
+  if (!title || !body || !scheduledDate || !scheduledTime) {
+    toast('Title, body, and send date/time are all required', true);
+    return;
+  }
+  // Same 24-hour HH:MM pattern events.js's saveEvent() enforces on
+  // mStartTime — a plain text field rather than a native time/
+  // datetime-local input specifically so the format can't drift to
+  // AM/PM display depending on the browser's locale.
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(scheduledTime)) {
+    toast('Send time must be 24-hour HH:MM (e.g. 19:00)', true);
     return;
   }
   if (recurring && (!intervalRaw || parseInt(intervalRaw) <= 0)) {
@@ -151,7 +161,7 @@ async function saveAnnouncement() {
   const payload = {
     title,
     body_markdown: body,
-    scheduled_for: scheduledLocal + ':00+00:00', // explicit UTC offset, matching the "Send At (UTC)" field label
+    scheduled_for: scheduledDate + 'T' + scheduledTime + ':00+00:00', // explicit UTC offset, matching the "Send Date/Time (UTC)" field labels
     targets,
     leadership_only: document.getElementById('aLeadershipOnly').checked,
     recurring,
