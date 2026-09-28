@@ -58,8 +58,9 @@
         <h1 id="pageTitle" style="color:var(--pf-t--global--text--color--inverse);margin:0;font-size:var(--pf-t--global--font--size--heading--lg);font-weight:var(--pf-t--global--font--weight--heading--bold)">⏱ Kingshot Event Schedule</h1>
       </span>
     </div>
-    <div class="pf-v6-c-masthead__content" style="display:flex;align-items:center;gap:var(--pf-t--global--spacer--md)">
-      <select class="pf-v6-c-form-control" id="displayTzPicker" onchange="onDisplayTzChange(this.value)" title="Local time zone used for the second time shown next to each UTC time" style="width:auto"></select>
+    <div class="pf-v6-c-masthead__content" style="display:flex;align-items:center;gap:var(--pf-t--global--spacer--sm)">
+      <label for="displayTzPicker" style="color:var(--pf-t--global--text--color--inverse);font-size:var(--pf-t--global--font--size--body--sm);white-space:nowrap">🕐 Time zone:</label>
+      <select class="pf-v6-c-form-control" id="displayTzPicker" onchange="onDisplayTzChange(this.value)" title="Local time zone used for the second time shown next to each UTC time" style="width:auto;margin-right:var(--pf-t--global--spacer--sm)"></select>
       <a class="pf-v6-c-button pf-m-primary" id="icsLink" href="#">📅 Subscribe to Calendar</a>
     </div>
   </header>

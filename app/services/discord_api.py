@@ -237,6 +237,30 @@ async def get_guild_roles(token: str, guild_id: str) -> tuple[list[dict], str]:
     return [], f"HTTP {response.status_code}"
 
 
+async def get_guild_info(token: str, guild_id: str) -> tuple[dict | None, str]:
+    """
+    Fetches the guild's own display name — distinct from our `Tenant.name`
+    (the alliance's name in our system), which several tenants can share
+    a Discord server without sharing (see MOD/NSR's shared guild_id).
+    Returns (info, error_message). info is None on failure.
+    """
+    url = f"{DISCORD_API_BASE}/guilds/{guild_id}"
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, headers=_auth_headers(token))
+        except httpx.RequestError as e:
+            return None, f"Network error: {e}"
+
+    if response.status_code == 200:
+        g = response.json()
+        return {"id": g["id"], "name": g["name"]}, ""
+    if response.status_code == 401:
+        return None, "401 Unauthorized — token invalid or bot removed"
+    if response.status_code == 403:
+        return None, "403 Forbidden — bot missing access to this guild"
+    return None, f"HTTP {response.status_code}"
+
+
 async def verify_token(token: str) -> tuple[bool, str]:
     """Calls GET /users/@me to confirm the token is valid."""
     async with httpx.AsyncClient() as client:

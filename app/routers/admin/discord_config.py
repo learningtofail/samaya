@@ -6,11 +6,23 @@ tenants.py has superseded.
 """
 from fastapi import APIRouter, Depends, HTTPException
 
-from services.discord_api import get_guild_channels, get_guild_roles
+from services.discord_api import get_guild_channels, get_guild_info, get_guild_roles
 
 from .deps import DiscordCreds, get_discord_config
 
 router = APIRouter()
+
+
+@router.get("/api/discord/guild")
+async def get_current_guild_info(cfg: DiscordCreds = Depends(get_discord_config)):
+    """The current tenant's Discord server's own display name — shown
+    next to Channel Name in the Config tab so it's clear which physical
+    Discord server (not which alliance) a channel belongs to; several
+    tenants can point at the same guild_id (see MOD/NSR)."""
+    info, error = await get_guild_info(cfg.bot_token, cfg.guild_id)
+    if error:
+        raise HTTPException(status_code=502, detail=error)
+    return info
 
 
 @router.get("/api/discord/channels")

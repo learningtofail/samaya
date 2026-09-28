@@ -12,15 +12,25 @@ async function loadDiscordConfig() {
   await Promise.all([loadDiscordChannels(), loadDiscordRoles()]);
 }
 
+// The guild's own Discord display name — distinct from the tenant/alliance
+// name shown everywhere else in the UI, and worth surfacing here since
+// more than one tenant can point at the same guild_id (e.g. MOD/NSR).
+// Fetched once per load and reused for every channel row, rather than a
+// per-row call, since it's the same value for all of them (Config is
+// single-tenant — see common.js's SINGLE_TENANT_ONLY_VIEWS).
 async function loadDiscordChannels() {
   const tbody = document.getElementById('discordChannelsBody');
   try {
-    const channels = await api('GET', '/api/discord/channels');
+    const [channels, guild] = await Promise.all([
+      api('GET', '/api/discord/channels'),
+      api('GET', '/api/discord/guild').catch(() => null),
+    ]);
+    const guildName = guild ? escapeHtml(guild.name) : '<span style="color:var(--muted)">—</span>';
     tbody.innerHTML = channels.length
-      ? channels.map(c => `<tr><td>${escapeHtml(c.name)}</td><td style="color:var(--muted);font-size:var(--fs-sm)">${escapeHtml(c.id)}</td></tr>`).join('')
-      : '<tr><td colspan="2" style="color:var(--muted);padding:20px">No channels found.</td></tr>';
+      ? channels.map(c => `<tr><td>${escapeHtml(c.name)}</td><td>${guildName}</td><td style="color:var(--muted);font-size:var(--fs-sm)">${escapeHtml(c.id)}</td></tr>`).join('')
+      : '<tr><td colspan="3" style="color:var(--muted);padding:20px">No channels found.</td></tr>';
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="2" style="color:var(--muted);padding:20px">${escapeHtml(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="3" style="color:var(--muted);padding:20px">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 

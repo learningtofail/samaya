@@ -76,6 +76,7 @@
     </div>
     <div class="pf-v6-c-masthead__content">
       <select id="tenantPicker" class="pf-v6-c-form-control" onchange="onTenantChange(this.value)" title="Which alliance's data you're viewing and editing"></select>
+      <label for="displayTzPicker" style="color:var(--pf-t--global--text--color--inverse);font-size:var(--pf-t--global--font--size--body--sm);white-space:nowrap">🕐 Time zone:</label>
       <select id="displayTzPicker" class="pf-v6-c-form-control" onchange="onDisplayTzChange(this.value)" title="Your time zone — controls the local half of every time shown alongside UTC. Defaults to your browser's detected zone."></select>
       <form method="post" action="/auth/logout" style="margin:0">
         <button type="submit" class="pf-v6-c-button pf-m-secondary pf-m-small">Log out</button>
@@ -85,16 +86,19 @@
 
   <div class="pf-v6-c-tabs" style="background:var(--pf-t--global--background--color--primary--default);border-block-end:1px solid var(--pf-t--global--border--color--default)">
     <ul class="pf-v6-c-tabs__list">
+      <!-- Tab order (spec §17): content/scheduling tabs first (what a
+           coordinator actually manages day to day), then per-tenant setup
+           and permissions, with superadmin-only Platform last. -->
       <li class="pf-v6-c-tabs__item pf-m-current"><button class="pf-v6-c-tabs__link" onclick="showView('dashboard',this)"><span class="pf-v6-c-tabs__item-text">Dashboard</span></button></li>
       <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('events',this)"><span class="pf-v6-c-tabs__item-text">Events</span></button></li>
+      <li class="pf-v6-c-tabs__item" id="announcementsTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('announcements',this)"><span class="pf-v6-c-tabs__item-text">Announcements</span></button></li>
       <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('schedule',this)"><span class="pf-v6-c-tabs__item-text">Schedule</span></button></li>
       <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('gantt',this)"><span class="pf-v6-c-tabs__item-text">Gantt</span></button></li>
       <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('postlog',this)"><span class="pf-v6-c-tabs__item-text">Post Log</span></button></li>
       <li class="pf-v6-c-tabs__item" id="syncTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('sync',this)"><span class="pf-v6-c-tabs__item-text">Sync <span id="syncBadge" class="pf-v6-c-label pf-m-red pf-m-filled pf-m-compact" style="display:none;margin-inline-start:4px"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text" id="syncBadgeText">0</span></span></span></span></button></li>
+      <li class="pf-v6-c-tabs__item" id="configTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('config',this)"><span class="pf-v6-c-tabs__item-text">Config</span></button></li>
       <li class="pf-v6-c-tabs__item" id="accessTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('access',this)" title="Manage who has coordinator/owner access to this alliance"><span class="pf-v6-c-tabs__item-text">Access</span></button></li>
       <li class="pf-v6-c-tabs__item" id="platformTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('platform',this)" title="Superadmin: manage Kingdoms and Tenants"><span class="pf-v6-c-tabs__item-text">Platform</span></button></li>
-      <li class="pf-v6-c-tabs__item" id="announcementsTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('announcements',this)"><span class="pf-v6-c-tabs__item-text">Announcements</span></button></li>
-      <li class="pf-v6-c-tabs__item" id="configTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('config',this)"><span class="pf-v6-c-tabs__item-text">Config</span></button></li>
     </ul>
   </div>
 
@@ -256,8 +260,8 @@
       <button class="btn btn-ghost btn-sm" onclick="loadDiscordConfig()">↻ Refresh</button>
     </div>
     <table class="mb-16">
-      <thead><tr><th>Name</th><th>ID</th></tr></thead>
-      <tbody id="discordChannelsBody"><tr><td colspan="2" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+      <thead><tr><th>Name</th><th>Server</th><th>ID</th></tr></thead>
+      <tbody id="discordChannelsBody"><tr><td colspan="3" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
     </table>
 
     <h3 style="font-size:var(--fs-md)">Roles</h3>

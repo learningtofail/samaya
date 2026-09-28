@@ -61,6 +61,26 @@ class TestDiscordConfig:
         assert r.status_code == 200
         assert r.json() == [{"id": "chan-1", "name": "general"}]
 
+    async def test_guild_reflects_discord_api_error(self, client: AsyncClient, monkeypatch):
+        """Same error-path reasoning as the channels/roles tests above —
+        this is also the path a not-yet-invited bot hits (403 from
+        Discord), which the frontend's config.js treats as non-fatal and
+        just leaves the Server column blank rather than failing the
+        whole channels list."""
+        async def fake_guild(token, guild_id):
+            return None, "403 Forbidden — bot missing access to this guild"
+        monkeypatch.setattr("routers.admin.discord_config.get_guild_info", fake_guild)
+        r = await client.get("/admin/api/discord/guild")
+        assert r.status_code == 502
+
+    async def test_guild_success_path(self, client: AsyncClient, monkeypatch):
+        async def fake_guild(token, guild_id):
+            return {"id": "guild-1", "name": "Kingshot HQ"}, ""
+        monkeypatch.setattr("routers.admin.discord_config.get_guild_info", fake_guild)
+        r = await client.get("/admin/api/discord/guild")
+        assert r.status_code == 200
+        assert r.json() == {"id": "guild-1", "name": "Kingshot HQ"}
+
     async def test_requires_login(self, client_no_session: AsyncClient, tenant: dict):
         r = await client_no_session.get(
             "/admin/api/discord/channels", headers={"X-Tenant-Slug": tenant["slug"]}
