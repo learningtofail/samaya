@@ -2,11 +2,17 @@
 // scheduled channel posts, not built on EventDefinition/Occurrence at all —
 // no start/end, no duration, no anchor date. Depends on common.js (api,
 // toast, escapeHtml, TENANTS, dualTimeString/fmtDateTime) and events.js's
-// tenantName() helper.
+// tenantName()/tenantSlugFor() helpers.
+
+// The last list loaded by loadAnnouncements() — duplicateAnnouncement()
+// reads from this instead of a second GET, since the row it's duplicating
+// is already sitting in front of the user.
+let ANNOUNCEMENTS = [];
 
 async function loadAnnouncements() {
   try {
     const items = await api('GET', '/api/announcements');
+    ANNOUNCEMENTS = items;
     const tbody = document.getElementById('announcementsBody');
     if (!items.length) {
       tbody.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="6" style="color:var(--muted);padding:20px">No announcements yet. Click &quot;+ New Announcement&quot; to schedule one.</td></tr>';
@@ -14,17 +20,28 @@ async function loadAnnouncements() {
     }
     const announcementStatusColor = { draft: 'pf-m-grey', scheduled: 'pf-m-blue', posted: 'pf-m-green', failed: 'pf-m-red', cancelled: 'pf-m-grey' };
     const targetStatusColor = { pending: 'pf-m-grey', posted: 'pf-m-green', error: 'pf-m-red' };
+    const deletableStatuses = ['posted', 'failed', 'cancelled'];
 
     tbody.innerHTML = items.map(a => {
+      // A cancelled announcement's targets never got a real post attempt
+      // past that point, so showing their pre-cancel post_status (usually
+      // a stale "pending") is misleading — the announcement-level status
+      // is what actually governs them once cancelled.
       const targetsHtml = a.targets.map(t => {
-        const label = tenantName(t.tenant_id) + ': ' + pfLabel(escapeHtml(t.post_status), targetStatusColor[t.post_status] || 'pf-m-grey');
-        return t.status_detail
+        const displayStatus = a.status === 'cancelled' ? 'cancelled' : t.post_status;
+        const color = a.status === 'cancelled' ? 'pf-m-grey' : (targetStatusColor[t.post_status] || 'pf-m-grey');
+        const label = tenantName(t.tenant_id) + ': ' + pfLabel(escapeHtml(displayStatus), color);
+        return t.status_detail && a.status !== 'cancelled'
           ? '<div title="' + escapeHtml(t.status_detail) + '">' + label + '</div>'
           : '<div>' + label + '</div>';
       }).join('');
       const cancelBtn = a.status === 'scheduled'
         ? '<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="cancelAnnouncement(' + a.id + ')">Cancel</button>'
         : '';
+      const deleteBtn = deletableStatuses.includes(a.status)
+        ? '<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="deleteAnnouncement(' + a.id + ')" title="Remove this finished announcement from the list">Delete</button>'
+        : '';
+      const duplicateBtn = '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="duplicateAnnouncement(' + a.id + ')" title="Open a new announcement pre-filled with this one\'s title, body, and targets">Duplicate</button>';
       const leadershipBadge = a.leadership_only
         ? ' <span title="Leadership only">👑</span>'
         : ' <span title="General">🛡️</span>';
@@ -37,7 +54,7 @@ async function loadAnnouncements() {
         + '<td class="pf-v6-c-table__td">' + recurringBadge + '</td>'
         + '<td class="pf-v6-c-table__td">' + pfLabel(escapeHtml(a.status), announcementStatusColor[a.status] || 'pf-m-grey') + '</td>'
         + '<td class="pf-v6-c-table__td">' + targetsHtml + '</td>'
-        + '<td class="pf-v6-c-table__td">' + cancelBtn + '</td>'
+        + '<td class="pf-v6-c-table__td" style="display:flex;gap:6px;flex-wrap:wrap">' + [cancelBtn, deleteBtn, duplicateBtn].filter(Boolean).join('') + '</td>'
         + '</tr>';
     }).join('');
   } catch (e) { toast(e.message, true); }
@@ -104,26 +121,42 @@ function announcementTargetChannelValue(row) {
   return select.style.display !== 'none' ? select.value : fallback.value;
 }
 
-function openAnnouncementModal() {
-  document.getElementById('aTitle').value = '';
-  document.getElementById('aBody').value = '';
+// source, when passed (duplicateAnnouncement below), pre-fills every
+// field except the send date/time — a duplicate always needs a fresh
+// future schedule, never the original's (which is either already past,
+// or the very thing that got cancelled/failed).
+function openAnnouncementModal(source) {
+  document.getElementById('aTitle').value = source ? source.title : '';
+  document.getElementById('aBody').value = source ? source.body_markdown : '';
   updateAnnouncementCharCount();
   document.getElementById('aScheduledDate').value = '';
   document.getElementById('aScheduledTime').value = '';
-  document.getElementById('aRecurring').checked = false;
-  document.getElementById('aIntervalDays').value = '';
-  document.getElementById('aIntervalGroup').style.display = 'none';
-  document.getElementById('aLeadershipOnly').checked = false;
+  document.getElementById('aRecurring').checked = !!(source && source.recurring);
+  document.getElementById('aIntervalDays').value = (source && source.interval_days) ? source.interval_days : '';
+  document.getElementById('aIntervalGroup').style.display = (source && source.recurring) ? '' : 'none';
+  document.getElementById('aLeadershipOnly').checked = !!(source && source.leadership_only);
   document.getElementById('aTargetsList').innerHTML = '';
-  // The Announcements tab is single-tenant-only (see common.js's
-  // SINGLE_TENANT_ONLY_VIEWS) — the picker is never on '*' while this
-  // modal is reachable, so the first target can default to it directly.
-  addAnnouncementTargetRow(getCurrentTenantSlug());
+  if (source && source.targets.length) {
+    source.targets.forEach(t => addAnnouncementTargetRow(tenantSlugFor(t.tenant_id), t.discord_channel_id));
+  } else {
+    // The Announcements tab is single-tenant-only (see common.js's
+    // SINGLE_TENANT_ONLY_VIEWS) — the picker is never on '*' while this
+    // modal is reachable, so the first target can default to it directly.
+    addAnnouncementTargetRow(getCurrentTenantSlug());
+  }
+  document.querySelector('#announcementModalTitle .pf-v6-c-modal-box__title-text').textContent =
+    source ? 'Duplicate Announcement' : 'New Announcement';
   document.getElementById('announcementModal').classList.add('open');
 }
 
 function closeAnnouncementModal() {
   document.getElementById('announcementModal').classList.remove('open');
+}
+
+function duplicateAnnouncement(id) {
+  const source = ANNOUNCEMENTS.find(a => a.id === id);
+  if (!source) return;
+  openAnnouncementModal(source);
 }
 
 async function saveAnnouncement() {
@@ -188,6 +221,15 @@ async function cancelAnnouncement(id) {
   try {
     await api('POST', `/api/announcements/${id}/cancel`);
     toast('Announcement cancelled');
+    loadAnnouncements();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deleteAnnouncement(id) {
+  if (!confirm('Delete this announcement permanently? This cannot be undone.')) return;
+  try {
+    await api('DELETE', `/api/announcements/${id}`);
+    toast('Announcement deleted');
     loadAnnouncements();
   } catch (e) { toast(e.message, true); }
 }

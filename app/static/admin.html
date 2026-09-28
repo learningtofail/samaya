@@ -33,6 +33,16 @@
   #eventModal.open { display: block; }
   #announcementModal { display: none; }
   #announcementModal.open { display: block; }
+  #tenantModal { display: none; }
+  #tenantModal.open { display: block; }
+  #timezoneModal { display: none; }
+  #timezoneModal.open { display: block; }
+  /* Header's alliance/time-zone controls (spec §24) — plain text links
+     rather than <select>s, each opening a modal with the actual option
+     list. Underline-on-hover only, so they read as "current state,
+     clickable" rather than a generic nav link. */
+  .header-link { color: var(--pf-t--global--text--color--inverse); font-size: var(--pf-t--global--font--size--body--sm); text-decoration: none; white-space: nowrap; padding: 4px 8px; border-radius: 4px; }
+  .header-link:hover { background: rgba(255,255,255,.1); text-decoration: underline; }
   /* Page's own internal layout is CSS grid with template areas for
      header/sidebar/main — since this app has no sidebar, a bare
      .pf-v6-c-tabs div as a direct child got auto-placed into whatever
@@ -75,9 +85,8 @@
       <span id="headerStatus">Kingshot Alliance Event Scheduler</span>
     </div>
     <div class="pf-v6-c-masthead__content">
-      <select id="tenantPicker" class="pf-v6-c-form-control" onchange="onTenantChange(this.value)" title="Which alliance's data you're viewing and editing"></select>
-      <label for="displayTzPicker" style="color:var(--pf-t--global--text--color--inverse);font-size:var(--pf-t--global--font--size--body--sm);white-space:nowrap">🕐 Time zone:</label>
-      <select id="displayTzPicker" class="pf-v6-c-form-control" onchange="onDisplayTzChange(this.value)" title="Your time zone — controls the local half of every time shown alongside UTC. Defaults to your browser's detected zone."></select>
+      <a href="#" id="tenantLink" class="header-link" onclick="openTenantModal();return false;" title="Which alliance's data you're viewing and editing — click to switch">Loading…</a>
+      <a href="#" id="headerClock" class="header-link" onclick="openTimezoneModal();return false;" title="Current UTC time and your local time — click to change your time zone">Loading…</a>
       <form method="post" action="/auth/logout" style="margin:0">
         <button type="submit" class="pf-v6-c-button pf-m-secondary pf-m-small">Log out</button>
       </form>
@@ -367,10 +376,10 @@
   <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">Plain channel posts with a title, a Markdown body, and a send time — not tied to any event definition. Once scheduled, an announcement can be cancelled but not edited; cancel and create a new one instead.</p>
   <table class="pf-v6-c-table pf-m-grid-md" id="announcementsTable">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
-      <th class="pf-v6-c-table__th">Title</th><th class="pf-v6-c-table__th">Scheduled For (UTC)</th><th class="pf-v6-c-table__th">Status</th>
+      <th class="pf-v6-c-table__th">Title</th><th class="pf-v6-c-table__th">Scheduled For (UTC)</th><th class="pf-v6-c-table__th">Recurring</th><th class="pf-v6-c-table__th">Status</th>
       <th class="pf-v6-c-table__th">Targets</th><th class="pf-v6-c-table__th">Actions</th>
     </tr></thead>
-    <tbody id="announcementsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="5" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody id="announcementsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="6" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
   </table>
 </div>
 
@@ -464,14 +473,8 @@
               </div>
             </div>
             <div class="pf-v6-c-form__group full">
-              <div class="pf-v6-c-form__group-label"><span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Extra Notification Targets (spec §20)</span></span></div>
+              <div class="pf-v6-c-form__group-label"><span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Extra Notification Targets</span></span></div>
               <div class="pf-v6-c-form__group-control">
-                <p class="pf-v6-u-font-size-sm" style="color:var(--muted);margin:0 0 8px">
-                  Optional — additional Discord servers/channels/roles to ping when this event is posted, beyond
-                  the alliance's own channel/role above and (for a kingdom-wide event) the automatic fan-out to
-                  every alliance in the kingdom. Use this for a server that isn't in the same kingdom at all
-                  (e.g. a community-wide hub server).
-                </p>
                 <div id="mTargetsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
                 <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="addEventTargetRow()">+ Add Target</button>
               </div>
@@ -580,6 +583,41 @@
       <footer class="pf-v6-c-modal-box__footer">
         <button class="pf-v6-c-button pf-m-primary" onclick="saveAnnouncement()">Save</button>
         <button class="pf-v6-c-button pf-m-link" onclick="closeAnnouncementModal()">Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<!-- TENANT MODAL (spec §24) — replaces the old header <select id="tenantPicker"> -->
+<div class="pf-v6-c-backdrop" id="tenantModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-sm" role="dialog" aria-modal="true" aria-labelledby="tenantModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="tenantModalTitle"><span class="pf-v6-c-modal-box__title-text">Switch Alliance</span></h2>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <div id="tenantModalList" style="display:flex;flex-direction:column;gap:4px"></div>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button class="pf-v6-c-button pf-m-link" onclick="closeTenantModal()">Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<!-- TIME ZONE MODAL (spec §24) — replaces the old header <select id="displayTzPicker"> -->
+<div class="pf-v6-c-backdrop" id="timezoneModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-sm" role="dialog" aria-modal="true" aria-labelledby="timezoneModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="timezoneModalTitle"><span class="pf-v6-c-modal-box__title-text">Time Zone</span></h2>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <p class="pf-v6-u-font-size-sm" style="color:var(--muted);margin:0 0 12px">Controls the local half of every time shown alongside UTC across the admin UI — the header clock, and every dual-time display in Dashboard, Schedule, Gantt, Post Log, and Announcements.</p>
+        <div id="timezoneModalList" style="display:flex;flex-direction:column;gap:4px"></div>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button class="pf-v6-c-button pf-m-link" onclick="closeTimezoneModal()">Cancel</button>
       </footer>
     </div>
   </div>

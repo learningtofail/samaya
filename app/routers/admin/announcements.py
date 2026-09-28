@@ -137,3 +137,38 @@ async def cancel_announcement(
     )
     await db.commit()
     return {"status": "cancelled"}
+
+
+@router.delete("/api/announcements/{announcement_id}", status_code=200)
+async def delete_announcement(
+    announcement_id: int,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Removes a finished announcement from the list outright — the
+    cleanup mechanism a "scheduled" one doesn't need (cancel it first;
+    see cancel_announcement above) but a posted/failed/cancelled one has
+    no other way to leave, and the list otherwise only grows."""
+    result = await db.execute(
+        select(Announcement).where(
+            Announcement.id == announcement_id, Announcement.owning_tenant_id == tenant.id
+        )
+    )
+    announcement = result.scalar_one_or_none()
+    if not announcement:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+    if announcement.status not in ("posted", "failed", "cancelled"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete an announcement with status '{announcement.status}' — cancel it first",
+        )
+
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id,
+        table_name="announcements", row_id=announcement.id, action="delete",
+        before={"title": announcement.title, "status": announcement.status},
+    )
+    await db.delete(announcement)  # AnnouncementTarget rows cascade via ondelete="CASCADE"
+    await db.commit()
+    return {"status": "deleted"}

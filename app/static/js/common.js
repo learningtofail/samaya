@@ -55,22 +55,49 @@ function isCombinedMode() {
 async function loadTenants() {
   TENANTS = await api('GET', '/api/tenants', null, /*skipTenantHeader=*/true);
   TENANTS.forEach(t => { TENANT_COLORS[t.id] = t.color; });
-  const picker = document.getElementById('tenantPicker');
-  if (!picker) return;
-  picker.innerHTML = TENANTS.map(t =>
-    `<option value="${escapeHtml(t.slug)}">${escapeHtml(t.name)}</option>`
-  ).join('') + (TENANTS.length > 1
-    ? `<option value="${COMBINED_SLUG}">— All my alliances —</option>`
-    : '');
   const current = getCurrentTenantSlug();
   if (current === COMBINED_SLUG && TENANTS.length > 1) {
-    picker.value = COMBINED_SLUG;
+    // already valid, nothing to correct
   } else if (current && TENANTS.some(t => t.slug === current)) {
-    picker.value = current;
+    // already valid, nothing to correct
   } else if (TENANTS.length) {
     setCurrentTenantSlug(TENANTS[0].slug);
-    picker.value = TENANTS[0].slug;
   }
+  renderTenantLink();
+}
+
+// Header's alliance control (spec §24): a text link showing the current
+// selection, rather than the old <select id="tenantPicker"> — the actual
+// list of choices now lives in the Switch Alliance modal (openTenantModal
+// below), which is what needed a <select>'s worth of state in the first
+// place.
+function renderTenantLink() {
+  const link = document.getElementById('tenantLink');
+  if (!link) return;
+  const slug = getCurrentTenantSlug();
+  const tenant = TENANTS.find(t => t.slug === slug);
+  const label = slug === COMBINED_SLUG ? '— All my alliances —' : (tenant ? tenant.name : (slug || 'Select alliance'));
+  link.textContent = label + ' ▾';
+}
+
+function openTenantModal() {
+  const list = document.getElementById('tenantModalList');
+  const current = getCurrentTenantSlug();
+  const options = TENANTS.map(t => ({ slug: t.slug, name: t.name }))
+    .concat(TENANTS.length > 1 ? [{ slug: COMBINED_SLUG, name: '— All my alliances —' }] : []);
+  list.innerHTML = options.map(o =>
+    `<button type="button" class="pf-v6-c-button ${o.slug === current ? 'pf-m-primary' : 'pf-m-secondary'}" style="justify-content:flex-start" onclick="selectTenant('${escapeHtml(o.slug)}')">${escapeHtml(o.name)}</button>`
+  ).join('');
+  document.getElementById('tenantModal').classList.add('open');
+}
+
+function closeTenantModal() {
+  document.getElementById('tenantModal').classList.remove('open');
+}
+
+function selectTenant(slug) {
+  closeTenantModal();
+  onTenantChange(slug);
 }
 
 // Views with no meaningful "combined" form — each is inherently tied to
@@ -91,9 +118,9 @@ function onTenantChange(slug) {
   const activeId = activeView ? activeView.id.replace('v-', '') : null;
   if (slug === COMBINED_SLUG && activeId && SINGLE_TENANT_ONLY_VIEWS.includes(activeId)) {
     setCurrentTenantSlug(TENANTS[0].slug);
-    document.getElementById('tenantPicker').value = TENANTS[0].slug;
     applyRoleVisibility();
   }
+  renderTenantLink();
   // Reload whichever view is currently open under the (possibly just
   // corrected) tenant selection.
   const current = document.querySelector('.view.active');
@@ -164,21 +191,60 @@ function setDisplayTz(tz) {
   localStorage.setItem('samaya_display_tz', tz);
 }
 
-function initDisplayTzPicker() {
-  const picker = document.getElementById('displayTzPicker');
-  if (!picker) return;
-  const current = getDisplayTz();
-  // The detected zone can be anything in the IANA database, not just
-  // one of our curated common ones — if it's not in the list, prepend
-  // it rather than silently falling back to whatever option happens to
-  // render first, which would make the picker's visible selection lie
-  // about what's actually being applied.
-  const options = DISPLAY_TZ_OPTIONS.includes(current) ? DISPLAY_TZ_OPTIONS : [current, ...DISPLAY_TZ_OPTIONS];
-  picker.innerHTML = options.map(tz => `<option value="${tz}" ${tz === current ? 'selected' : ''}>${tz}</option>`).join('');
+// Header's time-zone control (spec §24): a live "HH:MM UTC · HH:MM <zone>"
+// clock, rather than the old bare <select id="displayTzPicker"> — clicking
+// it opens the Time Zone modal (openTimezoneModal below) to change it.
+// Needs no login/tenant context, same as the picker it replaces, so
+// init.js starts it immediately rather than waiting on loadMe().
+let _headerClockTimer = null;
+
+function formatHeaderClock() {
+  const now = new Date();
+  const utcStr = now.toLocaleTimeString('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' });
+  const tz = getDisplayTz();
+  if (tz === 'UTC') return `🕐 ${utcStr} UTC`;
+  let localStr;
+  try {
+    localStr = now.toLocaleTimeString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    // An invalid/unrecognized IANA zone name (shouldn't happen via the
+    // modal's own option list, but guards a hand-edited localStorage
+    // value) — fall back to showing UTC only rather than throwing.
+    return `🕐 ${utcStr} UTC`;
+  }
+  return `🕐 ${utcStr} UTC · ${localStr} (${tz})`;
 }
 
-function onDisplayTzChange(tz) {
+function startHeaderClock() {
+  const el = document.getElementById('headerClock');
+  if (!el) return;
+  const tick = () => { el.textContent = formatHeaderClock(); };
+  tick();
+  if (_headerClockTimer) clearInterval(_headerClockTimer);
+  _headerClockTimer = setInterval(tick, 30000); // minute-resolution display, 30s is plenty
+}
+
+function openTimezoneModal() {
+  const list = document.getElementById('timezoneModalList');
+  const current = getDisplayTz();
+  // The detected/stored zone can be anything in the IANA database, not
+  // just one of our curated common ones — if it's not in the list,
+  // prepend it rather than silently leaving it unrepresented as a choice.
+  const options = DISPLAY_TZ_OPTIONS.includes(current) ? DISPLAY_TZ_OPTIONS : [current, ...DISPLAY_TZ_OPTIONS];
+  list.innerHTML = options.map(tz =>
+    `<button type="button" class="pf-v6-c-button ${tz === current ? 'pf-m-primary' : 'pf-m-secondary'}" style="justify-content:flex-start" onclick="selectTimezone('${tz}')">${tz}</button>`
+  ).join('');
+  document.getElementById('timezoneModal').classList.add('open');
+}
+
+function closeTimezoneModal() {
+  document.getElementById('timezoneModal').classList.remove('open');
+}
+
+function selectTimezone(tz) {
   setDisplayTz(tz);
+  closeTimezoneModal();
+  startHeaderClock();
   // Reload whichever view is currently open so its times re-render
   // under the new zone — same set of views that read getDisplayTz()
   // through fmtTime/fmtTimeShort/fmtDateTime.

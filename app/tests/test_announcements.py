@@ -378,3 +378,63 @@ class TestCancelAnnouncement:
 
         await _run_delivery_job(db_engine)
         assert calls == []
+
+
+class TestDeleteAnnouncement:
+
+    async def test_cannot_delete_scheduled_announcement(self, client: AsyncClient, tenant: dict):
+        """Cleanup is for finished announcements only — a still-scheduled
+        one has to be cancelled first (TestCancelAnnouncement above), same
+        as the rest of the admin UI never lets a live thing be deleted out
+        from under itself."""
+        created = await client.post("/admin/api/announcements", json={
+            "title": "Still scheduled", "body_markdown": "hi", "scheduled_for": _future_iso(),
+            "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
+        })
+        announcement_id = created.json()["id"]
+
+        r = await client.delete(f"/admin/api/announcements/{announcement_id}")
+        assert r.status_code == 400
+        assert "cancel" in r.json()["detail"].lower()
+
+        listed = await client.get("/admin/api/announcements")
+        assert any(a["id"] == announcement_id for a in listed.json())
+
+    async def test_can_delete_cancelled_announcement(self, client: AsyncClient, tenant: dict):
+        created = await client.post("/admin/api/announcements", json={
+            "title": "To cancel then delete", "body_markdown": "hi", "scheduled_for": _future_iso(),
+            "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
+        })
+        announcement_id = created.json()["id"]
+        await client.post(f"/admin/api/announcements/{announcement_id}/cancel")
+
+        r = await client.delete(f"/admin/api/announcements/{announcement_id}")
+        assert r.status_code == 200
+
+        listed = await client.get("/admin/api/announcements")
+        assert not any(a["id"] == announcement_id for a in listed.json())
+
+    async def test_can_delete_posted_announcement(
+        self, client: AsyncClient, db_session, db_engine, tenant: dict, monkeypatch
+    ):
+        created = await client.post("/admin/api/announcements", json={
+            "title": "To post then delete", "body_markdown": "hi", "scheduled_for": _future_iso(),
+            "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
+        })
+        announcement_id = created.json()["id"]
+        await _backdate_to_due(db_session, announcement_id)
+
+        async def fake_send(token, channel_id, message):
+            return True, ""
+        monkeypatch.setattr("scheduler.announcements.send_channel_message", fake_send)
+        await _run_delivery_job(db_engine)
+
+        r = await client.delete(f"/admin/api/announcements/{announcement_id}")
+        assert r.status_code == 200
+
+        listed = await client.get("/admin/api/announcements")
+        assert not any(a["id"] == announcement_id for a in listed.json())
+
+    async def test_delete_nonexistent_announcement_404s(self, client: AsyncClient):
+        r = await client.delete("/admin/api/announcements/999999")
+        assert r.status_code == 404
