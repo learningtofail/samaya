@@ -64,6 +64,37 @@ async def get_current_tenant(
     return tenant
 
 
+async def get_current_tenants(
+    x_tenant_slug: str = Header(default=""),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[Tenant]:
+    """Combined-mode variant of get_current_tenant, for read/list endpoints
+    only (see spec §14.3): 'X-Tenant-Slug: *' means every tenant the caller
+    holds UserTenant access to (or every tenant in the deployment, for a
+    superadmin), not one. Write endpoints keep depending on
+    get_current_tenant directly, which has no notion of '*' and still
+    requires exactly one real, access-checked tenant — combined mode is a
+    viewing convenience, not a way to act on several tenants in one call.
+    """
+    if x_tenant_slug != "*":
+        tenant = await get_current_tenant(x_tenant_slug=x_tenant_slug, user=user, db=db)
+        return [tenant]
+
+    if user.is_superadmin:
+        result = await db.execute(select(Tenant))
+        return list(result.scalars().all())
+
+    result = await db.execute(
+        select(Tenant).join(UserTenant, UserTenant.tenant_id == Tenant.id)
+        .where(UserTenant.user_id == user.id)
+    )
+    tenants = list(result.scalars().all())
+    if not tenants:
+        raise HTTPException(status_code=403, detail="You don't have access to any tenant")
+    return tenants
+
+
 async def require_tenant_owner(
     tenant: Tenant = Depends(get_current_tenant),
     user: User = Depends(get_current_user),

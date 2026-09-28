@@ -34,11 +34,22 @@ let TENANTS = [];               // populated by loadTenants(), used for the
 const TENANT_COLORS = {};       // tenant.id -> tenant.color, replaces the
                                  // old hardcoded ALLIANCE_COLORS constant
 
+// The literal slug '*' is the combined-view pseudo-tenant (spec §14):
+// sent as-is in the X-Tenant-Slug header, which deps.get_current_tenants
+// on the server recognizes as "every tenant I have access to" for
+// read/list endpoints. Write endpoints never receive '*' — see the
+// tenantOverride param on api() below, used by the Add Event modal etc.
+// to target one explicit tenant while combined mode is selected.
+const COMBINED_SLUG = '*';
+
 function getCurrentTenantSlug() {
   return localStorage.getItem('samaya_tenant_slug') || '';
 }
 function setCurrentTenantSlug(slug) {
   localStorage.setItem('samaya_tenant_slug', slug);
+}
+function isCombinedMode() {
+  return getCurrentTenantSlug() === COMBINED_SLUG;
 }
 
 async function loadTenants() {
@@ -48,9 +59,13 @@ async function loadTenants() {
   if (!picker) return;
   picker.innerHTML = TENANTS.map(t =>
     `<option value="${escapeHtml(t.slug)}">${escapeHtml(t.name)}</option>`
-  ).join('');
+  ).join('') + (TENANTS.length > 1
+    ? `<option value="${COMBINED_SLUG}">— All my alliances —</option>`
+    : '');
   const current = getCurrentTenantSlug();
-  if (current && TENANTS.some(t => t.slug === current)) {
+  if (current === COMBINED_SLUG && TENANTS.length > 1) {
+    picker.value = COMBINED_SLUG;
+  } else if (current && TENANTS.some(t => t.slug === current)) {
     picker.value = current;
   } else if (TENANTS.length) {
     setCurrentTenantSlug(TENANTS[0].slug);
@@ -58,22 +73,52 @@ async function loadTenants() {
   }
 }
 
+// Views with no meaningful "combined" form — each is inherently tied to
+// one tenant's own Discord bot/guild config or its own invite grants
+// (spec §14.1). Switching into one of these while combined mode is
+// selected falls back to the first real tenant instead.
+// 'announcements' is here too: an announcement is authored by one tenant
+// (owning_tenant_id) even though it can target several, and the admin
+// API's announcements list/cancel endpoints were kept single-tenant
+// (unlike events/occurrences/post-log) since combined viewing wasn't
+// part of what this feature needed (spec §13 predates §14).
+const SINGLE_TENANT_ONLY_VIEWS = ['config', 'sync', 'access', 'platform', 'announcements'];
+
 function onTenantChange(slug) {
   setCurrentTenantSlug(slug);
   applyRoleVisibility();
-  // Reload whichever view is currently open under the new tenant.
   const activeView = document.querySelector('.view.active');
-  if (activeView) showView(activeView.id.replace('v-', ''), document.querySelector('.pf-v6-c-tabs__item.pf-m-current .pf-v6-c-tabs__link'));
+  const activeId = activeView ? activeView.id.replace('v-', '') : null;
+  if (slug === COMBINED_SLUG && activeId && SINGLE_TENANT_ONLY_VIEWS.includes(activeId)) {
+    setCurrentTenantSlug(TENANTS[0].slug);
+    document.getElementById('tenantPicker').value = TENANTS[0].slug;
+    applyRoleVisibility();
+  }
+  // Reload whichever view is currently open under the (possibly just
+  // corrected) tenant selection.
+  const current = document.querySelector('.view.active');
+  if (current) showView(current.id.replace('v-', ''), document.querySelector('.pf-v6-c-tabs__item.pf-m-current .pf-v6-c-tabs__link'));
 }
 
 // Shows/hides the Access tab (current-tenant owner only) and Platform tab
 // (superadmin only) — called once after login and again on every tenant
 // switch, since "am I this tenant's owner" depends on which one is selected.
+// Also disables the single-tenant-only tabs (§14.1) while combined mode
+// is selected, rather than hiding them outright, since they're still
+// valid destinations once a real tenant is picked again.
 function applyRoleVisibility() {
   const accessItem = document.getElementById('accessTabItem');
   const platformItem = document.getElementById('platformTabItem');
-  if (accessItem)   accessItem.style.display = isCurrentTenantOwner() ? '' : 'none';
-  if (platformItem) platformItem.style.display = (ME && ME.is_superadmin) ? '' : 'none';
+  if (accessItem)   accessItem.style.display = (!isCombinedMode() && isCurrentTenantOwner()) ? '' : 'none';
+  if (platformItem) platformItem.style.display = (!isCombinedMode() && ME && ME.is_superadmin) ? '' : 'none';
+  const configItem = document.getElementById('configTabItem');
+  const syncItem = document.getElementById('syncTabItem');
+  const announcementsItem = document.getElementById('announcementsTabItem');
+  [configItem, syncItem, announcementsItem].forEach(item => {
+    if (!item) return;
+    item.classList.toggle('pf-m-disabled', isCombinedMode());
+    item.querySelector('button').disabled = isCombinedMode();
+  });
 }
 
 // ── HTML escaping ────────────────────────────────────────────
@@ -105,12 +150,19 @@ function showView(id, btn) {
   if (id === 'config')    loadDiscordConfig();
   if (id === 'access')    loadAccess();
   if (id === 'platform')  loadPlatform();
+  if (id === 'announcements') loadAnnouncements();
 }
 
-async function api(method, path, body, skipTenantHeader) {
+// tenantOverride sends one explicit tenant slug regardless of the
+// picker's current value — used by write actions (create/edit an event,
+// create an announcement) while combined mode ('*') is selected, since
+// no write endpoint accepts '*' (spec §14.3): there's always exactly one
+// owning tenant for something being created, even when the list view
+// showing it is combined.
+async function api(method, path, body, skipTenantHeader, tenantOverride) {
   const headers = {'Content-Type':'application/json'};
   if (!skipTenantHeader) {
-    const slug = getCurrentTenantSlug();
+    const slug = tenantOverride || getCurrentTenantSlug();
     if (slug) headers['X-Tenant-Slug'] = slug;
   }
   const opts = { method, headers, credentials: 'same-origin' };

@@ -31,7 +31,7 @@ function renderSchedule() {
     return `<tr class="pf-v6-c-table__tr" style="${rowStyle}">
       <td class="pf-v6-c-table__td" style="${isToday?'font-weight:600':''}">${o.occurrence_date}</td>
       <td class="pf-v6-c-table__td">${DOW3[new Date(o.occurrence_date+'T12:00:00Z').getUTCDay()]}</td>
-      <td class="pf-v6-c-table__td"><span class="cat-dot" style="background:${allyColor}"></span>${escapeHtml(o.event_name)}${o.scope === 'kingdom-wide' ? ' 🌐' : ''}${o.leadership_only ? ' 👑' : ' 🛡️'}</td>
+      <td class="pf-v6-c-table__td"><span class="cat-dot" style="background:${allyColor}"></span>${escapeHtml(o.event_name)}${o.scope === 'kingdom-wide' ? ' 🌐' : ''}${o.leadership_only ? ' 👑' : ' 🛡️'}${isCombinedMode() ? ' <span style="color:var(--muted);font-size:var(--fs-sm)">(' + escapeHtml(tenantName(o.owning_tenant_id)) + ')</span>' : ''}</td>
       <td class="pf-v6-c-table__td">${fmtTime(o.start_datetime_utc)}</td>
       <td class="pf-v6-c-table__td">${o.duration_hours}h</td>
       <td class="pf-v6-c-table__td" style="color:var(--muted);font-size:var(--fs-sm)">${escapeHtml(o.discord_channel)}</td>

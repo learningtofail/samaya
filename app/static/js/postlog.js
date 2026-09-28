@@ -35,8 +35,14 @@ async function loadPostLog() {
     tbody.innerHTML = logs.map(l => {
       const dimStyle = l.status === 'cancelled' ? 'opacity:.5;' : '';
       const leadStyle = l.leadership_only ? 'background:var(--bg3);' : '';
-      return `<tr class="pf-v6-c-table__tr" style="${dimStyle}${leadStyle}">
-        <td class="pf-v6-c-table__td">${escapeHtml(l.event_name)}${l.leadership_only ? ' 👑' : ' 🛡️'}</td>
+      // Combined mode (spec §14.2) mixes tenants in one list — a left
+      // border plus inline tenant name gives the same at-a-glance
+      // attribution the Events/Schedule tables already use.
+      const allyColor = TENANT_COLORS[l.tenant_id] || '#475569';
+      const borderStyle = isCombinedMode() ? `border-left:3px solid ${allyColor};` : '';
+      const tenantTag = isCombinedMode() ? ` <span style="color:var(--muted);font-size:var(--fs-sm)">(${escapeHtml(tenantName(l.tenant_id))})</span>` : '';
+      return `<tr class="pf-v6-c-table__tr" style="${dimStyle}${leadStyle}${borderStyle}">
+        <td class="pf-v6-c-table__td">${escapeHtml(l.event_name)}${l.leadership_only ? ' 👑' : ' 🛡️'}${tenantTag}</td>
         <td class="pf-v6-c-table__td">${l.occurrence_date}</td>
         <td class="pf-v6-c-table__td" style="color:var(--muted);font-size:var(--fs-sm)">${l.timing}</td>
         <td class="pf-v6-c-table__td" style="font-size:var(--fs-sm)">${l.posted_at_utc ? fmtDateTime(l.posted_at_utc) : '—'}</td>

@@ -80,7 +80,8 @@
       <li class="pf-v6-c-tabs__item" id="syncTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('sync',this)"><span class="pf-v6-c-tabs__item-text">Sync <span id="syncBadge" class="pf-v6-c-label pf-m-red pf-m-filled pf-m-compact" style="display:none;margin-inline-start:4px"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text" id="syncBadgeText">0</span></span></span></span></button></li>
       <li class="pf-v6-c-tabs__item" id="accessTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('access',this)" title="Manage who has coordinator/owner access to this alliance"><span class="pf-v6-c-tabs__item-text">Access</span></button></li>
       <li class="pf-v6-c-tabs__item" id="platformTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('platform',this)" title="Superadmin: manage Kingdoms and Tenants"><span class="pf-v6-c-tabs__item-text">Platform</span></button></li>
-      <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('config',this)"><span class="pf-v6-c-tabs__item-text">Config</span></button></li>
+      <li class="pf-v6-c-tabs__item" id="announcementsTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('announcements',this)"><span class="pf-v6-c-tabs__item-text">Announcements</span></button></li>
+      <li class="pf-v6-c-tabs__item" id="configTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('config',this)"><span class="pf-v6-c-tabs__item-text">Config</span></button></li>
     </ul>
   </div>
 
@@ -308,6 +309,22 @@
   </table>
 </div>
 
+<!-- ANNOUNCEMENTS (spec §13) -->
+<div id="v-announcements" class="view">
+  <div class="pf-v6-l-flex pf-m-align-items-center pf-v6-u-mb-sm" style="gap:12px">
+    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Announcements</h2>
+    <button class="pf-v6-c-button pf-m-primary" onclick="openAnnouncementModal()" title="Schedule a one-off channel message — no event or recurrence involved.">+ New Announcement</button>
+  </div>
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">Plain channel posts with a title, a Markdown body, and a send time — not tied to any event definition. Once scheduled, an announcement can be cancelled but not edited; cancel and create a new one instead.</p>
+  <table class="pf-v6-c-table pf-m-grid-md" id="announcementsTable">
+    <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
+      <th class="pf-v6-c-table__th">Title</th><th class="pf-v6-c-table__th">Scheduled For (UTC)</th><th class="pf-v6-c-table__th">Status</th>
+      <th class="pf-v6-c-table__th">Targets</th><th class="pf-v6-c-table__th">Actions</th>
+    </tr></thead>
+    <tbody id="announcementsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="5" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+  </table>
+</div>
+
     </section>
   </main>
   </div>
@@ -324,6 +341,13 @@
         <input type="hidden" id="modalEventId">
         <form class="pf-v6-c-form">
           <div class="form-grid">
+            <div class="pf-v6-c-form__group full" id="mOwningTenantRow" style="display:none">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mOwningTenant"><span class="pf-v6-c-form__label-text">Owning Alliance</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <select class="pf-v6-c-form-control" id="mOwningTenant"></select>
+                <div class="pf-v6-c-form__helper-text">Shown only in combined view — pick which alliance this new event belongs to.</div>
+              </div>
+            </div>
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mName"><span class="pf-v6-c-form__label-text">Event Name</span></label></div>
               <div class="pf-v6-c-form__group-control">
@@ -442,6 +466,55 @@
   </div>
 </div>
 
+<!-- ANNOUNCEMENT MODAL (spec §13) -->
+<div class="pf-v6-c-backdrop" id="announcementModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="announcementModalTitle" style="max-height:90vh;overflow-y:auto">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="announcementModalTitle"><span class="pf-v6-c-modal-box__title-text">New Announcement</span></h2>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <form class="pf-v6-c-form">
+          <div class="form-grid">
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aTitle"><span class="pf-v6-c-form__label-text">Title</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="text" id="aTitle" placeholder="Server maintenance tonight">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aBody"><span class="pf-v6-c-form__label-text">Body (Markdown)</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <textarea class="pf-v6-c-form-control" id="aBody" rows="5" maxlength="2000" placeholder="Announcement text sent to Discord" oninput="updateAnnouncementCharCount()"></textarea>
+                <div class="pf-v6-c-form__helper-text"><span id="aBodyCount">0</span> / 2000 characters (Discord's message limit)</div>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aScheduledFor"><span class="pf-v6-c-form__label-text">Send At (UTC)</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="datetime-local" id="aScheduledFor">
+                <div class="pf-v6-c-form__helper-text">Your detected timezone: <span id="aDetectedTz">—</span>. Entered here in UTC, same as event start times.</div>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Targets</span></span></div>
+              <div class="pf-v6-c-form__group-control">
+                <div id="aTargetsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
+                <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="addAnnouncementTargetRow()">+ Add another target</button>
+                <div class="pf-v6-c-form__helper-text">One row per alliance you want this posted to, each with that alliance's own Discord channel ID.</div>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button class="pf-v6-c-button pf-m-primary" onclick="saveAnnouncement()">Save</button>
+        <button class="pf-v6-c-button pf-m-link" onclick="closeAnnouncementModal()">Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="/static/js/common.js"></script>
@@ -450,6 +523,7 @@
 <script src="/static/js/schedule.js"></script>
 <script src="/static/js/gantt.js"></script>
 <script src="/static/js/postlog.js"></script>
+<script src="/static/js/announcements.js"></script>
 <script src="/static/js/config.js"></script>
 <script src="/static/js/sync.js"></script>
 <script src="/static/js/access.js"></script>

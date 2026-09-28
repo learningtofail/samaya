@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models import get_db
 from models.db import EventDefinition, PostLog, Tenant
 
-from .deps import get_current_tenant
+from .deps import get_current_tenant, get_current_tenants
 from .serializers import _log_dict
 
 router = APIRouter()
@@ -20,12 +20,13 @@ router = APIRouter()
 @router.get("/api/post-log")
 async def get_post_log(
     limit: int = 50, offset: int = 0,
-    tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db),
+    tenants: list[Tenant] = Depends(get_current_tenants), db: AsyncSession = Depends(get_db),
 ):
+    tenant_ids = [t.id for t in tenants]
     result = await db.execute(
         select(PostLog, EventDefinition)
         .outerjoin(EventDefinition, PostLog.event_id == EventDefinition.id)
-        .where(PostLog.tenant_id == tenant.id)
+        .where(PostLog.tenant_id.in_(tenant_ids))
         .order_by(PostLog.occurrence_date.desc(), PostLog.posted_at_utc.desc())
         .limit(limit).offset(offset)
     )
@@ -34,10 +35,11 @@ async def get_post_log(
 
 @router.get("/api/post-log/export.csv")
 async def export_post_log(
-    tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
+    tenants: list[Tenant] = Depends(get_current_tenants), db: AsyncSession = Depends(get_db)
 ):
+    tenant_ids = [t.id for t in tenants]
     result = await db.execute(
-        select(PostLog).where(PostLog.tenant_id == tenant.id).order_by(PostLog.occurrence_date.desc())
+        select(PostLog).where(PostLog.tenant_id.in_(tenant_ids)).order_by(PostLog.occurrence_date.desc())
     )
     logs = result.scalars().all()
     def generate():

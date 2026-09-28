@@ -26,7 +26,10 @@ from services.discord_api import (
 )
 from services.time_utils import ensure_utc
 
-from .deps import PLATFORM_BOT_TOKEN, find_post_log, get_current_tenant, get_occurrence_with_event
+from .deps import (
+    PLATFORM_BOT_TOKEN, find_post_log, get_current_tenant, get_current_tenants,
+    get_occurrence_with_event,
+)
 from .schemas import OccurrencePatch
 from .serializers import _occurrence_dict
 
@@ -35,10 +38,16 @@ router = APIRouter()
 
 @router.get("/api/occurrences")
 async def list_occurrences(
-    tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
+    tenants: list[Tenant] = Depends(get_current_tenants), db: AsyncSession = Depends(get_db)
 ):
+    """See admin/events.py::list_events for the combined-mode reasoning —
+    same union-plus-dedupe approach, applied to occurrences instead of
+    event definitions.
+    """
     from sqlalchemy.orm import selectinload
     from models.db import EventDefinition
+    tenant_ids = [t.id for t in tenants]
+    kingdom_ids = {t.kingdom_id for t in tenants}
     result = await db.execute(
         select(Occurrence)
         .join(Occurrence.event)
@@ -46,14 +55,16 @@ async def list_occurrences(
         .options(selectinload(Occurrence.event))
         .where(
             or_(
-                Occurrence.tenant_id == tenant.id,
-                (EventDefinition.scope == "kingdom-wide") & (Tenant.kingdom_id == tenant.kingdom_id),
+                Occurrence.tenant_id.in_(tenant_ids),
+                (EventDefinition.scope == "kingdom-wide") & (Tenant.kingdom_id.in_(kingdom_ids)),
             )
         )
         .order_by(Occurrence.occurrence_date)
     )
-    occs = result.scalars().all()
-    return [_occurrence_dict(occ, occ.event) for occ in occs]
+    seen = {}
+    for occ in result.scalars().all():
+        seen[occ.id] = occ
+    return [_occurrence_dict(occ, occ.event) for occ in seen.values()]
 
 
 @router.patch("/api/occurrences/{occ_id}")

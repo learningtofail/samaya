@@ -40,8 +40,14 @@ async function loadEvents() {
           + 'data-id="' + e.id + '" data-name="' + safeName + '" '
           + 'onclick="permanentDelete(this)">Delete</button>';
       }
+      // In combined mode (spec §14.2), rows come from several tenants
+      // at once, so the tenant color dot alone is no longer enough —
+      // add the tenant name inline.
+      var tenantTag = isCombinedMode()
+        ? ' <span style="color:var(--muted);font-size:var(--fs-sm)">(' + escapeHtml(tenantName(e.owning_tenant_id)) + ')</span>'
+        : '';
       return '<tr class="pf-v6-c-table__tr" style="border-left:3px solid ' + allyColor + '">'
-        + '<td class="pf-v6-c-table__td"><span class="cat-dot" style="background:' + allyColor + '"></span>' + escapeHtml(e.name) + '</td>'
+        + '<td class="pf-v6-c-table__td"><span class="cat-dot" style="background:' + allyColor + '"></span>' + escapeHtml(e.name) + tenantTag + '</td>'
         + '<td class="pf-v6-c-table__td">' + scopeLabel + '</td>'
         + '<td class="pf-v6-c-table__td">' + intervalLabel(e.interval_days) + '</td>'
         + '<td class="pf-v6-c-table__td">' + e.start_time_utc + ' UTC</td>'
@@ -67,9 +73,27 @@ async function loadEvents() {
   } catch(e) { toast(e.message, true); }
 }
 
+function tenantName(id) {
+  const t = TENANTS.find(t => t.id === id);
+  return t ? t.name : ('#' + id);
+}
+
 function openEventModal(event, presetLeadership) {
   document.getElementById('modalTitle').textContent = event ? 'Edit Event' : (presetLeadership ? 'Add Leadership Event' : 'Add Event');
   document.getElementById('modalEventId').value = event && event.id ? event.id : '';
+
+  // While combined mode is selected, there's no ambient tenant for a new
+  // event to belong to (spec §14.3) — show an explicit picker instead.
+  // Editing an existing event keeps its current owning tenant fixed;
+  // only creation needs the choice.
+  const ownerRow = document.getElementById('mOwningTenantRow');
+  const ownerSelect = document.getElementById('mOwningTenant');
+  if (isCombinedMode() && !event) {
+    ownerRow.style.display = '';
+    ownerSelect.innerHTML = TENANTS.map(t => `<option value="${escapeHtml(t.slug)}">${escapeHtml(t.name)}</option>`).join('');
+  } else {
+    ownerRow.style.display = 'none';
+  }
   document.getElementById('mName').value        = event?.name || '';
   document.getElementById('mKingdomWide').checked = event?.scope === 'kingdom-wide';
   document.getElementById('mInterval').value    = event?.interval_days || '';
@@ -230,12 +254,20 @@ async function saveEvent() {
                              : null,
     description:     document.getElementById('mDescription').value,
   };
+  // Only relevant for a new event while combined mode is selected (the
+  // row is hidden, and thus this is empty, in every other case) — see
+  // openEventModal(). undefined/'' falls through to the picker's own
+  // current tenant inside api().
+  const owningTenantOverride = document.getElementById('mOwningTenantRow').style.display !== 'none'
+    ? document.getElementById('mOwningTenant').value
+    : undefined;
+
   try {
     if (id) {
       await api('PATCH', `/api/events/${id}`, payload);
       toast('Event updated');
     } else {
-      await api('POST', '/api/events', payload);
+      await api('POST', '/api/events', payload, false, owningTenantOverride);
       toast('Event created');
     }
     closeModal();

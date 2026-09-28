@@ -22,7 +22,7 @@ from models import get_db
 from models.db import EventDefinition, PostLog, Tenant, User
 from services.audit import log_change
 
-from .deps import check_kingdom_coordinator, get_current_tenant, get_current_user
+from .deps import check_kingdom_coordinator, get_current_tenant, get_current_tenants, get_current_user
 from .schemas import EventIn, EventPatch, EventTenantNotificationIn
 from .serializers import _event_dict
 
@@ -31,20 +31,31 @@ router = APIRouter()
 
 @router.get("/api/events")
 async def list_events(
-    tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
+    tenants: list[Tenant] = Depends(get_current_tenants), db: AsyncSession = Depends(get_db)
 ):
+    """Single-tenant behavior is unchanged (tenants == [that tenant]).
+    Combined mode (X-Tenant-Slug: *, see deps.get_current_tenants) unions
+    each accessible tenant's own events with kingdom-wide events visible
+    to any of them, de-duplicating by event id since two tenants sharing
+    a Kingdom would otherwise see the same kingdom-wide event twice.
+    """
+    tenant_ids = [t.id for t in tenants]
+    kingdom_ids = {t.kingdom_id for t in tenants}
     result = await db.execute(
         select(EventDefinition)
         .join(Tenant, EventDefinition.owning_tenant_id == Tenant.id)
         .where(
             or_(
-                EventDefinition.owning_tenant_id == tenant.id,
-                (EventDefinition.scope == "kingdom-wide") & (Tenant.kingdom_id == tenant.kingdom_id),
+                EventDefinition.owning_tenant_id.in_(tenant_ids),
+                (EventDefinition.scope == "kingdom-wide") & (Tenant.kingdom_id.in_(kingdom_ids)),
             )
         )
         .order_by(EventDefinition.name)
     )
-    return [_event_dict(e) for e in result.scalars().all()]
+    seen = {}
+    for e in result.scalars().all():
+        seen[e.id] = e
+    return [_event_dict(e) for e in seen.values()]
 
 
 @router.post("/api/events", status_code=201)
