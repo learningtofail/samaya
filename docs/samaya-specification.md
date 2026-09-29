@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.22.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.23.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -1036,6 +1036,8 @@ Small, well-scoped ideas that have come up but are deliberately not built yet �
 
 - A real Discord Gateway connection (so `GUILD_SCHEDULED_EVENT_UPDATE`/`_DELETE` could genuinely be received) — a persistent WebSocket client is a materially different deployment shape (a long-running process rather than a stateless request-served FastAPI app) and out of scope for what fixing this particular symptom needs; the schedule-derived heuristic above is sufficient for reconciliation purposes.
 - Automatically calling `POST /api/sync/mark-completed/{id}` for every naturally-completed row on a schedule — left as a one-click coordinator action for now, consistent with every other Sync fix action being manually triggered rather than automatic.
+
+**Addendum (spec §49 batch).** The Sync page's user-facing label was shortened from "Naturally Completed" to plain "Completed" (the stat card, section heading, and the "PostLog Only" section's cross-reference sentence, all in `sync.js`) — "naturally" read as unnecessary hedging to coordinators reading the report. The internal `naturally_completed` field/list name, the `mark-completed` endpoint, and every code comment are unchanged; this is a display-text-only change.
 
 ## 46. Month Calendar View and Discord Preview
 
