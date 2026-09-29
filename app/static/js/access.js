@@ -91,7 +91,7 @@ async function removeMember(id, name) {
 function buildInviteRow(inv) {
   let status, actionCell;
   if (inv.revoked_at) {
-    status = pfLabel('Revoked', 'pf-m-grey');
+    status = pfLabel('Revoked', 'pf-m-gray');
     actionCell = '';
   } else if (inv.used_at) {
     status = pfLabel('Claimed', 'pf-m-green');

@@ -1,16 +1,7 @@
-// Gantt view (#v-gantt): renders the occurrence timeline grid. Reads the
-// same occurrenceData global common.js/schedule.js populate — does not
-// re-fetch it. Depends on common.js (GANTT_PALETTE, DOW3).
-
-async function loadGantt() {
-  try {
-    // Gantt is a sub-view of Schedule (same window, same rows, different
-    // layout) — it shares Schedule's own alliance filter rather than
-    // keeping a second independent one.
-    const occs = await api('GET', '/api/occurrences', null, false, getTabFilter('schedule'));
-    renderGantt(occs);
-  } catch(e) { toast(e.message, true); }
-}
+// Gantt timeline, now a layout within the Schedule tab (#scheduleGanttView)
+// rather than its own tab — rendered by schedule.js's loadSchedule() from
+// the same occurrenceData it already fetched, so switching layouts is
+// instant and never re-fetches. Depends on common.js (GANTT_PALETTE, DOW3).
 
 function renderGantt(occs) {
   const community = occs.filter(o => !o.leadership_only);

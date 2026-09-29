@@ -53,7 +53,7 @@ function renderPostLogTable(allLogs) {
       tbody.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">No posts yet.</td></tr>';
       return;
     }
-    const statusColor = { posted: 'pf-m-green', active: 'pf-m-blue', completed: 'pf-m-grey', cancelled: 'pf-m-red', pending: 'pf-m-grey', error: 'pf-m-red' };
+    const statusColor = { posted: 'pf-m-green', active: 'pf-m-blue', completed: 'pf-m-gray', cancelled: 'pf-m-red', pending: 'pf-m-gray', error: 'pf-m-red' };
     tbody.innerHTML = logs.map(l => {
       const dimStyle = l.status === 'cancelled' ? 'opacity:.5;' : '';
       const leadStyle = l.leadership_only ? 'background:var(--bg3);' : '';
@@ -70,7 +70,7 @@ function renderPostLogTable(allLogs) {
         <td class="pf-v6-c-table__td" style="color:var(--muted);font-size:var(--fs-sm)">${l.timing}</td>
         <td class="pf-v6-c-table__td" style="font-size:var(--fs-sm)">${l.posted_at_utc ? fmtDateTime(l.posted_at_utc) : '—'}</td>
         <td class="pf-v6-c-table__td" style="font-size:var(--fs-sm);color:var(--muted)">${escapeHtml(l.posted_by)}</td>
-        <td class="pf-v6-c-table__td">${pfLabel(escapeHtml(l.status), statusColor[l.status] || 'pf-m-grey')}</td>
+        <td class="pf-v6-c-table__td">${pfLabel(escapeHtml(l.status), statusColor[l.status] || 'pf-m-gray')}</td>
         <td class="pf-v6-c-table__td" style="font-size:var(--fs-xs);color:var(--muted);font-family:monospace">${l.discord_event_id ? escapeHtml(l.discord_event_id.slice(0,20))+'…' : '—'}</td>
       </tr>`;
     }).join('');

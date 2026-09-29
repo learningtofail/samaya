@@ -32,6 +32,9 @@
      visually distinct left accent on top of the 📢 Announcement badge,
      rather than looking identical to an event row until you read the text. */
   .samaya-announcement-card { border-inline-start: 4px solid var(--pf-t--global--color--nonstatus--purple--default, #7d5260); }
+  /* Consistency fix: events had no equivalent accent, so only announcement
+     rows stood out at a glance. Orange matches the 📅 Event badge color. */
+  .samaya-event-card { border-inline-start: 4px solid var(--pf-t--global--color--nonstatus--orange--default, #c9590c); }
   /* The masthead's own internal layout mechanism (CSS grid, per its
      grid-area:header) didn't shrink the title against the fixed-width
      button next to it the way a plain flex-child override assumed —
@@ -365,10 +368,11 @@ function statusBadge(status) {
   switch (status) {
     case 'posted':    return pfLabel('pf-m-green',  'Announced');
     case 'active':    return pfLabel('pf-m-blue',   'Live Now');
-    case 'completed': return pfLabel('pf-m-grey',   'Completed');
+    case 'completed': return pfLabel('pf-m-gray',   'Completed');
     case 'cancelled': return pfLabel('pf-m-red',    'Cancelled');
+    case 'error':     return pfLabel('pf-m-red',    'Post Failed');
     case 'pending':
-    default:          return pfLabel('pf-m-grey',   'Upcoming');
+    default:          return pfLabel('pf-m-gray',   'Upcoming');
   }
 }
 
@@ -380,10 +384,10 @@ function statusBadge(status) {
 function announcementStatusBadge(status) {
   switch (status) {
     case 'posted':    return pfLabel('pf-m-green', 'Announced');
-    case 'scheduled': return pfLabel('pf-m-grey',  'Scheduled');
+    case 'scheduled': return pfLabel('pf-m-gray',  'Scheduled');
     case 'failed':    return pfLabel('pf-m-red',   'Failed');
     case 'cancelled': return pfLabel('pf-m-red',   'Cancelled');
-    default:          return pfLabel('pf-m-grey',  'Scheduled');
+    default:          return pfLabel('pf-m-gray',  'Scheduled');
   }
 }
 
@@ -393,6 +397,17 @@ function announcementStatusBadge(status) {
 // but non-PatternFly-standard color.
 function announcementKindBadge() {
   return pfLabel('pf-m-purple', '📢 Announcement');
+}
+
+// Consistency fix: events had no equivalent kind badge, so an announcement
+// row looked visually distinct while an event row didn't stand out at all.
+// Orange is deliberately unused by statusBadge()/scopeBadge() so this kind
+// badge never gets confused for a status ("Live Now" is blue, "Kingdom-wide"
+// is purple) when both sit next to each other on the same row. (pf-m-cyan
+// isn't in this PatternFly build's CSS — only gray/green/blue/purple/red/
+// orange/orangered are — so orange, not cyan, is the free color here.)
+function eventKindBadge() {
+  return pfLabel('pf-m-orange', '📅 Event');
 }
 
 // notify_minutes_before (events) / event_offset_minutes (announcements
@@ -499,7 +514,7 @@ async function loadEvents() {
         const isAnnouncement = ev.kind === 'announcement';
 
         html += `
-          <div class="pf-v6-c-card pf-v6-u-mb-sm${isToday ? ' pf-m-selected' : ''}${isAnnouncement ? ' samaya-announcement-card' : ''}">
+          <div class="pf-v6-c-card pf-v6-u-mb-sm${isToday ? ' pf-m-selected' : ''}${isAnnouncement ? ' samaya-announcement-card' : ' samaya-event-card'}">
             <div class="pf-v6-c-card__body">
               <div class="samaya-event-row">
                 <div class="samaya-date-col${isToday ? ' samaya-today' : ''}">
@@ -508,7 +523,7 @@ async function loadEvents() {
                 </div>
                 <div style="flex:1;min-width:0">
                   <div class="pf-v6-l-flex pf-m-align-items-center pf-m-space-items-sm pf-v6-u-mb-xs">
-                    ${isAnnouncement ? announcementKindBadge() : ''}
+                    ${isAnnouncement ? announcementKindBadge() : eventKindBadge()}
                     <span><strong>${escapeHtml(ev.event_name)}</strong></span>
                     ${tenantBadge(ev)}
                     ${scopeBadge(ev.scope)}

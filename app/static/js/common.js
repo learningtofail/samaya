@@ -201,8 +201,7 @@ function selectTimezone(tz) {
   if (!activeView) return;
   const id = activeView.id.replace('v-', '');
   if (id === 'dashboard')     loadDashboard();
-  if (id === 'schedule')      renderSchedule();
-  if (id === 'gantt')         loadGantt();
+  if (id === 'schedule')      { renderSchedule(); renderGantt(occurrenceData); }
   if (id === 'postlog')       loadPostLog();
   if (id === 'announcements') loadAnnouncements();
 }
@@ -214,8 +213,7 @@ function showView(id, btn) {
   btn.closest('.pf-v6-c-tabs__item').classList.add('pf-m-current');
   if (id === 'dashboard') loadDashboard();
   if (id === 'events')    loadEvents();
-  if (id === 'schedule')  loadSchedule();
-  if (id === 'gantt')     loadGantt();
+  if (id === 'schedule')  { setScheduleLayout(localStorage.getItem('samaya_schedule_layout') || 'table'); loadSchedule(); }
   if (id === 'postlog')   loadPostLog();
   if (id === 'sync')      loadSync();
   if (id === 'config')    loadDiscordConfig();

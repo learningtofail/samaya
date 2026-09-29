@@ -48,7 +48,7 @@ async function loadDashboard() {
       })
       .sort((a, b) => new Date(a.start_datetime_utc) - new Date(b.start_datetime_utc));
 
-    const statusColor = { posted: 'pf-m-green', active: 'pf-m-blue', completed: 'pf-m-grey', cancelled: 'pf-m-red', pending: 'pf-m-grey' };
+    const statusColor = { posted: 'pf-m-green', active: 'pf-m-blue', completed: 'pf-m-gray', cancelled: 'pf-m-red', pending: 'pf-m-gray' };
     function occurrenceCard(o) {
       const allianceName = tenantNameFor(o.owning_tenant_id);
       return `
@@ -60,7 +60,7 @@ async function loadDashboard() {
           <span style="color:var(--muted)">${fmtTime(o.start_datetime_utc)}</span>
           <span style="color:var(--muted);font-size:0.85em">${formatRelativeTime(new Date(o.start_datetime_utc))}</span>
           <span style="color:var(--muted)">${escapeHtml(o.discord_channel)}</span>
-          ${pfLabel(escapeHtml(o.post_status), statusColor[o.post_status] || 'pf-m-grey')}
+          ${pfLabel(escapeHtml(o.post_status), statusColor[o.post_status] || 'pf-m-gray')}
         </div>
       </div>`;
     }

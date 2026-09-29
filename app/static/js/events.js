@@ -110,7 +110,7 @@ function renderEventsTable(allEvents) {
     function buildRow(e) {
       var allyColor = TENANT_COLORS[e.owning_tenant_id] || '#475569';
       var scopeLabel = e.scope === 'kingdom-wide' ? '🌐 Kingdom-wide' : 'Alliance';
-      var statusLabel = pfLabel(e.active ? 'Active' : 'Inactive', e.active ? 'pf-m-green' : 'pf-m-grey');
+      var statusLabel = pfLabel(e.active ? 'Active' : 'Inactive', e.active ? 'pf-m-green' : 'pf-m-gray');
       var btnCls    = e.active ? 'pf-m-danger' : 'pf-m-secondary';
       var btnTxt    = e.active ? 'Deactivate' : 'Activate';
       var btnTitle  = e.active

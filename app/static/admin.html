@@ -170,7 +170,6 @@
       <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('events',this)"><span class="pf-v6-c-tabs__item-text">Events</span></button></li>
       <li class="pf-v6-c-tabs__item" id="announcementsTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('announcements',this)"><span class="pf-v6-c-tabs__item-text">Announcements</span></button></li>
       <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('schedule',this)"><span class="pf-v6-c-tabs__item-text">Schedule</span></button></li>
-      <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('gantt',this)"><span class="pf-v6-c-tabs__item-text">Gantt</span></button></li>
       <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('postlog',this)"><span class="pf-v6-c-tabs__item-text">Post Log</span></button></li>
       <li class="pf-v6-c-tabs__item" id="syncTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('sync',this)"><span class="pf-v6-c-tabs__item-text">Sync <span id="syncBadge" class="pf-v6-c-label pf-m-red pf-m-filled pf-m-compact" style="display:none;margin-inline-start:4px"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text" id="syncBadgeText">0</span></span></span></span></button></li>
       <li class="pf-v6-c-tabs__item" id="configTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('config',this)"><span class="pf-v6-c-tabs__item-text">Config</span></button></li>
@@ -286,83 +285,78 @@
   </details>
 </div>
 
-<!-- SCHEDULE -->
+<!-- SCHEDULE (spec §38-followup: Gantt merged in as a second layout, not a separate tab) -->
 <div id="v-schedule" class="view">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
     <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">28-Day Schedule</h2>
     <div style="display:flex;align-items:center;gap:8px">
       <label for="scheduleFilter" style="color:var(--muted);font-size:0.85em">Alliance:</label>
       <select class="pf-v6-c-form-control pf-m-small" id="scheduleFilter" style="max-width:180px"></select>
+      <div style="display:flex;gap:4px" role="group" aria-label="Layout">
+        <button class="pf-v6-c-button pf-m-primary pf-m-small" id="scheduleLayoutTableBtn" onclick="setScheduleLayout('table')" title="Show occurrences as a sortable table with post/cancel actions.">☰ Table</button>
+        <button class="pf-v6-c-button pf-m-secondary pf-m-small" id="scheduleLayoutGanttBtn" onclick="setScheduleLayout('gantt')" title="Show occurrences as a 28-day visual timeline.">📊 Timeline</button>
+      </div>
       <button class="pf-v6-c-button pf-m-secondary" onclick="loadSchedule()" title="Reload the 28-day occurrence list from the database.">Refresh</button>
     </div>
   </div>
-  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-    <h2 class="pf-v6-c-title pf-m-md" style="margin:0">🛡️ Alliance Events</h2>
-    <button class="pf-v6-c-button pf-m-primary" onclick="postSelected('Alliance')" title="Post all checked alliance occurrences to Discord Scheduled Events sequentially.">▶ Post Selected to Discord</button>
-  </div>
-  <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg" id="schedTable">
-    <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
-      <th class="pf-v6-c-table__th">Date</th><th class="pf-v6-c-table__th">Day</th><th class="pf-v6-c-table__th">Event</th><th class="pf-v6-c-table__th">Start (UTC)</th>
-      <th class="pf-v6-c-table__th">Duration</th><th class="pf-v6-c-table__th">Channel</th><th class="pf-v6-c-table__th">Post?</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Actions</th>
-    </tr></thead>
-    <tbody id="schedBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="9" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
-  </table>
-  <div id="schedLeadershipWrap" style="display:none">
+
+  <div id="scheduleTableView">
     <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-      <h2 class="pf-v6-c-title pf-m-md" style="margin:0;background:var(--amber);padding:6px 10px;border-radius:4px">👑 Leadership Notifications</h2>
-      <button class="pf-v6-c-button pf-m-primary" onclick="postSelected('Leadership')" title="Send all checked leadership occurrences as channel notifications.">▶ Post Selected to Discord</button>
+      <h2 class="pf-v6-c-title pf-m-md" style="margin:0">🛡️ Alliance Events</h2>
+      <button class="pf-v6-c-button pf-m-primary" onclick="postSelected('Alliance')" title="Post all checked alliance occurrences to Discord Scheduled Events sequentially.">▶ Post Selected to Discord</button>
     </div>
-    <p class="pf-v6-u-font-size-sm pf-v6-u-mb-sm" style="color:var(--pf-t--global--text--color--subtle)">These events post to the leadership channel only — not visible on Discord Scheduled Events or the public calendar.</p>
-    <table class="pf-v6-c-table pf-m-grid-md" id="schedTableLeadership">
+    <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg" id="schedTable">
       <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
         <th class="pf-v6-c-table__th">Date</th><th class="pf-v6-c-table__th">Day</th><th class="pf-v6-c-table__th">Event</th><th class="pf-v6-c-table__th">Start (UTC)</th>
         <th class="pf-v6-c-table__th">Duration</th><th class="pf-v6-c-table__th">Channel</th><th class="pf-v6-c-table__th">Post?</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Actions</th>
       </tr></thead>
-      <tbody id="schedBodyLeadership"></tbody>
+      <tbody id="schedBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="9" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
     </table>
+    <div id="schedLeadershipWrap" style="display:none">
+      <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
+        <h2 class="pf-v6-c-title pf-m-md" style="margin:0;background:var(--amber);padding:6px 10px;border-radius:4px">👑 Leadership Notifications</h2>
+        <button class="pf-v6-c-button pf-m-primary" onclick="postSelected('Leadership')" title="Send all checked leadership occurrences as channel notifications.">▶ Post Selected to Discord</button>
+      </div>
+      <p class="pf-v6-u-font-size-sm pf-v6-u-mb-sm" style="color:var(--pf-t--global--text--color--subtle)">These events post to the leadership channel only — not visible on Discord Scheduled Events or the public calendar.</p>
+      <table class="pf-v6-c-table pf-m-grid-md" id="schedTableLeadership">
+        <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
+          <th class="pf-v6-c-table__th">Date</th><th class="pf-v6-c-table__th">Day</th><th class="pf-v6-c-table__th">Event</th><th class="pf-v6-c-table__th">Start (UTC)</th>
+          <th class="pf-v6-c-table__th">Duration</th><th class="pf-v6-c-table__th">Channel</th><th class="pf-v6-c-table__th">Post?</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Actions</th>
+        </tr></thead>
+        <tbody id="schedBodyLeadership"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="scheduleGanttView" style="display:none">
+    <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">🛡️ Alliance Events Timeline</h2>
+    <div class="pf-v6-c-card gantt-wrap" id="ganttWrap">
+      <p style="color:var(--muted);padding:1rem">Loading…</p>
+    </div>
+    <div id="ganttLegend" style="margin-top:12px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:10px"></div>
+    <div id="ganttLeadershipWrap" style="display:none">
+      <div style="border-top:2px solid var(--border);margin-bottom:16px"></div>
+      <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">👑 Leadership Notifications Timeline</h2>
+      <div class="pf-v6-c-card gantt-wrap" id="ganttWrapLeadership" style="background:var(--bg2)"></div>
+      <div id="ganttLegendLeadership" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px"></div>
+    </div>
   </div>
 
   <details class="about-page">
     <summary>About this page</summary>
     <div class="about-page-body">
-      <h4>Alliance filter</h4>
-      <p>Shared with the Gantt tab below — they're two views of the same 28-day occurrence window, so narrowing one narrows the other.</p>
+      <h4>Alliance filter and layout toggle</h4>
+      <p>The Alliance filter applies to both layouts — Table and Timeline are two views of the same 28-day occurrence window, so narrowing one narrows the other. Table and Timeline share one Refresh; switching layouts is instant and doesn't re-fetch.</p>
       <h4>Sections</h4>
       <ul>
-        <li><strong>Post?</strong> checkbox — whether this occurrence will actually go to Discord; unchecking it skips that one occurrence without deleting anything.</li>
-        <li><strong>Post Selected to Discord</strong> — posts every checked row in that section (Alliance or Leadership) one at a time.</li>
-        <li><strong>Cancel</strong> (on a posted row) — removes the Discord Scheduled Event; the occurrence itself stays and can be posted again later.</li>
+        <li><strong>Table</strong> — <strong>Post?</strong> checkbox controls whether an occurrence will actually go to Discord; unchecking it skips that one occurrence without deleting anything. <strong>Post Selected to Discord</strong> posts every checked row in that section (Alliance or Leadership) one at a time. <strong>Cancel</strong> (on a posted row) removes the Discord Scheduled Event; the occurrence itself stays and can be posted again later.</li>
+        <li><strong>Timeline</strong> — a visual Gantt-style grid grouped by event name across the next 28 days. Hover a filled cell for its exact time (both UTC and your local time zone).</li>
       </ul>
       <h4>Known limitations</h4>
       <ul>
         <li>This window only ever covers the next 28 days — it's rebuilt from Events daily, or on demand from the Dashboard's Regenerate Now.</li>
+        <li>Timeline is read-only — post/cancel actions are only available from the Table layout.</li>
       </ul>
-    </div>
-  </details>
-</div>
-
-<!-- GANTT -->
-<div id="v-gantt" class="view">
-  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Gantt View</h2>
-    <button class="pf-v6-c-button pf-m-secondary" onclick="loadGantt()" title="Reload and redraw the Gantt chart from current occurrence data.">Refresh</button>
-  </div>
-  <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">🛡️ Alliance Events Gantt</h2>
-  <div class="pf-v6-c-card gantt-wrap" id="ganttWrap">
-    <p style="color:var(--muted);padding:1rem">Loading…</p>
-  </div>
-  <div id="ganttLegend" style="margin-top:12px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:10px"></div>
-  <div id="ganttLeadershipWrap" style="display:none">
-    <div style="border-top:2px solid var(--border);margin-bottom:16px"></div>
-    <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">👑 Leadership Notifications Gantt</h2>
-    <div class="pf-v6-c-card gantt-wrap" id="ganttWrapLeadership" style="background:var(--bg2)"></div>
-    <div id="ganttLegendLeadership" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px"></div>
-  </div>
-
-  <details class="about-page">
-    <summary>About this page</summary>
-    <div class="about-page-body">
-      <p>A visual timeline of the same 28-day window as the Schedule tab, uses the same alliance filter (see Schedule tab above), grouped by event name across the next 28 days. Hover a filled cell for its exact time; click Refresh after changing events elsewhere to redraw it.</p>
     </div>
   </details>
 </div>

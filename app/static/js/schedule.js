@@ -1,12 +1,25 @@
 // Schedule view (#v-schedule): the per-occurrence list (post/cancel to
-// Discord, toggle post_to_discord). Depends on common.js.
+// Discord, toggle post_to_discord), plus the Gantt timeline as a second
+// layout over the same data (merged in per user feedback on the original
+// spec §38 build — Table and Timeline are one tab, not two). Depends on
+// common.js and gantt.js's renderGantt().
 
 async function loadSchedule() {
   renderAllianceFilterSelect('scheduleFilter', 'schedule', loadSchedule);
   try {
     occurrenceData = await api('GET', '/api/occurrences', null, false, getTabFilter('schedule'));
     renderSchedule();
+    renderGantt(occurrenceData);
   } catch(e) { toast(e.message, true); }
+}
+
+// Persisted so returning to the tab keeps whichever layout was last picked.
+function setScheduleLayout(layout) {
+  localStorage.setItem('samaya_schedule_layout', layout);
+  document.getElementById('scheduleTableView').style.display = layout === 'table' ? '' : 'none';
+  document.getElementById('scheduleGanttView').style.display = layout === 'gantt' ? '' : 'none';
+  document.getElementById('scheduleLayoutTableBtn').className = 'pf-v6-c-button pf-m-small ' + (layout === 'table' ? 'pf-m-primary' : 'pf-m-secondary');
+  document.getElementById('scheduleLayoutGanttBtn').className = 'pf-v6-c-button pf-m-small ' + (layout === 'gantt' ? 'pf-m-primary' : 'pf-m-secondary');
 }
 
 // Spec §38.1: an occurrence's own owning alliance (not whatever this
@@ -29,7 +42,7 @@ function renderSchedule() {
     return;
   }
 
-  const statusColor = { posted: 'pf-m-green', active: 'pf-m-blue', completed: 'pf-m-grey', cancelled: 'pf-m-red', pending: 'pf-m-grey', queued: 'pf-m-blue', error: 'pf-m-red' };
+  const statusColor = { posted: 'pf-m-green', active: 'pf-m-blue', completed: 'pf-m-gray', cancelled: 'pf-m-red', pending: 'pf-m-gray', queued: 'pf-m-blue', error: 'pf-m-red' };
 
   function buildRow(o, sectionScope) {
     // sectionScope is 'Alliance' or 'Leadership' (which table section this
@@ -54,7 +67,7 @@ function renderSchedule() {
         </span>
       </td>
       <td class="pf-v6-c-table__td">
-        ${pfLabel(escapeHtml(o.post_status), statusColor[o.post_status] || 'pf-m-grey')}
+        ${pfLabel(escapeHtml(o.post_status), statusColor[o.post_status] || 'pf-m-gray')}
         ${o.status_detail?`<span title="${escapeHtml(o.status_detail)}" style="cursor:help;margin-left:4px">⚠</span>`:''}
       </td>
       <td class="pf-v6-c-table__td">
