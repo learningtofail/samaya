@@ -10,6 +10,43 @@ function pfLabel(text, color) {
   return `<span class="pf-v6-c-label ${color} pf-m-filled"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${text}</span></span></span>`;
 }
 
+// ── Canonical status vocabulary ──────────────────────────────────
+// One word and one color per underlying meaning, used everywhere a
+// status pill appears — admin (here, schedule.js, announcements.js) and
+// public (events.html, which has no shared JS with this file so carries
+// its own identical copy — see CLAUDE.md §22). Replaces printing the raw
+// post_status/Announcement.status DB string directly, which is what made
+// admin pills read differently from the public page's friendly labels
+// for the exact same state. Live Now/Completed are event-only — they
+// come from Discord's own Scheduled Event lifecycle (routers/webhooks.py),
+// which an announcement has no equivalent of.
+const STATUS_META = {
+  scheduled: { text: 'Scheduled', color: 'pf-m-gray'  },
+  announced: { text: 'Announced', color: 'pf-m-green' },
+  live:      { text: 'Live Now',  color: 'pf-m-blue'  },
+  completed: { text: 'Completed', color: 'pf-m-gray'  },
+  failed:    { text: 'Failed',    color: 'pf-m-red'   },
+  cancelled: { text: 'Cancelled', color: 'pf-m-red'   },
+};
+
+function occurrenceStatusBadge(status) {
+  const key = {
+    pending: 'scheduled', posted: 'announced', active: 'live',
+    completed: 'completed', cancelled: 'cancelled', error: 'failed',
+  }[status] || 'scheduled';
+  const m = STATUS_META[key];
+  return pfLabel(m.text, m.color);
+}
+
+function announcementStatusBadgeAdmin(status) {
+  const key = {
+    draft: 'scheduled', scheduled: 'scheduled', posted: 'announced',
+    failed: 'failed', cancelled: 'cancelled',
+  }[status] || 'scheduled';
+  const m = STATUS_META[key];
+  return pfLabel(m.text, m.color);
+}
+
 function tenantNameFor(tenantId) {
   const t = TENANTS.find(t => t.id === tenantId);
   return t ? t.name : null;
@@ -48,7 +85,6 @@ async function loadDashboard() {
       })
       .sort((a, b) => new Date(a.start_datetime_utc) - new Date(b.start_datetime_utc));
 
-    const statusColor = { posted: 'pf-m-green', active: 'pf-m-blue', completed: 'pf-m-gray', cancelled: 'pf-m-red', pending: 'pf-m-gray' };
     function occurrenceCard(o) {
       const allianceName = tenantNameFor(o.owning_tenant_id);
       return `
@@ -60,7 +96,7 @@ async function loadDashboard() {
           <span style="color:var(--muted)">${fmtTime(o.start_datetime_utc)}</span>
           <span style="color:var(--muted);font-size:0.85em">${formatRelativeTime(new Date(o.start_datetime_utc))}</span>
           <span style="color:var(--muted)">${escapeHtml(o.discord_channel)}</span>
-          ${pfLabel(escapeHtml(o.post_status), statusColor[o.post_status] || 'pf-m-gray')}
+          ${occurrenceStatusBadge(o.post_status)}
         </div>
       </div>`;
     }

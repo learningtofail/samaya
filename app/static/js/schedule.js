@@ -42,8 +42,6 @@ function renderSchedule() {
     return;
   }
 
-  const statusColor = { posted: 'pf-m-green', active: 'pf-m-blue', completed: 'pf-m-gray', cancelled: 'pf-m-red', pending: 'pf-m-gray', queued: 'pf-m-blue', error: 'pf-m-red' };
-
   function buildRow(o, sectionScope) {
     // sectionScope is 'Alliance' or 'Leadership' (which table section this
     // row is in, used by postSelected()'s bulk actions) — distinct from
@@ -67,13 +65,13 @@ function renderSchedule() {
         </span>
       </td>
       <td class="pf-v6-c-table__td">
-        ${pfLabel(escapeHtml(o.post_status), statusColor[o.post_status] || 'pf-m-gray')}
+        ${occurrenceStatusBadge(o.post_status)}
         ${o.status_detail?`<span title="${escapeHtml(o.status_detail)}" style="cursor:help;margin-left:4px">⚠</span>`:''}
       </td>
       <td class="pf-v6-c-table__td">
         ${o.post_status==='posted'
           ? `<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="cancelOccurrence(${o.id})">Cancel</button>`
-          : `<button class="pf-v6-c-button pf-m-primary pf-m-small" onclick="postOne(${o.id})" ${['posted','queued'].includes(o.post_status)?'disabled':''}>Post</button>`
+          : `<button class="pf-v6-c-button pf-m-primary pf-m-small" onclick="postOne(${o.id})" ${o.post_status==='posted'?'disabled':''}>Post</button>`
         }
       </td>
     </tr>`;

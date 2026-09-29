@@ -653,11 +653,12 @@
 </div>
 
 <!-- EVENT MODAL -->
-<div class="pf-v6-c-backdrop" id="eventModal">
+<div class="pf-v6-c-backdrop" id="eventModal" data-close-fn="closeModal">
   <div class="pf-v6-l-bullseye">
     <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="modalTitle" style="max-height:90vh;overflow-y:auto">
       <header class="pf-v6-c-modal-box__header">
         <h2 class="pf-v6-c-modal-box__title" id="modalTitle"><span class="pf-v6-c-modal-box__title-text">Add Event</span></h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeModal()">&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
         <input type="hidden" id="modalEventId">
@@ -816,11 +817,12 @@
 </div>
 
 <!-- ANNOUNCEMENT MODAL (spec §13) -->
-<div class="pf-v6-c-backdrop" id="announcementModal">
+<div class="pf-v6-c-backdrop" id="announcementModal" data-close-fn="closeAnnouncementModal">
   <div class="pf-v6-l-bullseye">
     <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="announcementModalTitle" style="max-height:90vh;overflow-y:auto">
       <header class="pf-v6-c-modal-box__header">
         <h2 class="pf-v6-c-modal-box__title" id="announcementModalTitle"><span class="pf-v6-c-modal-box__title-text">New Announcement</span></h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeAnnouncementModal()">&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
         <form class="pf-v6-c-form">
@@ -935,11 +937,12 @@
 </div>
 
 <!-- ANNOUNCEMENT TEMPLATE MODAL (spec §27) -->
-<div class="pf-v6-c-backdrop" id="templateModal">
+<div class="pf-v6-c-backdrop" id="templateModal" data-close-fn="closeTemplateModal">
   <div class="pf-v6-l-bullseye">
     <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="templateModalTitle" style="max-height:90vh;overflow-y:auto">
       <header class="pf-v6-c-modal-box__header">
         <h2 class="pf-v6-c-modal-box__title" id="templateModalTitle"><span class="pf-v6-c-modal-box__title-text">New Template</span></h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeTemplateModal()">&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
         <input type="hidden" id="tTemplateId">
@@ -1018,11 +1021,12 @@
 <!-- TENANT (ALLIANCE) MODAL (spec §38 — create/edit, including the 1:1 icon
      upload; replaces the old prompt()-based createTenant/editTenant, since
      a file picker needs a real form) -->
-<div class="pf-v6-c-backdrop" id="tenantModal">
+<div class="pf-v6-c-backdrop" id="tenantModal" data-close-fn="closeTenantModal">
   <div class="pf-v6-l-bullseye">
     <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="tenantModalTitle">
       <header class="pf-v6-c-modal-box__header">
         <h2 class="pf-v6-c-modal-box__title" id="tenantModalTitle"><span class="pf-v6-c-modal-box__title-text">New Tenant</span></h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeTenantModal()">&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
         <input type="hidden" id="tnId">
@@ -1076,18 +1080,19 @@
 </div>
 
 <!-- TIME ZONE MODAL (spec §24) — replaces the old header <select id="displayTzPicker"> -->
-<div class="pf-v6-c-backdrop" id="timezoneModal">
+<div class="pf-v6-c-backdrop" id="timezoneModal" data-close-fn="closeTimezoneModal">
   <div class="pf-v6-l-bullseye">
     <div class="pf-v6-c-modal-box pf-m-sm" role="dialog" aria-modal="true" aria-labelledby="timezoneModalTitle">
       <header class="pf-v6-c-modal-box__header">
         <h2 class="pf-v6-c-modal-box__title" id="timezoneModalTitle"><span class="pf-v6-c-modal-box__title-text">Time Zone</span></h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeTimezoneModal()">&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
-        <p class="pf-v6-u-font-size-sm" style="color:var(--muted);margin:0 0 12px">Controls the local half of every time shown alongside UTC across the admin UI — the header clock, and every dual-time display in Dashboard, Schedule, Gantt, Post Log, and Announcements.</p>
-        <div id="timezoneModalList" style="display:flex;flex-direction:column;gap:4px"></div>
+        <p class="pf-v6-u-font-size-sm" id="timezoneModalIntro" style="color:var(--muted);margin:0 0 12px">Controls the local half of every time shown alongside UTC across the admin UI — the header clock, and every dual-time display in Dashboard, Schedule, Gantt, Post Log, and Announcements.</p>
+        <div id="timezoneModalList"></div>
       </div>
       <footer class="pf-v6-c-modal-box__footer">
-        <button class="pf-v6-c-button pf-m-link" onclick="closeTimezoneModal()">Cancel</button>
+        <button class="pf-v6-c-button pf-m-link" onclick="closeTimezoneModal()">Close</button>
       </footer>
     </div>
   </div>

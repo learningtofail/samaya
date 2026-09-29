@@ -101,6 +101,19 @@
   .about-page-body h4:first-child { margin-top: 0; }
   .about-page-body ul { margin: 2px 0 8px 20px; padding: 0; }
 
+  /* Every modal gets an explicit X close button (top-right of its header)
+     plus Escape-key support (wired via each backdrop's data-close-fn
+     attribute in common.js) rather than relying only on a Cancel button
+     buried in the footer. */
+  .pf-v6-c-modal-box__header { position: relative; }
+  .samaya-modal-close {
+    position: absolute; top: 10px; right: 10px;
+    background: none; border: none; cursor: pointer;
+    font-size: 1.3rem; line-height: 1; padding: 6px; border-radius: 4px;
+    color: var(--muted);
+  }
+  .samaya-modal-close:hover { color: var(--text); background: var(--bg3); }
+
   /* Every view header across the admin UI (Dashboard/Events/Schedule/
      Access/.../Platform) uses this same PatternFly pf-l-flex +
      space-between pattern for "title on the left, controls on the right".

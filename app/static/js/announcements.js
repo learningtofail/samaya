@@ -495,8 +495,6 @@ async function loadAnnouncements() {
       tbody.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="6" style="color:var(--muted);padding:20px">No announcements yet. Click &quot;+ New Announcement&quot; to schedule one.</td></tr>';
       return;
     }
-    const announcementStatusColor = { draft: 'pf-m-gray', scheduled: 'pf-m-blue', posted: 'pf-m-green', failed: 'pf-m-red', cancelled: 'pf-m-gray' };
-    const targetStatusColor = { pending: 'pf-m-gray', posted: 'pf-m-green', error: 'pf-m-red' };
     const deletableStatuses = ['posted', 'failed', 'cancelled'];
 
     tbody.innerHTML = items.map(a => {
@@ -505,9 +503,12 @@ async function loadAnnouncements() {
       // a stale "pending") is misleading — the announcement-level status
       // is what actually governs them once cancelled.
       const targetsHtml = a.targets.map(t => {
+        // AnnouncementTarget.post_status (pending/posted/error) uses the
+        // exact same three underlying meanings as an Occurrence's
+        // pending/posted/error, so occurrenceStatusBadge's mapping
+        // (dashboard.js) applies unchanged — same word/color everywhere.
         const displayStatus = a.status === 'cancelled' ? 'cancelled' : t.post_status;
-        const color = a.status === 'cancelled' ? 'pf-m-gray' : (targetStatusColor[t.post_status] || 'pf-m-gray');
-        const label = tenantName(t.tenant_id) + ': ' + pfLabel(escapeHtml(displayStatus), color);
+        const label = tenantName(t.tenant_id) + ': ' + occurrenceStatusBadge(displayStatus);
         return t.status_detail && a.status !== 'cancelled'
           ? '<div title="' + escapeHtml(t.status_detail) + '">' + label + '</div>'
           : '<div>' + label + '</div>';
@@ -536,7 +537,7 @@ async function loadAnnouncements() {
         + '<td class="pf-v6-c-table__td">' + escapeHtml(a.title) + leadershipBadge + '</td>'
         + '<td class="pf-v6-c-table__td">' + fmtDateTime(a.scheduled_for) + '</td>'
         + '<td class="pf-v6-c-table__td">' + recurringBadge + '</td>'
-        + '<td class="pf-v6-c-table__td">' + pfLabel(escapeHtml(a.status), announcementStatusColor[a.status] || 'pf-m-gray') + '</td>'
+        + '<td class="pf-v6-c-table__td">' + announcementStatusBadgeAdmin(a.status) + '</td>'
         + '<td class="pf-v6-c-table__td">' + targetsHtml + '</td>'
         + '<td class="pf-v6-c-table__td" style="display:flex;gap:6px;flex-wrap:wrap">' + [cancelBtn, retryBtn, deleteBtn, duplicateBtn].filter(Boolean).join('') + '</td>'
         + '</tr>';

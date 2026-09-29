@@ -70,6 +70,15 @@
   #allianceModal.open { display: block; }
   #timezoneModal { display: none; }
   #timezoneModal.open { display: block; }
+  /* Same X-close + Escape treatment as admin.html's modals. */
+  .pf-v6-c-modal-box__header { position: relative; }
+  .samaya-modal-close {
+    position: absolute; top: 10px; right: 10px;
+    background: none; border: none; cursor: pointer;
+    font-size: 1.3rem; line-height: 1; padding: 6px; border-radius: 4px;
+    color: var(--pf-t--global--text--color--subtle);
+  }
+  .samaya-modal-close:hover { color: var(--pf-t--global--text--color--regular); background: var(--pf-t--global--background--color--secondary--default); }
   /* Same PatternFly page-layout fix admin.html already carries: .pf-v6-c-page
      is CSS grid with header/sidebar/main template areas, and with no
      sidebar element on this page, .pf-v6-c-page__main-container's default
@@ -102,11 +111,12 @@
   </header>
 
   <!-- ALLIANCE MODAL (spec §26) -->
-  <div class="pf-v6-c-backdrop" id="allianceModal">
+  <div class="pf-v6-c-backdrop" id="allianceModal" data-close-fn="closeAllianceModal">
     <div class="pf-v6-l-bullseye">
       <div class="pf-v6-c-modal-box pf-m-sm" role="dialog" aria-modal="true" aria-labelledby="allianceModalTitle">
         <header class="pf-v6-c-modal-box__header">
           <h2 class="pf-v6-c-modal-box__title" id="allianceModalTitle"><span class="pf-v6-c-modal-box__title-text">Switch Alliance</span></h2>
+          <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeAllianceModal()">&times;</button>
         </header>
         <div class="pf-v6-c-modal-box__body">
           <div id="allianceModalList" style="display:flex;flex-direction:column;gap:4px"></div>
@@ -119,18 +129,19 @@
   </div>
 
   <!-- TIME ZONE MODAL (spec §26, mirrors admin's §24) -->
-  <div class="pf-v6-c-backdrop" id="timezoneModal">
+  <div class="pf-v6-c-backdrop" id="timezoneModal" data-close-fn="closeTimezoneModal">
     <div class="pf-v6-l-bullseye">
       <div class="pf-v6-c-modal-box pf-m-sm" role="dialog" aria-modal="true" aria-labelledby="timezoneModalTitle">
         <header class="pf-v6-c-modal-box__header">
           <h2 class="pf-v6-c-modal-box__title" id="timezoneModalTitle"><span class="pf-v6-c-modal-box__title-text">Time Zone</span></h2>
+          <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeTimezoneModal()">&times;</button>
         </header>
         <div class="pf-v6-c-modal-box__body">
-          <p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle);margin:0 0 12px">Controls the local half of every time shown alongside UTC on this page.</p>
-          <div id="timezoneModalList" style="display:flex;flex-direction:column;gap:4px"></div>
+          <p class="pf-v6-u-font-size-sm" id="timezoneModalIntro" style="color:var(--pf-t--global--text--color--subtle);margin:0 0 12px">Controls the local half of every time shown alongside UTC on this page.</p>
+          <div id="timezoneModalList"></div>
         </div>
         <footer class="pf-v6-c-modal-box__footer">
-          <button class="pf-v6-c-button pf-m-link" onclick="closeTimezoneModal()">Cancel</button>
+          <button class="pf-v6-c-button pf-m-link" onclick="closeTimezoneModal()">Close</button>
         </footer>
       </div>
     </div>
@@ -201,6 +212,20 @@ document.getElementById('footerText').innerHTML =
 const DOW_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MONTH    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+// ── Modal close: Escape key ──────────────────────────────────
+// Mirrors admin.html's common.js listener — every modal backdrop here
+// (allianceModal/timezoneModal) carries a data-close-fn attribute naming
+// its own close function; each modal's X button already calls that
+// function directly, this covers Escape for both without a per-modal
+// keydown handler.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const openModal = document.querySelector('.pf-v6-c-backdrop.open');
+  if (!openModal) return;
+  const fnName = openModal.dataset.closeFn;
+  if (fnName && typeof window[fnName] === 'function') window[fnName]();
+});
+
 // ── Display time zone (spec §15.4) ──────────────────────────────
 // This page has no shared JS with admin.html (it's served standalone, no
 // <script src> chain), so the picker/format logic is duplicated here
@@ -211,6 +236,18 @@ const DISPLAY_TZ_OPTIONS = [
   'America/Denver', 'America/Los_Angeles', 'Europe/London', 'Europe/Paris',
   'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney',
 ];
+
+// Full IANA time zone database (~400 zones) rather than the curated list
+// above — mirrors common.js's own allTimeZones() exactly (see that
+// function's comment for the Intl.supportedValuesOf browser-support note).
+function allTimeZones() {
+  try {
+    if (typeof Intl.supportedValuesOf === 'function') {
+      return Intl.supportedValuesOf('timeZone');
+    }
+  } catch (e) { /* fall through to the curated list below */ }
+  return DISPLAY_TZ_OPTIONS;
+}
 
 function getDisplayTz() {
   return localStorage.getItem('samaya_display_tz')
@@ -251,17 +288,41 @@ function startHeaderClock() {
   _headerClockTimer = setInterval(tick, 30000);
 }
 
-function openTimezoneModal() {
+// firstVisit=true renders extra explanatory copy — triggered automatically
+// once, the first time someone opens this page with no stored preference
+// yet (see maybeShowFirstVisitTzModal below); the header clock click is
+// always a plain re-open.
+function openTimezoneModal(firstVisit) {
   const list = document.getElementById('timezoneModalList');
+  const intro = document.getElementById('timezoneModalIntro');
   const current = getDisplayTz();
-  const options = DISPLAY_TZ_OPTIONS.includes(current) ? DISPLAY_TZ_OPTIONS : [current, ...DISPLAY_TZ_OPTIONS];
-  list.innerHTML = options.map(tz =>
-    `<button type="button" class="pf-v6-c-button ${tz === current ? 'pf-m-primary' : 'pf-m-secondary'}" style="justify-content:flex-start" onclick="selectTimezone('${tz}')">${tz}</button>`
-  ).join('');
+  if (intro) {
+    intro.textContent = firstVisit
+      ? `We show event times in both UTC and your local time zone so nothing gets missed across time zones. We've detected ${current} from your browser — pick a different one below if that's wrong, or just close this if it looks right.`
+      : 'Controls the local half of every time shown alongside UTC on this page.';
+  }
+  const zones = allTimeZones();
+  const options = zones.includes(current) ? zones : [current, ...zones];
+  list.innerHTML = `<select class="pf-v6-c-form-control" id="timezoneSelect" style="width:100%" onchange="selectTimezone(this.value)">`
+    + options.map(tz => `<option value="${tz}" ${tz === current ? 'selected' : ''}>${tz}</option>`).join('')
+    + `</select>`;
   document.getElementById('timezoneModal').classList.add('open');
 }
 
+// Called once at page load — a stored samaya_display_tz means either an
+// explicit past choice or a past confirm/dismiss of this modal
+// (selectTimezone/closeTimezoneModal both set it), so its mere presence
+// is "already asked."
+function maybeShowFirstVisitTzModal() {
+  if (localStorage.getItem('samaya_display_tz')) return;
+  openTimezoneModal(/*firstVisit=*/true);
+}
+
 function closeTimezoneModal() {
+  // Closing without picking a zone still counts as "confirmed" — this is
+  // what stops the first-visit prompt from reappearing on every future
+  // visit even if the detected default was left as-is.
+  if (!localStorage.getItem('samaya_display_tz')) setDisplayTz(getDisplayTz());
   document.getElementById('timezoneModal').classList.remove('open');
 }
 
@@ -364,16 +425,30 @@ function pfLabel(cls, text) {
   return `<span class="pf-v6-c-label ${cls} pf-m-filled"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${text}</span></span></span>`;
 }
 
+// ── Canonical status vocabulary ──────────────────────────────────
+// One word and one color per underlying meaning, shared between events
+// and announcements (and matched exactly by the admin console's own
+// pills in dashboard.js/schedule.js/announcements.js) — "hasn't gone out
+// yet" is always "Scheduled"/gray, a hard failure is always "Failed"/red,
+// wherever it appears. Live Now/Completed are event-only: they come from
+// Discord's own Scheduled Event lifecycle (routers/webhooks.py's inbound
+// status sync), which an announcement has no equivalent of.
+const STATUS_META = {
+  scheduled: { text: 'Scheduled', color: 'pf-m-gray'  },
+  announced: { text: 'Announced', color: 'pf-m-green' },
+  live:      { text: 'Live Now',  color: 'pf-m-blue'  },
+  completed: { text: 'Completed', color: 'pf-m-gray'  },
+  failed:    { text: 'Failed',    color: 'pf-m-red'   },
+  cancelled: { text: 'Cancelled', color: 'pf-m-red'   },
+};
+
 function statusBadge(status) {
-  switch (status) {
-    case 'posted':    return pfLabel('pf-m-green',  'Announced');
-    case 'active':    return pfLabel('pf-m-blue',   'Live Now');
-    case 'completed': return pfLabel('pf-m-gray',   'Completed');
-    case 'cancelled': return pfLabel('pf-m-red',    'Cancelled');
-    case 'error':     return pfLabel('pf-m-red',    'Post Failed');
-    case 'pending':
-    default:          return pfLabel('pf-m-gray',   'Upcoming');
-  }
+  const key = {
+    pending: 'scheduled', posted: 'announced', active: 'live',
+    completed: 'completed', cancelled: 'cancelled', error: 'failed',
+  }[status] || 'scheduled';
+  const m = STATUS_META[key];
+  return pfLabel(m.color, m.text);
 }
 
 // Announcement.status has its own vocabulary (draft/scheduled/posted/
@@ -382,13 +457,12 @@ function statusBadge(status) {
 // rather than overloading statusBadge() with a second meaning per value
 // (spec §37).
 function announcementStatusBadge(status) {
-  switch (status) {
-    case 'posted':    return pfLabel('pf-m-green', 'Announced');
-    case 'scheduled': return pfLabel('pf-m-gray',  'Scheduled');
-    case 'failed':    return pfLabel('pf-m-red',   'Failed');
-    case 'cancelled': return pfLabel('pf-m-red',   'Cancelled');
-    default:          return pfLabel('pf-m-gray',  'Scheduled');
-  }
+  const key = {
+    draft: 'scheduled', scheduled: 'scheduled', posted: 'announced',
+    failed: 'failed', cancelled: 'cancelled',
+  }[status] || 'scheduled';
+  const m = STATUS_META[key];
+  return pfLabel(m.color, m.text);
 }
 
 // Spec §37 — a small purple label marking an announcement row so it
@@ -589,6 +663,7 @@ loadAlliances();
 loadLastActivity();
 setInterval(loadEvents, 600000);
 setInterval(loadLastActivity, 600000);
+maybeShowFirstVisitTzModal();
 </script>
 </body>
 </html>

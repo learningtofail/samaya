@@ -34,4 +34,8 @@ loadMe().then(() => loadTenants()).then(() => {
   }
   applyRoleVisibility();
   loadDashboard();
+  // Only once real access is confirmed — not before loadMe()'s 401 redirect
+  // has had a chance to fire, so a logged-out visitor never sees this modal
+  // flash before being sent to /auth/login.
+  maybeShowFirstVisitTzModal();
 });

@@ -11,6 +11,21 @@
 // a tenant owner, the Platform tab only for a superadmin.
 let ME = null;
 
+// ── Modal close: Escape key ──────────────────────────────────
+// Every modal backdrop (event/announcement/template/tenant/timezone) has
+// a data-close-fn attribute naming its own close function — an X button
+// in each modal's header already calls that function directly on click;
+// this one listener covers Escape for all of them without each modal
+// needing its own keydown handler. Registered once, here, since common.js
+// loads before every modal-owning view script.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const openModal = document.querySelector('.pf-v6-c-backdrop.open');
+  if (!openModal) return;
+  const fnName = openModal.dataset.closeFn;
+  if (fnName && typeof window[fnName] === 'function') window[fnName]();
+});
+
 async function loadMe() {
   ME = await api('GET', '/api/me', null, /*skipTenantHeader=*/true);
   return ME;
@@ -118,12 +133,29 @@ let occurrenceData = [];
 // not tied to any one view, hence living here rather than in events.js
 // where it used to be buried inside the Add/Edit Event modal.
 //
-// Same IANA zone list the old mTimezone dropdown offered.
+// Same IANA zone list the old mTimezone dropdown offered — kept as the
+// fallback for a browser without Intl.supportedValuesOf (see allTimeZones
+// below), and as the "detected zone" fast path when it's already common.
 const DISPLAY_TZ_OPTIONS = [
   'UTC', 'America/Toronto', 'America/New_York', 'America/Chicago',
   'America/Denver', 'America/Los_Angeles', 'Europe/London', 'Europe/Paris',
   'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney',
 ];
+
+// Full IANA time zone database (~400 zones) rather than the ~10-option
+// curated list above — Intl.supportedValuesOf('timeZone') is the
+// standard way to get it (Baseline widely-available since 2023; every
+// browser this app already requires for Intl.DateTimeFormat's own
+// timeZoneName option supports it). Falls back to the curated list on an
+// older engine that lacks it rather than throwing.
+function allTimeZones() {
+  try {
+    if (typeof Intl.supportedValuesOf === 'function') {
+      return Intl.supportedValuesOf('timeZone');
+    }
+  } catch (e) { /* fall through to the curated list below */ }
+  return DISPLAY_TZ_OPTIONS;
+}
 
 function getDisplayTz() {
   // Falls back to the browser-detected zone, not a hardcoded 'UTC' —
@@ -173,20 +205,45 @@ function startHeaderClock() {
   _headerClockTimer = setInterval(tick, 30000); // minute-resolution display, 30s is plenty
 }
 
-function openTimezoneModal() {
+// firstVisit=true renders extra explanatory copy and is triggered
+// automatically once, the first time someone opens the admin UI with no
+// stored preference yet (see maybeShowFirstVisitTzModal below) — every
+// other call (the header clock click) is a plain re-open.
+function openTimezoneModal(firstVisit) {
   const list = document.getElementById('timezoneModalList');
+  const intro = document.getElementById('timezoneModalIntro');
   const current = getDisplayTz();
-  // The detected/stored zone can be anything in the IANA database, not
-  // just one of our curated common ones — if it's not in the list,
-  // prepend it rather than silently leaving it unrepresented as a choice.
-  const options = DISPLAY_TZ_OPTIONS.includes(current) ? DISPLAY_TZ_OPTIONS : [current, ...DISPLAY_TZ_OPTIONS];
-  list.innerHTML = options.map(tz =>
-    `<button type="button" class="pf-v6-c-button ${tz === current ? 'pf-m-primary' : 'pf-m-secondary'}" style="justify-content:flex-start" onclick="selectTimezone('${tz}')">${tz}</button>`
-  ).join('');
+  if (intro) {
+    intro.textContent = firstVisit
+      ? `We show event times in both UTC and your local time zone so nothing gets missed across time zones. We've detected ${current} from your browser — pick a different one below if that's wrong, or just close this if it looks right.`
+      : 'Controls the local half of every time shown alongside UTC across the admin UI — the header clock, and every dual-time display in Dashboard, Schedule, Gantt, Post Log, and Announcements.';
+  }
+  // Full IANA database (~400 zones) in a native <select> rather than the
+  // old curated 10-button list — a native select supports type-to-jump,
+  // so this needs no separate search box to stay usable at this size.
+  const zones = allTimeZones();
+  const options = zones.includes(current) ? zones : [current, ...zones];
+  list.innerHTML = `<select class="pf-v6-c-form-control" id="timezoneSelect" style="width:100%" onchange="selectTimezone(this.value)">`
+    + options.map(tz => `<option value="${tz}" ${tz === current ? 'selected' : ''}>${tz}</option>`).join('')
+    + `</select>`;
   document.getElementById('timezoneModal').classList.add('open');
 }
 
+// Called once from init.js after the page is otherwise ready — a stored
+// samaya_display_tz means either an explicit past choice or a past
+// confirm/dismiss of this very modal (selectTimezone/closeTimezoneModal
+// both set it), so its mere presence is "already asked."
+function maybeShowFirstVisitTzModal() {
+  if (localStorage.getItem('samaya_display_tz')) return;
+  openTimezoneModal(/*firstVisit=*/true);
+}
+
 function closeTimezoneModal() {
+  // Closing without picking a zone still counts as "confirmed" — this is
+  // what stops the first-visit prompt from reappearing on every future
+  // visit even if the detected default was left as-is (see
+  // maybeShowFirstVisitTzModal above, which only checks presence).
+  if (!localStorage.getItem('samaya_display_tz')) setDisplayTz(getDisplayTz());
   document.getElementById('timezoneModal').classList.remove('open');
 }
 
