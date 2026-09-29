@@ -12,9 +12,13 @@ additionally requires a UserKingdom grant (check_kingdom_coordinator) —
 being trusted with one alliance's own settings doesn't imply being
 trusted to post into every other alliance's Discord server.
 """
-from datetime import date
+import csv
+import io
+from datetime import date, time as dtime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -31,6 +35,20 @@ from .schemas import EventIn, EventPatch, EventTenantNotificationIn
 from .serializers import _event_dict
 
 router = APIRouter()
+
+# spec §32 — bulk import/export column order. Deliberately excludes `scope`
+# and `targets`: a kingdom-wide event's automatic fan-out and an explicit
+# EventTarget list are both multi-row, cross-tenant concepts that don't
+# flatten cleanly into one CSV row per event, so bulk import only ever
+# creates alliance-scope events with no extra targets — see §32's Out of
+# Scope for the reasoning. Export is symmetric with import: the exact same
+# column set, in the same order, so a round-trip (export, tweak in a
+# spreadsheet, re-import) works without reshaping anything by hand.
+_BULK_EVENT_COLUMNS = [
+    "name", "interval_days", "start_time_utc", "duration_hours",
+    "discord_channel", "description", "leadership_only", "anchor_date",
+    "notification_channel_id", "notification_role_id", "notify_minutes_before",
+]
 
 
 @router.get("/api/events")
@@ -354,3 +372,133 @@ async def permanent_delete_event(
         "event_name": event.name,
         "post_log_entries_preserved": len(log_entries),
     }
+
+
+@router.get("/api/events/export.csv")
+async def export_events_csv(
+    tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
+):
+    """spec §32 — bulk export, paired with import below. Alliance-scope
+    events owned by the current tenant only: a kingdom-wide event's
+    automatic fan-out and any explicit EventTarget rows aren't
+    representable in one flat CSV row, so this (deliberately) leaves them
+    out rather than producing a lossy or misleading export of them — see
+    _BULK_EVENT_COLUMNS' comment."""
+    result = await db.execute(
+        select(EventDefinition).where(
+            EventDefinition.owning_tenant_id == tenant.id,
+            EventDefinition.scope == "alliance",
+        ).order_by(EventDefinition.name)
+    )
+    events = result.scalars().all()
+
+    def generate():
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(_BULK_EVENT_COLUMNS)
+        yield buf.getvalue()
+        for e in events:
+            buf.seek(0); buf.truncate(0)
+            writer.writerow([
+                e.name, e.interval_days, e.start_time_utc.strftime("%H:%M"),
+                str(e.duration_hours), e.discord_channel, e.description,
+                str(e.leadership_only).lower(), e.anchor_date.isoformat(),
+                e.notification_channel_id, e.notification_role_id,
+                e.notify_minutes_before if e.notify_minutes_before is not None else "",
+            ])
+            yield buf.getvalue()
+
+    return StreamingResponse(
+        generate(), media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=Events_Export.csv"},
+    )
+
+
+@router.post("/api/events/import.csv")
+async def import_events_csv(
+    file: UploadFile,
+    tenant: Tenant = Depends(require_not_viewer),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The import half of §32's bulk import/export pair. Every row becomes
+    a brand-new alliance-scope event owned by the current tenant — this is
+    additive only, never an update-by-name or upsert, so re-importing the
+    same file twice creates duplicates rather than silently overwriting
+    anything (matching how every other create endpoint in this app works:
+    there's no merge-by-name convention anywhere else to be consistent
+    with). A bad row doesn't abort the whole file: each row is validated
+    independently through EventIn's own validators (the same rules the
+    single-event create form enforces), valid rows are created, and every
+    invalid row is reported back by its 1-indexed CSV row number (header
+    row is row 1, so the first data row is row 2 — matching what a
+    coordinator sees if they open the file in a spreadsheet) with the
+    validation error, rather than the caller needing to fix a file blind
+    and re-upload it as guesswork.
+    """
+    raw = (await file.read()).decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(raw))
+    missing_cols = set(_BULK_EVENT_COLUMNS) - set(reader.fieldnames or [])
+    if missing_cols:
+        raise HTTPException(
+            status_code=422,
+            detail=f"CSV is missing required column(s): {sorted(missing_cols)}",
+        )
+
+    created = []
+    errors = []
+    for row_num, row in enumerate(reader, start=2):
+        try:
+            payload = EventIn(
+                name=row["name"],
+                interval_days=row["interval_days"],
+                start_time_utc=row["start_time_utc"],
+                duration_hours=row["duration_hours"],
+                discord_channel=row.get("discord_channel") or "",
+                description=row.get("description") or "",
+                leadership_only=str(row.get("leadership_only", "")).strip().lower() in ("true", "1", "yes"),
+                scope="alliance",
+                anchor_date=row["anchor_date"],
+                notification_channel_id=row.get("notification_channel_id") or "",
+                notification_role_id=row.get("notification_role_id") or "",
+                notify_minutes_before=row.get("notify_minutes_before") or None,
+                targets=[],
+            )
+        except ValidationError as e:
+            errors.append({"row": row_num, "detail": "; ".join(err["msg"] for err in e.errors())})
+            continue
+
+        event = EventDefinition(
+            owning_tenant_id        = tenant.id,
+            scope                   = "alliance",
+            name                    = payload.name,
+            interval_days           = payload.interval_days,
+            start_time_utc          = dtime(*map(int, payload.start_time_utc.split(":"))),
+            duration_hours          = payload.duration_hours,
+            discord_channel         = payload.discord_channel,
+            description             = payload.description,
+            leadership_only         = payload.leadership_only,
+            anchor_date             = date.fromisoformat(str(payload.anchor_date)),
+            active                  = True,
+            notification_channel_id = payload.notification_channel_id,
+            notification_role_id    = payload.notification_role_id,
+            notify_minutes_before   = payload.notify_minutes_before,
+        )
+        db.add(event)
+        try:
+            await db.flush()
+        except Exception as e:
+            await db.rollback()
+            errors.append({"row": row_num, "detail": f"Database error: {e}"})
+            continue
+        created.append(event)
+
+    for event in created:
+        await log_change(
+            db, user_id=user.id, tenant_id=tenant.id,
+            table_name="event_definitions", row_id=event.id, action="create",
+            after={"name": event.name, "scope": event.scope, "active": event.active, "source": "bulk_import"},
+        )
+    await db.commit()
+
+    return {"created": len(created), "errors": errors}

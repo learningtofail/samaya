@@ -18,6 +18,62 @@ async function loadEvents() {
   } catch(e) { toast(e.message, true); }
 }
 
+// spec §32 — bulk export/import, alliance-scope events only (see the
+// backend's _BULK_EVENT_COLUMNS comment for why kingdom-wide/targets are
+// excluded). Export follows the same fetch-blob-download pattern as
+// postlog.js's exportPostLogCsv(); import posts the chosen file as
+// multipart form data, outside the api() helper since api() always sends
+// JSON.
+async function exportEventsCsv() {
+  try {
+    const res = await fetch('/admin/api/events/export.csv', {
+      headers: { 'X-Tenant-Slug': getCurrentTenantSlug() },
+      credentials: 'same-origin',
+    });
+    if (res.status === 401) { window.location.href = '/auth/login'; return; }
+    if (!res.ok) throw new Error('Export failed: ' + res.statusText);
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = 'Events_Export.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function importEventsCsv(file) {
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const res = await fetch('/admin/api/events/import.csv', {
+      method: 'POST',
+      headers: { 'X-Tenant-Slug': getCurrentTenantSlug() },
+      credentials: 'same-origin',
+      body: formData,
+    });
+    if (res.status === 401) { window.location.href = '/auth/login'; return; }
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || res.statusText);
+    if (body.errors && body.errors.length) {
+      toast(`Imported ${body.created} event(s), ${body.errors.length} row(s) failed — see console for details`, body.created === 0);
+      console.warn('Event import errors:', body.errors);
+    } else {
+      toast(`Imported ${body.created} event(s)`);
+    }
+    loadEvents();
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    document.getElementById('eventsImportFile').value = '';
+  }
+}
+
 function renderEventsTable(allEvents) {
     const filterText = (document.getElementById('eventsFilterInput')?.value || '').trim().toLowerCase();
     const events = filterText

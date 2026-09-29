@@ -238,6 +238,9 @@
   <div class="pf-v6-l-flex pf-m-align-items-center pf-v6-u-mb-sm" style="gap:12px">
     <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Event Definitions</h2>
     <button class="pf-v6-c-button pf-m-primary" onclick="openEventModal()" title="Create a new recurring event definition. Check &quot;Leadership Only&quot; inside to make it a channel-notification-only event.">+ Add Event</button>
+    <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="exportEventsCsv()" title="Download this alliance's own alliance-scope events as CSV">Export CSV</button>
+    <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="document.getElementById('eventsImportFile').click()" title="Bulk-create alliance-scope events from a CSV in the same column format as Export CSV">Import CSV</button>
+    <input type="file" id="eventsImportFile" accept=".csv" style="display:none" onchange="importEventsCsv(this.files[0])">
     <input class="pf-v6-c-form-control pf-m-small" id="eventsFilterInput" placeholder="Filter by name or alliance…" style="max-width:240px;margin-left:auto" oninput="filterEventsTable()">
   </div>
   <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">🛡️ Alliance Events</h2>
@@ -569,6 +572,9 @@
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mDescription"><span class="pf-v6-c-form__label-text">Description</span></label></div>
               <div class="pf-v6-c-form__group-control">
                 <textarea class="pf-v6-c-form-control" id="mDescription" rows="3" placeholder="Event description sent to Discord"></textarea>
+                <div class="pf-v6-c-form__helper-text">
+                  Placeholders, resolved when this event is posted: <code>{alliance_name}</code> <code>{kingdom_name}</code> <code>{send_time}</code> <code>{send_time_relative}</code> <code>{event_time}</code> <code>{event_time_relative}</code> (the last two are this occurrence's own start time). Appears in both the Discord Scheduled Event's own description and the pre-event ping.
+                </div>
               </div>
             </div>
             <div class="pf-v6-c-form__group">

@@ -24,6 +24,7 @@ from models.db import EventTarget, EventTenantNotification, Occurrence, PostLog,
 from services.discord_api import (
     cancel_discord_event, create_discord_event, send_channel_message,
 )
+from services.templates import render_placeholders
 from services.time_utils import ensure_utc
 
 from .deps import (
@@ -165,13 +166,34 @@ async def _post_to_one_tenant(db: AsyncSession, occ: Occurrence, event, target_t
         return {"tenant_slug": target_tenant.slug, "status": "skipped", "detail": "Already posted"}
     await db.commit()
 
+    # spec §32 — the same six {placeholder} names Announcements support
+    # (§27) now also resolve in an Event's description, wherever that
+    # description reaches Discord: the Scheduled Event's own description
+    # field below, and the pre-event ping's extra line further down (both
+    # use this one resolved copy, computed once). "send_time" here means
+    # "when this ping/event post actually went out" (now) rather than a
+    # separately-scheduled send time, since an Event has no such concept
+    # of its own — event_offset_minutes is computed from now to this
+    # occurrence's own start, so {event_time}/{event_time_relative}
+    # resolve to the occurrence's real start time either way.
+    now = datetime.now(timezone.utc)
+    occ_start = ensure_utc(occ.start_datetime_utc)
+    offset_minutes = round((occ_start - now).total_seconds() / 60)
+    resolved_description = render_placeholders(
+        event.description,
+        tenant_name=target_tenant.name,
+        kingdom_name=target_tenant.kingdom.name,
+        scheduled_for=now,
+        event_offset_minutes=offset_minutes,
+    ) if event.description else event.description
+
     discord_id, error = await create_discord_event(
         token       = token,
         guild_id    = target_tenant.server.guild_id,
         name        = event.name,
         start       = occ.start_datetime_utc,
         end         = occ.end_datetime_utc,
-        description = event.description,
+        description = resolved_description,
         location    = event.discord_channel,
     )
 
@@ -195,6 +217,7 @@ async def _post_to_one_tenant(db: AsyncSession, occ: Occurrence, event, target_t
             f"{role_mention}📅 **{event.name}** has been scheduled\n"
             f"{date_str} · {time_str}"
             + (f" · {event.discord_channel}" if event.discord_channel else "")
+            + (f"\n{resolved_description}" if resolved_description else "")
             + (f"\nhttps://discord.com/events/{target_tenant.server.guild_id}/{discord_id}" if discord_id else "")
             + "\n\nClick **Interested** to get a reminder 30 minutes before."
         )
