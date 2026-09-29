@@ -12,7 +12,7 @@ from models.db import Tenant
 from services.recurrence import next_occurrences
 from scheduler.regeneration import regenerate_occurrences
 
-from .deps import get_current_tenant
+from .deps import require_not_viewer
 from .schemas import EventIn
 
 router = APIRouter()
@@ -27,7 +27,7 @@ async def preview_occurrences(payload: EventIn):
 
 @router.post("/api/scheduler/regenerate")
 async def manual_regenerate(
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     session_factory=Depends(get_session_factory),
 ):
     # regenerate_occurrences opens its own session via session_factory

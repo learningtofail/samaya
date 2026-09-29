@@ -14,7 +14,7 @@ from models import get_db
 from models.db import Announcement, AnnouncementTarget, Tenant, User
 from services.audit import log_change
 
-from .deps import get_current_tenant, get_current_user, resolve_target_tenants
+from .deps import get_current_tenant, require_not_viewer, get_current_user, resolve_target_tenants
 from .schemas import AnnouncementIn
 
 router = APIRouter()
@@ -67,7 +67,7 @@ async def list_announcements(
 @router.post("/api/announcements", status_code=201)
 async def create_announcement(
     payload: AnnouncementIn,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -115,7 +115,7 @@ async def create_announcement(
 @router.post("/api/announcements/{announcement_id}/cancel")
 async def cancel_announcement(
     announcement_id: int,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -143,7 +143,7 @@ async def cancel_announcement(
 @router.post("/api/announcements/{announcement_id}/retry-failed-targets")
 async def retry_failed_targets(
     announcement_id: int,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -200,7 +200,7 @@ async def retry_failed_targets(
 @router.delete("/api/announcements/{announcement_id}", status_code=200)
 async def delete_announcement(
     announcement_id: int,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

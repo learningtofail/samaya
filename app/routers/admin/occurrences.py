@@ -28,7 +28,7 @@ from services.time_utils import ensure_utc
 
 from .deps import (
     PLATFORM_BOT_TOKEN, find_post_log, get_current_tenant, get_current_tenants,
-    get_occurrence_with_event,
+    get_occurrence_with_event, require_not_viewer,
 )
 from .schemas import OccurrencePatch
 from .serializers import _occurrence_dict
@@ -72,6 +72,7 @@ async def update_occurrence(
     occ_id: int, payload: OccurrencePatch,
     occ_and_event: tuple = Depends(get_occurrence_with_event),
     db: AsyncSession = Depends(get_db),
+    _: Tenant = Depends(require_not_viewer),
 ):
     # get_occurrence_with_event already allows any tenant sharing this
     # occurrence's Kingdom for a kingdom-wide event — post_to_discord is a
@@ -206,6 +207,7 @@ async def _post_to_one_tenant(db: AsyncSession, occ: Occurrence, event, target_t
 async def post_occurrence(
     db: AsyncSession = Depends(get_db),
     occ_and_event: tuple = Depends(get_occurrence_with_event),
+    _: Tenant = Depends(require_not_viewer),
 ):
     occ, event = occ_and_event
 
@@ -267,7 +269,7 @@ async def post_occurrence(
 async def cancel_occurrence_discord(
     db: AsyncSession = Depends(get_db),
     occ_and_event: tuple = Depends(get_occurrence_with_event),
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
 ):
     """Cancels only the *current tenant's own* copy of this occurrence's
     Discord post — for a kingdom-wide event, each tenant manages their own

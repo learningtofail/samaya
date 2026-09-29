@@ -108,20 +108,24 @@ class User(Base):
 
 
 class UserTenant(Base):
-    """Grants a user owner/coordinator access to one Tenant. Independent
-    per tenant — a coordinator of MOD is not automatically anything to
-    NSR, even if the two share a Discord guild."""
+    """Grants a user owner/coordinator/viewer access to one Tenant.
+    Independent per tenant — a coordinator of MOD is not automatically
+    anything to NSR, even if the two share a Discord guild. 'viewer'
+    (spec §31) is read-only: passes every GET-only dependency the same
+    as 'coordinator' does, but is rejected by require_not_viewer, which
+    every mutating admin route depends on instead of plain
+    get_current_tenant."""
     __tablename__ = "user_tenants"
 
     id         = Column(Integer, primary_key=True)
     user_id    = Column(Integer, ForeignKey("users.id"), nullable=False)
     tenant_id  = Column(Integer, ForeignKey("tenants.id"), nullable=False)
-    role       = Column(Text, nullable=False)  # owner | coordinator
+    role       = Column(Text, nullable=False)  # owner | coordinator | viewer
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         UniqueConstraint("user_id", "tenant_id", name="uq_user_tenant"),
-        CheckConstraint("role IN ('owner', 'coordinator')", name="ck_user_tenant_role"),
+        CheckConstraint("role IN ('owner', 'coordinator', 'viewer')", name="ck_user_tenant_role"),
     )
 
 
@@ -154,7 +158,7 @@ class Invite(Base):
     token         = Column(Text, nullable=False, unique=True)
     tenant_id     = Column(Integer, ForeignKey("tenants.id"), nullable=True)
     kingdom_id    = Column(Integer, ForeignKey("kingdoms.id"), nullable=True)
-    role          = Column(Text, nullable=False)  # owner | coordinator | kingdom_coordinator
+    role          = Column(Text, nullable=False)  # owner | coordinator | viewer | kingdom_coordinator
     created_by    = Column(Integer, ForeignKey("users.id"), nullable=True)
     expires_at    = Column(DateTime(timezone=True), nullable=False)
     used_at       = Column(DateTime(timezone=True))
@@ -164,7 +168,7 @@ class Invite(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "role IN ('owner', 'coordinator', 'kingdom_coordinator')",
+            "role IN ('owner', 'coordinator', 'viewer', 'kingdom_coordinator')",
             name="ck_invite_role",
         ),
         CheckConstraint(

@@ -136,8 +136,12 @@ function onTenantChange(slug) {
 function applyRoleVisibility() {
   const accessItem = document.getElementById('accessTabItem');
   const platformItem = document.getElementById('platformTabItem');
+  const auditItem = document.getElementById('auditTabItem');
   if (accessItem)   accessItem.style.display = (!isCombinedMode() && isCurrentTenantOwner()) ? '' : 'none';
   if (platformItem) platformItem.style.display = (!isCombinedMode() && ME && ME.is_superadmin) ? '' : 'none';
+  // Audit log (spec §31) — same owner-only visibility as Access, since
+  // /api/audit-log is require_tenant_owner-gated the same way.
+  if (auditItem)    auditItem.style.display = (!isCombinedMode() && isCurrentTenantOwner()) ? '' : 'none';
   const configItem = document.getElementById('configTabItem');
   const syncItem = document.getElementById('syncTabItem');
   const announcementsItem = document.getElementById('announcementsTabItem');
@@ -271,6 +275,7 @@ function showView(id, btn) {
   if (id === 'sync')      loadSync();
   if (id === 'config')    loadDiscordConfig();
   if (id === 'access')    loadAccess();
+  if (id === 'audit')     loadAuditLog();
   if (id === 'platform')  loadPlatform();
   if (id === 'announcements') { loadAnnouncements(); loadAnnouncementTemplates(); }
 }

@@ -4,7 +4,12 @@ broken via a manual smoke test during the Phase 4/5 code-quality pass,
 but "I checked once by hand" isn't the same as having a real test, so
 these lock in what that smoke test checked.
 """
+from datetime import datetime, timedelta, timezone
+
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from models.db import Announcement, AnnouncementTarget, PostLog
 
 
 class TestStatus:
@@ -30,6 +35,96 @@ class TestStatus:
         r2 = await client.get("/admin/api/status", headers={"X-Tenant-Slug": second_tenant["slug"]})
         assert r1.json()["tenant"] == tenant["slug"]
         assert r2.json()["tenant"] == second_tenant["slug"]
+
+
+class TestDeliveryHealth:
+    """spec §31 — GET /api/delivery-health, a trailing-7-day rollup of
+    AnnouncementTarget and PostLog outcomes for the current tenant."""
+
+    async def test_empty_when_no_activity(self, client: AsyncClient, tenant: dict):
+        r = await client.get("/admin/api/delivery-health")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["window_days"] == 7
+        assert body["announcements"] == {"posted": 0, "error": 0}
+        assert body["event_posts"] == {"posted": 0, "error": 0, "cancelled": 0}
+
+    async def test_counts_announcement_targets_within_window(
+        self, client: AsyncClient, db_session: AsyncSession, tenant: dict
+    ):
+        # Two separate Announcements, one target apiece — uq_announcement_target
+        # is (announcement_id, tenant_id), so one announcement can't carry two
+        # targets for the same tenant.
+        now = datetime.now(timezone.utc)
+        ann1 = Announcement(
+            owning_tenant_id=tenant["id"], title="A", body_markdown="hi",
+            scheduled_for=now - timedelta(days=1), status="posted", posted_at=now - timedelta(days=1),
+        )
+        ann2 = Announcement(
+            owning_tenant_id=tenant["id"], title="B", body_markdown="hi",
+            scheduled_for=now - timedelta(days=1), status="failed", posted_at=now - timedelta(days=1),
+        )
+        db_session.add_all([ann1, ann2])
+        await db_session.commit()
+        db_session.add_all([
+            AnnouncementTarget(announcement_id=ann1.id, tenant_id=tenant["id"], discord_channel_id="c1", post_status="posted"),
+            AnnouncementTarget(announcement_id=ann2.id, tenant_id=tenant["id"], discord_channel_id="c2", post_status="error"),
+        ])
+        await db_session.commit()
+
+        r = await client.get("/admin/api/delivery-health")
+        assert r.json()["announcements"] == {"posted": 1, "error": 1}
+
+    async def test_excludes_announcement_targets_outside_window(
+        self, client: AsyncClient, db_session: AsyncSession, tenant: dict
+    ):
+        now = datetime.now(timezone.utc)
+        ann = Announcement(
+            owning_tenant_id=tenant["id"], title="Old", body_markdown="hi",
+            scheduled_for=now - timedelta(days=10), status="posted", posted_at=now - timedelta(days=10),
+        )
+        db_session.add(ann)
+        await db_session.commit()
+        db_session.add(
+            AnnouncementTarget(announcement_id=ann.id, tenant_id=tenant["id"], discord_channel_id="c1", post_status="posted")
+        )
+        await db_session.commit()
+
+        r = await client.get("/admin/api/delivery-health")
+        assert r.json()["announcements"] == {"posted": 0, "error": 0}
+
+    async def test_counts_post_log_within_window(
+        self, client: AsyncClient, db_session: AsyncSession, tenant: dict
+    ):
+        now = datetime.now(timezone.utc)
+        db_session.add_all([
+            PostLog(
+                tenant_id=tenant["id"], event_name="Siege", occurrence_date=now.date(),
+                discord_guild_id="g", posted_at_utc=now - timedelta(hours=1), status="posted",
+            ),
+            PostLog(
+                tenant_id=tenant["id"], event_name="Siege2", occurrence_date=now.date(),
+                discord_guild_id="g", posted_at_utc=now - timedelta(hours=2), status="error",
+            ),
+        ])
+        await db_session.commit()
+
+        r = await client.get("/admin/api/delivery-health")
+        assert r.json()["event_posts"]["posted"] == 1
+        assert r.json()["event_posts"]["error"] == 1
+
+    async def test_scoped_to_current_tenant(
+        self, client: AsyncClient, db_session: AsyncSession, tenant: dict, second_tenant: dict
+    ):
+        now = datetime.now(timezone.utc)
+        db_session.add(PostLog(
+            tenant_id=second_tenant["id"], event_name="Siege", occurrence_date=now.date(),
+            discord_guild_id="g", posted_at_utc=now, status="posted",
+        ))
+        await db_session.commit()
+
+        r = await client.get("/admin/api/delivery-health", headers={"X-Tenant-Slug": tenant["slug"]})
+        assert r.json()["event_posts"] == {"posted": 0, "error": 0, "cancelled": 0}
 
 
 class TestDiscordConfig:

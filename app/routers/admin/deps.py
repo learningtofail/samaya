@@ -116,6 +116,29 @@ async def require_tenant_owner(
     return tenant
 
 
+async def require_not_viewer(
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Tenant:
+    """For any mutating (create/update/delete) action on a tenant's data —
+    spec §31's read-only Viewer role passes get_current_tenant's plain
+    access check (a viewer can still load every GET endpoint) but is
+    blocked here. Unlike require_tenant_owner this doesn't require
+    'owner' specifically: both 'owner' and 'coordinator' may write, only
+    'viewer' may not, so the check is a rejection rather than a
+    match-required lookup."""
+    if user.is_superadmin:
+        return tenant
+    result = await db.execute(
+        select(UserTenant).where(UserTenant.user_id == user.id, UserTenant.tenant_id == tenant.id)
+    )
+    access = result.scalar_one_or_none()
+    if access and access.role == "viewer":
+        raise HTTPException(status_code=403, detail="Viewer access is read-only")
+    return tenant
+
+
 async def check_kingdom_coordinator(db: AsyncSession, user: User, kingdom_id: int):
     """Not a FastAPI dependency — only some events (scope='kingdom-wide')
     need this check, not every route that touches EventDefinition, so

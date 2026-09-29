@@ -143,13 +143,13 @@ class KingdomPatch(BaseModel):
 
 
 class TenantInviteIn(BaseModel):
-    role: str  # owner | coordinator
+    role: str  # owner | coordinator | viewer
 
     @field_validator("role")
     @classmethod
     def _validate_role(cls, v):
-        if v not in ("owner", "coordinator"):
-            raise ValueError("role must be 'owner' or 'coordinator'")
+        if v not in ("owner", "coordinator", "viewer"):
+            raise ValueError("role must be 'owner', 'coordinator', or 'viewer'")
         return v
 
 
@@ -157,13 +157,13 @@ class UserTenantPatch(BaseModel):
     """Changes an existing UserTenant grant's role — e.g. promoting a
     coordinator to owner. Distinct from TenantInviteIn: this edits a grant
     that already exists, rather than creating a new pending invite."""
-    role: str  # owner | coordinator
+    role: str  # owner | coordinator | viewer
 
     @field_validator("role")
     @classmethod
     def _validate_role(cls, v):
-        if v not in ("owner", "coordinator"):
-            raise ValueError("role must be 'owner' or 'coordinator'")
+        if v not in ("owner", "coordinator", "viewer"):
+            raise ValueError("role must be 'owner', 'coordinator', or 'viewer'")
         return v
 
 

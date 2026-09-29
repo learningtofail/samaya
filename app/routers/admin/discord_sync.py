@@ -16,7 +16,10 @@ from models import get_db
 from models.db import EventDefinition, PostLog, Tenant
 from services.discord_api import update_discord_event
 
-from .deps import PLATFORM_BOT_TOKEN, find_post_log, get_current_tenant, get_occurrence_with_event
+from .deps import (
+    PLATFORM_BOT_TOKEN, find_post_log, get_current_tenant, get_occurrence_with_event,
+    require_not_viewer,
+)
 
 router = APIRouter()
 
@@ -150,7 +153,7 @@ async def sync_discord(
 async def sync_push_to_discord(
     db: AsyncSession = Depends(get_db),
     occ_and_event: tuple = Depends(get_occurrence_with_event),
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
 ):
     """
     Updates a Discord event to match the current event definition.
@@ -183,7 +186,7 @@ async def sync_push_to_discord(
 @router.post("/api/sync/acknowledge/{discord_event_id}")
 async def acknowledge_discord_event(
     discord_event_id: str,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -238,7 +241,7 @@ async def acknowledge_discord_event(
 @router.post("/api/sync/push-by-log/{post_log_id}")
 async def sync_push_by_log(
     post_log_id: int,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Push Samaya values to Discord using PostLog ID."""
@@ -276,7 +279,7 @@ async def sync_push_by_log(
 @router.post("/api/sync/mark-cancelled/{post_log_id}")
 async def sync_mark_cancelled(
     post_log_id: int,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Mark a PostLog entry as cancelled when Discord event no longer exists."""

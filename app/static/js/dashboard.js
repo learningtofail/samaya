@@ -63,6 +63,29 @@ async function loadDashboard() {
         : '<p style="color:var(--muted)">Nothing else in the next 48 hours.</p>';
     }
   } catch(e) {}
+
+  // Delivery Health (spec §31) — trailing-7-day rollup of both delivery
+  // channels this app posts through, so a coordinator can spot a pattern
+  // of failures without digging through Announcements or Post Log.
+  try {
+    const h = await api('GET', '/api/delivery-health');
+    const el = document.getElementById('deliveryHealth');
+    if (el) {
+      function healthRow(label, posted, error) {
+        const total = posted + error;
+        const rate = total ? Math.round((posted / total) * 100) : null;
+        return `
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px">
+          <strong style="min-width:120px">${label}</strong>
+          ${pfLabel(posted + ' posted', 'pf-m-green')}
+          ${error ? pfLabel(error + ' failed', 'pf-m-red') : ''}
+          ${rate !== null ? `<span style="color:var(--muted);font-size:0.85em">${rate}% success</span>` : '<span style="color:var(--muted);font-size:0.85em">No activity in the last 7 days</span>'}
+        </div>`;
+      }
+      el.innerHTML = healthRow('Announcements', h.announcements.posted, h.announcements.error)
+        + healthRow('Event Posts', h.event_posts.posted, h.event_posts.error);
+    }
+  } catch(e) {}
 }
 
 async function triggerRegen() {

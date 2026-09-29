@@ -12,7 +12,7 @@ from models import get_db
 from models.db import AnnouncementTemplate, Tenant, User
 from services.audit import log_change
 
-from .deps import get_current_tenant, get_current_user
+from .deps import get_current_tenant, require_not_viewer, get_current_user
 from .schemas import AnnouncementTemplateIn, AnnouncementTemplatePatch
 
 router = APIRouter()
@@ -45,7 +45,7 @@ async def list_announcement_templates(
 @router.post("/api/announcement-templates", status_code=201)
 async def create_announcement_template(
     payload: AnnouncementTemplateIn,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -86,7 +86,7 @@ async def _get_owned_template(db: AsyncSession, tenant: Tenant, template_id: int
 @router.patch("/api/announcement-templates/{template_id}")
 async def update_announcement_template(
     template_id: int, payload: AnnouncementTemplatePatch,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -115,7 +115,7 @@ async def update_announcement_template(
 @router.delete("/api/announcement-templates/{template_id}", status_code=200)
 async def delete_announcement_template(
     template_id: int,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

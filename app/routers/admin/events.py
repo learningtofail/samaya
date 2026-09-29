@@ -25,7 +25,7 @@ from services.audit import log_change
 
 from .deps import (
     check_kingdom_coordinator, get_current_tenant, get_current_tenants, get_current_user,
-    resolve_target_tenants,
+    require_not_viewer, resolve_target_tenants,
 )
 from .schemas import EventIn, EventPatch, EventTenantNotificationIn
 from .serializers import _event_dict
@@ -66,7 +66,7 @@ async def list_events(
 @router.post("/api/events", status_code=201)
 async def create_event(
     payload: EventIn,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -140,7 +140,7 @@ async def create_event(
 @router.patch("/api/events/{event_id}")
 async def update_event(
     event_id: int, payload: EventPatch,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -224,7 +224,7 @@ async def update_event(
 @router.delete("/api/events/{event_id}", status_code=204)
 async def deactivate_event(
     event_id: int,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -248,7 +248,7 @@ async def deactivate_event(
 @router.put("/api/events/{event_id}/notification-override")
 async def set_notification_override(
     event_id: int, payload: EventTenantNotificationIn,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -315,7 +315,7 @@ async def set_notification_override(
 @router.delete("/api/events/{event_id}/permanent", status_code=200)
 async def permanent_delete_event(
     event_id: int,
-    tenant: Tenant = Depends(get_current_tenant),
+    tenant: Tenant = Depends(require_not_viewer),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

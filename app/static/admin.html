@@ -171,6 +171,7 @@
       <li class="pf-v6-c-tabs__item" id="syncTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('sync',this)"><span class="pf-v6-c-tabs__item-text">Sync <span id="syncBadge" class="pf-v6-c-label pf-m-red pf-m-filled pf-m-compact" style="display:none;margin-inline-start:4px"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text" id="syncBadgeText">0</span></span></span></span></button></li>
       <li class="pf-v6-c-tabs__item" id="configTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('config',this)"><span class="pf-v6-c-tabs__item-text">Config</span></button></li>
       <li class="pf-v6-c-tabs__item" id="accessTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('access',this)" title="Manage who has coordinator/owner access to this alliance"><span class="pf-v6-c-tabs__item-text">Access</span></button></li>
+      <li class="pf-v6-c-tabs__item" id="auditTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('audit',this)" title="Owner-only: who changed what, and when"><span class="pf-v6-c-tabs__item-text">Audit Log</span></button></li>
       <li class="pf-v6-c-tabs__item" id="platformTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('platform',this)" title="Superadmin: manage Kingdoms and Tenants"><span class="pf-v6-c-tabs__item-text">Platform</span></button></li>
     </ul>
   </div>
@@ -225,6 +226,11 @@
 
   <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-sm pf-v6-u-mt-md">Upcoming (Next 48h)</h2>
   <div id="upcomingEvents"><p style="color:var(--muted)">Loading…</p></div>
+
+  <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-sm pf-v6-u-mt-md">Delivery Health <span style="color:var(--muted);font-size:0.6em;font-weight:normal">(last 7 days)</span></h2>
+  <div class="pf-v6-c-card">
+    <div class="pf-v6-c-card__body" id="deliveryHealth"><p style="color:var(--muted)">Loading…</p></div>
+  </div>
 </div>
 
 <!-- EVENTS -->
@@ -389,6 +395,19 @@
   <table class="pf-v6-c-table pf-m-grid-md">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Role</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Expires</th><th class="pf-v6-c-table__th"></th></tr></thead>
     <tbody class="pf-v6-c-table__tbody" id="invitesBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="4" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+  </table>
+</div>
+
+<!-- AUDIT LOG -->
+<div id="v-audit" class="view">
+  <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-sm">Audit Log</h2>
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
+    Who changed what, and when, for this alliance. Append-only — nothing here can be edited or rolled back;
+    it's a record, not an undo button.
+  </p>
+  <table class="pf-v6-c-table pf-m-grid-md">
+    <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">When</th><th class="pf-v6-c-table__th">Who</th><th class="pf-v6-c-table__th">Action</th><th class="pf-v6-c-table__th">Table</th><th class="pf-v6-c-table__th">Details</th></tr></thead>
+    <tbody class="pf-v6-c-table__tbody" id="auditLogBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="5" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
   </table>
 </div>
 
@@ -841,6 +860,7 @@
 <script src="/static/js/config.js"></script>
 <script src="/static/js/sync.js"></script>
 <script src="/static/js/access.js"></script>
+<script src="/static/js/audit.js"></script>
 <script src="/static/js/platform.js"></script>
 <script src="/static/js/init.js"></script>
 </body>

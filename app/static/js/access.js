@@ -36,14 +36,24 @@ function buildMemberRow(m) {
     + '<td class="pf-v6-c-table__td">' + escapeHtml(m.discord_username) + '</td>'
     + '<td class="pf-v6-c-table__td">' + escapeHtml(m.role) + '</td>'
     + '<td class="pf-v6-c-table__td">'
-    + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="changeMemberRole(' + m.id + ',\'' + m.role + '\')" title="Promote/demote between owner and coordinator">Change role</button> '
+    + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="changeMemberRole(' + m.id + ',\'' + m.role + '\')" title="Change this person\'s role: owner, coordinator, or read-only viewer">Change role</button> '
     + '<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="removeMember(' + m.id + ',\'' + escapeHtml(m.discord_username).replace(/'/g, "\\'") + '\')">Remove</button>'
     + '</td>'
     + '</tr>';
 }
 
 async function changeMemberRole(id, currentRole) {
-  const next = currentRole === 'owner' ? 'coordinator' : 'owner';
+  // spec §31 — three roles now: owner (full access + member management),
+  // coordinator (full access, can't manage members), and viewer (read-only,
+  // blocked from every mutating admin endpoint server-side too — see
+  // require_not_viewer). A blind two-way toggle no longer covers the space,
+  // so this asks directly, pre-filled with the current role.
+  const next = prompt('New role for this person — "owner", "coordinator", or "viewer"?', currentRole);
+  if (!next || next === currentRole) return;
+  if (next !== 'owner' && next !== 'coordinator' && next !== 'viewer') {
+    toast('Role must be "owner", "coordinator", or "viewer"', true);
+    return;
+  }
   if (!confirm('Change this person\'s role from ' + currentRole + ' to ' + next + '?')) return;
   try {
     await api('PATCH', '/api/members/' + id, {role: next});
@@ -84,10 +94,10 @@ function buildInviteRow(inv) {
 }
 
 async function createInvite() {
-  const role = prompt('Role for this invite — "owner" or "coordinator"?', 'coordinator');
+  const role = prompt('Role for this invite — "owner", "coordinator", or "viewer"?', 'coordinator');
   if (!role) return;
-  if (role !== 'owner' && role !== 'coordinator') {
-    toast('Role must be "owner" or "coordinator"', true);
+  if (role !== 'owner' && role !== 'coordinator' && role !== 'viewer') {
+    toast('Role must be "owner", "coordinator", or "viewer"', true);
     return;
   }
   try {
