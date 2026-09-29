@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.20.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.21.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -1068,4 +1068,20 @@ Every row-level click handler (`handleRowPreviewClick`, `common.js`) ignores cli
 
 - Browsing calendar months outside the existing 28-day-forward data window — see §46.1; would need a different backend query shape than exists today.
 - A live re-fetch of Discord's actual current role/channel names for the public page's preview — the public page has no authenticated path to that data at all (see §46.2); this is an inherent limitation of previewing from an unauthenticated context, not a bug.
+
+## 47. Calendar View Legibility and Accessibility Pass
+
+**Status:** Implemented.
+
+**Problem.** Feedback on §46's calendar view, from real usage: calendar day-items were too small and low-contrast to read at a glance; the status/kind legend's flex-wrap layout left badges and descriptions raggedly aligned instead of scanning as tidy rows; the month/year calendar title was left-aligned and the same size as any other card heading, easy to miss; the Prev/Next month buttons were bare `◀`/`▶` glyphs giving no hint which month they'd land on; every modal's `×` close button and the plain-link-styled "Close" buttons on the Time Zone and Discord Preview modals were small, low-affordance targets; and the calendar's day cells and colored items had no keyboard path at all — a mouse was required to use the calendar.
+
+**Fix, all in `events.html` unless noted:**
+
+- **Legend (`renderLegend`)** — `.samaya-legend-kinds`/`.samaya-legend-statuses` switched from `display:flex;flex-wrap:wrap` to a fixed 3-column CSS grid (`repeat(3, minmax(0,1fr))`), collapsing to one column under 700px. Every badge+description row now lines up into clean columns instead of wrapping wherever space ran out.
+- **Calendar item legibility (`.cal-item`)** — font-size raised (0.72rem → 0.78rem, 0.62rem → 0.68rem on mobile), weight bumped to 600, and the event color darkened from `#c9590c` to `#a34a0a` — the original orange's white-text contrast ratio (~4.4:1) fell just under WCAG AA's 4.5:1 small-text threshold; the announcement purple (`#7d5260`, ~6.5:1) already cleared it and is unchanged. `.cal-cell` grew slightly (84px → 96px min-height, 56px → 64px on mobile) to fit the larger text.
+- **Calendar header** — restructured into a `.cal-header-row` 3-column grid (nav | title | balancing spacer) so `#calMonthLabel` (`.cal-month-label`) is centered against the whole card rather than the leftover space beside the nav buttons, and enlarged to the page's heading-lg token (heading-md on mobile). `calendarPrevMonth`/`calendarNextMonth`'s shared `renderCalendar()` now also sets the nav buttons' text to the adjacent month's abbreviated name (`◀ Aug` / `Oct ▶`) and a full `aria-label` (`"Previous month: August 2026"`) instead of the bare arrows carrying no month information.
+- **Modal close affordance** — `.samaya-modal-close` (`events.html` and, identically, `admin.css`) grew to a 44×44px minimum touch target (WCAG 2.5.5) with a larger glyph (1.3rem → 1.75rem) and an explicit `:focus-visible` outline. The Time Zone and Discord Preview modals' footer "Close" buttons changed from `pf-m-link` (styled as a bare text link) to `pf-m-primary` (solid blue, white text) in both `events.html` and `admin.html`, matching how every other confirming modal action in this app is styled; their "Cancel" siblings on other modals are unchanged, since cancelling is a different action from a simple close.
+- **Keyboard accessibility** — calendar day cells and colored items (previously plain `<div onclick>` with no keyboard path at all) gained `role="button"`, `tabindex="0"`, a descriptive `aria-label` (the day cell's names the date and item count; each item's names the event/announcement title), and an `onkeydown` handler treating Enter/Space as a click, matching the existing `role="button"` convention `buildEventCardHtml`'s list-view cards already used — those cards additionally gained the same Enter/Space `onkeydown` handler and an `aria-label`, since `tabindex`+`role="button"` alone doesn't give a `<div>` native button key handling.
+
+No backend changes; `STATIC_ASSET_VERSION` bumped (`routers/admin/ui.py`) since only static assets changed.
 - Any interactivity in the preview itself (actually clicking "Interested," reacting, replying) — it's a static visual approximation, not an embedded Discord widget.
