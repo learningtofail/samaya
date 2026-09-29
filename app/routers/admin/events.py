@@ -117,6 +117,7 @@ async def create_event(
         notification_channel_id = payload.notification_channel_id,
         notification_role_id    = payload.notification_role_id,
         notify_minutes_before   = payload.notify_minutes_before,
+        cover_image_data        = payload.cover_image_data or None,
     )
     event.targets = [
         EventTarget(
@@ -202,6 +203,7 @@ async def update_event(
     if payload.notification_channel_id is not None: event.notification_channel_id = payload.notification_channel_id
     if payload.notification_role_id is not None:    event.notification_role_id    = payload.notification_role_id
     if payload.notify_minutes_before is not None:   event.notify_minutes_before   = payload.notify_minutes_before
+    if payload.cover_image_data is not None:        event.cover_image_data        = payload.cover_image_data or None
     if payload.start_time_utc is not None:
         try:
             h, m = map(int, payload.start_time_utc.split(":"))

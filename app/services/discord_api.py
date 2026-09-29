@@ -24,11 +24,19 @@ async def create_discord_event(
     end: datetime,
     description: str,
     location: str,
+    image: str | None = None,
 ) -> tuple[str, str]:
     """
     Creates a Discord Scheduled Event.
     Returns (discord_event_id, error_message).
     discord_event_id is empty string on failure.
+
+    image (spec §33), when given, is the event's cover image as the full
+    data URI EventDefinition.cover_image_data already stores ("data:image/
+    png;base64,...") — exactly the format Discord's own API expects for
+    this field, so it's passed straight through with no re-encoding.
+    Omitted entirely rather than sent as null/empty when there's no image,
+    matching how this payload already omits fields Discord doesn't need.
     """
     payload = {
         "name": name,
@@ -39,6 +47,8 @@ async def create_discord_event(
         "entity_metadata": {"location": location or "Community Server"},
         "privacy_level": 2,  # GUILD_ONLY
     }
+    if image:
+        payload["image"] = image
 
     url = f"{DISCORD_API_BASE}/guilds/{guild_id}/scheduled-events"
 
@@ -91,6 +101,7 @@ async def update_discord_event(
     name:        str,
     description: str,
     location:    str,
+    image:       str | None = None,
 ) -> tuple[bool, str]:
     """
     Updates a Discord Scheduled Event's name/description/location to match
@@ -99,12 +110,20 @@ async def update_discord_event(
     Shares create_discord_event's retry/backoff and error-code handling —
     this used to be reimplemented ad hoc at each call site with a bare
     single-attempt httpx.patch and no retry on 429/5xx.
+
+    image (spec §33) is only included when explicitly passed — omitted
+    means "leave whatever image Discord already has," not "remove it,"
+    since discord_sync.py's callers only ever push the fields they've
+    actually diffed against Discord's own state, and this app doesn't
+    currently diff cover images (see spec §33's Out of Scope).
     """
     payload = {
         "name":            name,
         "description":     description or "",
         "entity_metadata": {"location": location or "Community Server"},
     }
+    if image:
+        payload["image"] = image
     url = f"{DISCORD_API_BASE}/guilds/{guild_id}/scheduled-events/{discord_event_id}"
 
     async with httpx.AsyncClient() as client:

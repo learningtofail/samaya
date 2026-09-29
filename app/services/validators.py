@@ -83,3 +83,35 @@ def parse_scope(v, allow_none: bool = False):
     if v not in ("alliance", "kingdom-wide"):
         raise ValueError("Scope must be 'alliance' or 'kingdom-wide'")
     return v
+
+
+# Discord accepts PNG/JPEG/GIF for a Scheduled Event's cover image; this
+# just checks the payload is shaped like one of those data URIs rather
+# than re-deriving Discord's own actual size/format limits, which Discord
+# enforces itself on the create/update call either way. ~8MB of base64
+# text is a generous ceiling meant to catch a client bug (e.g. sending a
+# whole video file) rather than to be the real limit — Discord's own
+# response error is the source of truth for "too big"/"wrong format".
+_COVER_IMAGE_RE = re.compile(r"^data:image/(png|jpeg|jpg|gif);base64,[A-Za-z0-9+/]+=*$")
+_COVER_IMAGE_MAX_CHARS = 8 * 1024 * 1024
+
+
+def parse_cover_image_data(v, allow_none: bool = False):
+    # allow_none=True (EventPatch): an explicit null (or the field being
+    # left out of the request entirely, which never reaches this
+    # validator at all — see field default handling) means "leave the
+    # current image alone". An explicit "" is a *different* value from
+    # null and does reach here, meaning "remove the image" — the modal's
+    # Remove button sends exactly that, same "empty string clears a
+    # normally-non-nullable field" convention EventPatch already uses for
+    # discord_channel/description, adapted for a nullable column.
+    if v is None and allow_none:
+        return v
+    if v in (None, ""):
+        return ""
+    v = str(v)
+    if len(v) > _COVER_IMAGE_MAX_CHARS:
+        raise ValueError("Cover image is too large")
+    if not _COVER_IMAGE_RE.match(v):
+        raise ValueError("Cover image must be a PNG, JPEG, or GIF image")
+    return v

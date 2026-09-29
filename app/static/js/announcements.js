@@ -155,10 +155,14 @@ function renderDiscordMarkdownPreview(text, { roles, channels }) {
     '<blockquote class="preview-quote">' + m.replace(/^&gt; ?/gm, '').trim() + '</blockquote>'
   );
 
-  // Headers
-  html = html.replace(/^### (.*)$/gm, '<h3 class="preview-h">$1</h3>');
-  html = html.replace(/^## (.*)$/gm, '<h2 class="preview-h">$1</h2>');
-  html = html.replace(/^# (.*)$/gm, '<h1 class="preview-h">$1</h1>');
+  // Headers — the trailing \n? (rather than anchoring on $) consumes the
+  // line's own newline along with the line itself, so the block-level
+  // heading tag doesn't also leave behind a literal line break that the
+  // later "remaining newlines become <br>" pass would otherwise add on
+  // top of the heading's own margin.
+  html = html.replace(/^### (.*)\n?/gm, '<h3 class="preview-h">$1</h3>');
+  html = html.replace(/^## (.*)\n?/gm, '<h2 class="preview-h">$1</h2>');
+  html = html.replace(/^# (.*)\n?/gm, '<h1 class="preview-h">$1</h1>');
 
   // Inline emphasis — bold before italic so **x** isn't first read as
   // italic-inside-italic; underline/strike/spoiler are unambiguous.
@@ -220,6 +224,7 @@ async function renderAnnouncementPreview() {
   await renderComposerPreview({
     bodyId: 'aBody', paneId: 'aPreviewPane', previewTenantSelectId: 'aPreviewTenant',
     dateId: 'aScheduledDate', timeId: 'aScheduledTime', offsetId: 'aEventOffsetMinutes',
+    roleSelectId: 'aRoleMention',
   });
 }
 
@@ -227,38 +232,98 @@ async function renderTemplatePreview() {
   await renderComposerPreview({
     bodyId: 'tBody', paneId: 'tPreviewPane', previewTenantSelectId: 'tPreviewTenant',
     dateId: null, timeId: null, offsetId: 'tEventOffsetMinutes',
+    roleSelectId: 'tRoleMention',
   });
 }
 
-async function renderComposerPreview({ bodyId, paneId, previewTenantSelectId, dateId, timeId, offsetId }) {
+// Event descriptions (spec §32) get the same composer, but an Event has
+// no independently-scheduled "send time" the way an Announcement does —
+// occurrences.py always resolves {send_time}/{send_time_relative} as
+// "now" and {event_time}/{event_time_relative} as this occurrence's own
+// start. eventDateId/eventTimeId (the Anchor Date + Start Time fields)
+// stand in for that occurrence start; the offset from "now" to it is
+// computed here and fed through the exact same scheduledFor+offset math
+// renderComposerPreview already uses for Announcements/Templates, rather
+// than a second placeholder-resolution path.
+async function renderEventDescriptionPreview() {
+  await renderComposerPreview({
+    bodyId: 'mDescription', paneId: 'mPreviewPane', previewTenantSelectId: 'mPreviewTenant',
+    eventDateId: 'mAnchor', eventTimeId: 'mStartTime',
+    fallbackNote: 'Using the current time — no anchor date/start time set yet.',
+    roleSelectId: 'mRoleMention',
+  });
+}
+
+// Fills a body/description toolbar's "Insert role mention" dropdown from
+// the same tenant's role list the live preview just fetched anyway (spec
+// §34) — one @RoleName option per role, reusing ensurePreviewRolesLoaded's
+// cache rather than a second /api/discord/roles call. Picking one inserts
+// the raw <@&ROLE_ID> Discord mention syntax at the cursor (insertAtCursor,
+// common.js) — the same thing a coordinator would otherwise have to look
+// up the role's numeric ID to type by hand, which is exactly the kind of
+// mistake this removes: right role, right guild, no typing an ID at all.
+function refreshRoleMentionSelect(selectId, roles) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  select.innerHTML = '<option value="">Insert role mention…</option>'
+    + roles.map(r => `<option value="${escapeHtml(r.id)}">@${escapeHtml(r.name)}</option>`).join('');
+}
+
+function insertRoleMention(selectId, textareaId) {
+  const select = document.getElementById(selectId);
+  if (!select || !select.value) return;
+  insertAtCursor(textareaId, '<@&' + select.value + '>');
+  select.value = '';
+}
+
+async function renderComposerPreview({
+  bodyId, paneId, previewTenantSelectId, dateId, timeId, offsetId, eventDateId, eventTimeId, fallbackNote, roleSelectId,
+}) {
   const pane = document.getElementById(paneId);
   if (!pane) return;
   const body = document.getElementById(bodyId).value;
   const tenantSlug = document.getElementById(previewTenantSelectId).value || getCurrentTenantSlug();
   const tenant = TENANTS.find(t => t.slug === tenantSlug);
 
-  let scheduledFor = null;
-  if (dateId && timeId) {
-    const dateVal = document.getElementById(dateId).value;
-    const timeVal = document.getElementById(timeId).value.trim();
+  let scheduledFor, eventOffsetMinutes, usingFallbackTime;
+  if (eventDateId && eventTimeId) {
+    scheduledFor = new Date();
+    const dateVal = document.getElementById(eventDateId).value;
+    const timeVal = document.getElementById(eventTimeId).value.trim();
     if (dateVal && /^([01]\d|2[0-3]):[0-5]\d$/.test(timeVal)) {
-      scheduledFor = new Date(dateVal + 'T' + timeVal + ':00Z');
+      const eventStart = new Date(dateVal + 'T' + timeVal + ':00Z');
+      eventOffsetMinutes = Math.round((eventStart.getTime() - scheduledFor.getTime()) / 60000);
+      usingFallbackTime = false;
+    } else {
+      eventOffsetMinutes = 0;
+      usingFallbackTime = true;
     }
+  } else {
+    scheduledFor = null;
+    if (dateId && timeId) {
+      const dateVal = document.getElementById(dateId).value;
+      const timeVal = document.getElementById(timeId).value.trim();
+      if (dateVal && /^([01]\d|2[0-3]):[0-5]\d$/.test(timeVal)) {
+        scheduledFor = new Date(dateVal + 'T' + timeVal + ':00Z');
+      }
+    }
+    usingFallbackTime = !scheduledFor;
+    if (!scheduledFor) scheduledFor = new Date();
+    eventOffsetMinutes = parseInt(document.getElementById(offsetId).value, 10) || 0;
   }
-  const usingFallbackTime = !scheduledFor;
-  if (!scheduledFor) scheduledFor = new Date();
 
   const kingdomNames = await ensureKingdomNamesLoaded();
   const [roles, channels] = await Promise.all([
     ensurePreviewRolesLoaded(tenantSlug),
     ensurePreviewChannelsLoaded(tenantSlug),
   ]);
+  if (roleSelectId) refreshRoleMentionSelect(roleSelectId, roles);
 
   const resolved = clientRenderPlaceholders(body, {
     allianceName: tenant ? tenant.name : tenantSlug,
     kingdomName: tenant ? kingdomNames[tenant.kingdom_id] : '',
     scheduledFor,
-    eventOffsetMinutes: parseInt(document.getElementById(offsetId).value, 10) || 0,
+    eventOffsetMinutes,
   });
   const html = renderDiscordMarkdownPreview(resolved, { roles, channels });
 
@@ -270,7 +335,7 @@ async function renderComposerPreview({ bodyId, paneId, previewTenantSelectId, da
         <div class="discord-preview-text">${html}</div>
       </div>
     </div>
-    ${usingFallbackTime ? '<div class="discord-preview-note">Using the current time — no send time set yet.</div>' : ''}
+    ${usingFallbackTime ? `<div class="discord-preview-note">${fallbackNote || 'Using the current time — no send time set yet.'}</div>` : ''}
   `;
 }
 
@@ -498,6 +563,7 @@ function addAnnouncementTargetRow(tenantSlug, channelId) {
     <button type="button" class="pf-v6-c-button pf-m-danger pf-m-small" onclick="this.closest('.announcement-target-row').remove()">Remove</button>
   `;
   list.appendChild(row);
+  row.querySelector('.target-channel-fallback').addEventListener('input', () => row.classList.remove('target-row-invalid'));
   const select = row.querySelector('.target-tenant');
   select.addEventListener('change', () => {
     populateAnnouncementTargetChannels(row, select.value);
@@ -523,13 +589,22 @@ async function populateAnnouncementTargetChannels(row, tenantSlug, channelId) {
     const channels = await api('GET', '/api/discord/channels', null, false, tenantSlug);
     fillSelect(select, channels.map(c => ({ value: c.id, label: '#' + c.name })), channelId);
     select.disabled = false;
-    select.addEventListener('change', () => setLastChannelForTenant(tenantSlug, select.value));
+    select.addEventListener('change', () => {
+      setLastChannelForTenant(tenantSlug, select.value);
+      row.classList.remove('target-row-invalid');
+    });
     if (select.value) setLastChannelForTenant(tenantSlug, select.value);
   } catch (e) {
     select.style.display = 'none';
     fallback.style.display = '';
     fallback.value = channelId || '';
-    toast(`Could not load Discord channels for ${tenantSlug} — enter the channel ID manually`, true);
+    // Surface the server's actual reason (403 = no access to that tenant,
+    // 502 = the tenant's own Discord server/bot rejected the call) rather
+    // than a single generic line — the two failure modes need entirely
+    // different fixes (get access granted vs. fix that server's bot
+    // config), and hiding which one it is just moves the confusion from
+    // here to a support conversation.
+    toast(`Could not load Discord channels for ${tenantSlug} (${e.message}) — enter the channel ID manually`, true);
   }
 }
 
@@ -571,7 +646,7 @@ function openAnnouncementModal(source) {
   document.getElementById('aLeadershipOnly').checked = !!(source && source.leadership_only);
   document.getElementById('aEventOffsetMinutes').value = (source && source.event_offset_minutes) ? source.event_offset_minutes : 0;
   document.getElementById('aTargetsList').innerHTML = '';
-  if (source && source.targets.length) {
+  if (source && source.targets && source.targets.length) {
     source.targets.forEach(t => addAnnouncementTargetRow(tenantSlugFor(t.tenant_id), t.discord_channel_id));
   } else {
     // The Announcements tab is single-tenant-only (see common.js's
@@ -625,14 +700,23 @@ async function saveAnnouncement() {
     toast('Recurring announcements need a positive "Repeat every (days)" value', true);
     return;
   }
-  const targets = Array.from(document.querySelectorAll('#aTargetsList .announcement-target-row')).map(row => ({
+  const targetRows = Array.from(document.querySelectorAll('#aTargetsList .announcement-target-row'));
+  const targets = targetRows.map(row => ({
     tenant_slug: row.querySelector('.target-tenant').value,
     discord_channel_id: announcementTargetChannelValue(row).trim(),
   }));
+  // Flag exactly which row(s) are missing a channel rather than leaving
+  // the coordinator to guess — a brand-new target row defaults to
+  // "— none —" until a channel is actively picked (spec §29), which is
+  // easy to miss since nothing about the row itself looks wrong.
+  targetRows.forEach((row, i) => row.classList.toggle('target-row-invalid', !targets[i].discord_channel_id));
   if (!targets.length || targets.some(t => !t.discord_channel_id)) {
-    toast('Every target needs a Discord channel selected', true);
+    toast('Every target needs a Discord channel selected — the highlighted row(s) don\'t have one yet', true);
+    const firstInvalid = document.querySelector('#aTargetsList .target-row-invalid');
+    if (firstInvalid) firstInvalid.scrollIntoView({ block: 'center', behavior: 'smooth' });
     return;
   }
+  targetRows.forEach(row => row.classList.remove('target-row-invalid'));
 
   const payload = {
     title,

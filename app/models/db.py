@@ -220,6 +220,14 @@ class EventDefinition(Base):
     notification_channel_id  = Column(Text, nullable=False, default="")
     notification_role_id     = Column(Text, nullable=False, default="")
     notify_minutes_before    = Column(Integer, nullable=True)
+    # Discord Scheduled Event cover image (spec §33), stored as the full
+    # data URI the browser's FileReader produces ("data:image/png;base64,
+    # ..."), not a bare base64 blob — that's exactly the string
+    # create_discord_event's "image" field needs, so there's no format
+    # conversion between "what the admin uploaded" and "what Discord
+    # gets" anywhere in this app. NULL/empty means no cover image, same
+    # as description's own empty-string-default convention.
+    cover_image_data         = Column(Text, nullable=True)
     created_at               = Column(DateTime(timezone=True), server_default=func.now())
     updated_at               = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

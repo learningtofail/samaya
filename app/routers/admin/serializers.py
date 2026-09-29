@@ -26,6 +26,7 @@ def _event_dict(e: EventDefinition) -> dict:
         "notification_channel_id":  e.notification_channel_id,
         "notification_role_id":     e.notification_role_id,
         "notify_minutes_before":    e.notify_minutes_before,
+        "cover_image_data":         e.cover_image_data or None,
         # Requires e.targets to already be loaded (selectinload in
         # list_events, or populated in-memory by create/update_event) —
         # accessing an unloaded relationship here would raise under async

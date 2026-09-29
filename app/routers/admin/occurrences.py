@@ -195,6 +195,7 @@ async def _post_to_one_tenant(db: AsyncSession, occ: Occurrence, event, target_t
         end         = occ.end_datetime_utc,
         description = resolved_description,
         location    = event.discord_channel,
+        image       = event.cover_image_data or None,
     )
 
     if error:

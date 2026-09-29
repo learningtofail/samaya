@@ -58,6 +58,11 @@
   }
   .md-toolbar button:hover { background: var(--pf-t--global--background--color--secondary--hover, #e2e2e2); }
 
+  .target-row-invalid .target-channel,
+  .target-row-invalid .target-channel-fallback {
+    border-color: #dc2626; box-shadow: 0 0 0 1px #dc2626;
+  }
+
   .discord-preview-pane { min-height: 40px; }
   .discord-preview-msg {
     display: flex; gap: 12px; align-items: flex-start;
@@ -546,7 +551,7 @@
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mStartTime"><span class="pf-v6-c-form__label-text">Start Time (UTC) HH:MM</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <input class="pf-v6-c-form-control" type="text" id="mStartTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric">
+                <input class="pf-v6-c-form-control" type="text" id="mStartTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric" oninput="renderEventDescriptionPreview()">
               </div>
             </div>
             <div class="pf-v6-c-form__group">
@@ -558,7 +563,7 @@
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mAnchor"><span class="pf-v6-c-form__label-text">Anchor Date (first occurrence)</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <input class="pf-v6-c-form-control" type="date" id="mAnchor">
+                <input class="pf-v6-c-form-control" type="date" id="mAnchor" onchange="renderEventDescriptionPreview()">
               </div>
             </div>
             <div class="pf-v6-c-form__group">
@@ -571,9 +576,46 @@
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mDescription"><span class="pf-v6-c-form__label-text">Description</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <textarea class="pf-v6-c-form-control" id="mDescription" rows="3" placeholder="Event description sent to Discord"></textarea>
+                <div class="md-toolbar">
+                  <button type="button" title="Bold" onclick="wrapSelection('mDescription','**','**','bold')"><strong>B</strong></button>
+                  <button type="button" title="Italic" onclick="wrapSelection('mDescription','*','*','italic')"><em>I</em></button>
+                  <button type="button" title="Underline" onclick="wrapSelection('mDescription','__','__','underline')"><u>U</u></button>
+                  <button type="button" title="Strikethrough" onclick="wrapSelection('mDescription','~~','~~','strike')"><s>S</s></button>
+                  <button type="button" title="Spoiler" onclick="wrapSelection('mDescription','||','||','spoiler')">||•||</button>
+                  <button type="button" title="Heading" onclick="prefixSelectedLines('mDescription','# ')"><strong>H</strong></button>
+                  <button type="button" title="Quote" onclick="prefixSelectedLines('mDescription','&gt; ')">&gt; Quote</button>
+                  <button type="button" title="Inline code" onclick="wrapSelection('mDescription','`','`','code')">&lt;/&gt;</button>
+                  <button type="button" title="Code block" onclick="insertCodeBlock('mDescription')">{ }</button>
+                  <button type="button" class="emoji-picker-btn" title="Insert emoji" onclick="toggleEmojiPicker(this,'mDescription')">🙂</button>
+                  <select class="pf-v6-c-form-control pf-m-small" id="mRoleMention" style="max-width:170px" onchange="insertRoleMention('mRoleMention','mDescription')" title="Roles from the alliance chosen under Preview As"><option value="">Insert role mention…</option></select>
+                </div>
+                <textarea class="pf-v6-c-form-control" id="mDescription" rows="3" placeholder="Event description sent to Discord" oninput="renderEventDescriptionPreview()"></textarea>
                 <div class="pf-v6-c-form__helper-text">
                   Placeholders, resolved when this event is posted: <code>{alliance_name}</code> <code>{kingdom_name}</code> <code>{send_time}</code> <code>{send_time_relative}</code> <code>{event_time}</code> <code>{event_time_relative}</code> (the last two are this occurrence's own start time). Appears in both the Discord Scheduled Event's own description and the pre-event ping.
+                </div>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Preview</span></span></div>
+              <div class="pf-v6-c-form__group-control">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                  <label for="mPreviewTenant" style="color:var(--muted);font-size:0.85em">Preview as:</label>
+                  <select class="pf-v6-c-form-control pf-m-small" id="mPreviewTenant" style="max-width:220px" onchange="renderEventDescriptionPreview()"></select>
+                </div>
+                <div id="mPreviewPane" class="discord-preview-pane"></div>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mCoverImageFile"><span class="pf-v6-c-form__label-text">Cover Image</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input type="hidden" id="mCoverImageData" value="">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <img id="mCoverImagePreview" style="display:none;max-width:280px;max-height:120px;border-radius:6px;object-fit:cover" alt="Cover image preview">
+                  <input type="file" id="mCoverImageFile" accept="image/png,image/jpeg,image/gif" onchange="handleCoverImageFile(this)">
+                  <button type="button" id="mCoverImageRemove" class="pf-v6-c-button pf-m-secondary pf-m-small" style="display:none" onclick="removeCoverImage()">Remove</button>
+                </div>
+                <div class="pf-v6-c-form__helper-text">
+                  Shown on the Discord Scheduled Event itself (PNG, JPEG, or GIF — Discord recommends a 16:9 image, up to a few MB). Optional; the event posts fine without one.
                 </div>
               </div>
             </div>
@@ -655,14 +697,16 @@
                   <button type="button" title="Underline" onclick="wrapSelection('aBody','__','__','underline')"><u>U</u></button>
                   <button type="button" title="Strikethrough" onclick="wrapSelection('aBody','~~','~~','strike')"><s>S</s></button>
                   <button type="button" title="Spoiler" onclick="wrapSelection('aBody','||','||','spoiler')">||•||</button>
+                  <button type="button" title="Heading" onclick="prefixSelectedLines('aBody','# ')"><strong>H</strong></button>
                   <button type="button" title="Quote" onclick="prefixSelectedLines('aBody','&gt; ')">&gt; Quote</button>
                   <button type="button" title="Inline code" onclick="wrapSelection('aBody','`','`','code')">&lt;/&gt;</button>
                   <button type="button" title="Code block" onclick="insertCodeBlock('aBody')">{ }</button>
                   <button type="button" class="emoji-picker-btn" title="Insert emoji" onclick="toggleEmojiPicker(this,'aBody')">🙂</button>
+                  <select class="pf-v6-c-form-control pf-m-small" id="aRoleMention" style="max-width:170px" onchange="insertRoleMention('aRoleMention','aBody')" title="Roles from the alliance chosen under Preview As"><option value="">Insert role mention…</option></select>
                 </div>
                 <textarea class="pf-v6-c-form-control" id="aBody" rows="5" maxlength="2000" placeholder="Announcement text sent to Discord" oninput="updateAnnouncementCharCount()"></textarea>
                 <div class="pf-v6-c-form__helper-text">
-                  <span id="aBodyCount">0</span> / 2000 characters (Discord's message limit) — Discord markdown works as usual (**bold**, *italic*, __underline__, ~~strikethrough~~, ||spoiler||, &gt; quote, ```code```).
+                  <span id="aBodyCount">0</span> / 2000 characters (Discord's message limit) — Discord markdown works as usual (**bold**, *italic*, __underline__, ~~strikethrough~~, ||spoiler||, # heading, &gt; quote, ```code```).
                   Placeholders, resolved when each message is sent: <code>{alliance_name}</code> <code>{kingdom_name}</code> <code>{send_time}</code> <code>{send_time_relative}</code> <code>{event_time}</code> <code>{event_time_relative}</code> — the two <code>event_*</code> ones use the Event Offset field below.
                 </div>
               </div>
@@ -772,10 +816,12 @@
                   <button type="button" title="Underline" onclick="wrapSelection('tBody','__','__','underline')"><u>U</u></button>
                   <button type="button" title="Strikethrough" onclick="wrapSelection('tBody','~~','~~','strike')"><s>S</s></button>
                   <button type="button" title="Spoiler" onclick="wrapSelection('tBody','||','||','spoiler')">||•||</button>
+                  <button type="button" title="Heading" onclick="prefixSelectedLines('tBody','# ')"><strong>H</strong></button>
                   <button type="button" title="Quote" onclick="prefixSelectedLines('tBody','&gt; ')">&gt; Quote</button>
                   <button type="button" title="Inline code" onclick="wrapSelection('tBody','`','`','code')">&lt;/&gt;</button>
                   <button type="button" title="Code block" onclick="insertCodeBlock('tBody')">{ }</button>
                   <button type="button" class="emoji-picker-btn" title="Insert emoji" onclick="toggleEmojiPicker(this,'tBody')">🙂</button>
+                  <select class="pf-v6-c-form-control pf-m-small" id="tRoleMention" style="max-width:170px" onchange="insertRoleMention('tRoleMention','tBody')" title="Roles from the alliance chosen under Preview As"><option value="">Insert role mention…</option></select>
                 </div>
                 <textarea class="pf-v6-c-form-control" id="tBody" rows="5" placeholder="⚠️ Daily reset in {event_time_relative} ({event_time})" oninput="renderTemplatePreview()"></textarea>
                 <div class="pf-v6-c-form__helper-text">

@@ -178,6 +178,8 @@ function openEventModal(event) {
   document.getElementById('mDescription').value       = event?.description || '';
   document.getElementById('mNotifMinutes').value      = event?.notify_minutes_before || '';
   document.getElementById('mLeadershipOnly').checked  = !!event?.leadership_only;
+  setCoverImagePreview(event?.cover_image_data || '');
+  document.getElementById('mCoverImageFile').value = '';
   toggleLeadershipNote();
   document.getElementById('previewResult').textContent = '';
   populateDiscordFields(event);
@@ -186,6 +188,8 @@ function openEventModal(event) {
   (event?.targets || []).forEach(t => addEventTargetRow(tenantSlugFor(t.tenant_id), t.notification_channel_id, t.notification_role_id));
 
   document.getElementById('eventModal').classList.add('open');
+  refreshPreviewTenantOptions('mPreviewTenant', null);
+  renderEventDescriptionPreview();
 }
 
 // Reverse of the tenant_id the API stores a target as — the target-row
@@ -420,6 +424,48 @@ function fieldValue(selectId, fallbackId) {
   return sel.style.display !== 'none' ? sel.value : fb.value;
 }
 
+// Event cover image (spec §33) — read client-side as a data URI via
+// FileReader and stored as-is (no server-side re-encoding needed, since
+// that's exactly the format Discord's own Scheduled Event "image" field
+// takes). #mCoverImageData is the value saveEvent() actually reads;
+// #mCoverImageFile is just the picker, reset on every modal open so a
+// stale filename never lingers after a save.
+const COVER_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+
+function setCoverImagePreview(dataUri) {
+  document.getElementById('mCoverImageData').value = dataUri || '';
+  const img = document.getElementById('mCoverImagePreview');
+  const removeBtn = document.getElementById('mCoverImageRemove');
+  if (dataUri) {
+    img.src = dataUri;
+    img.style.display = '';
+    removeBtn.style.display = '';
+  } else {
+    img.style.display = 'none';
+    img.src = '';
+    removeBtn.style.display = 'none';
+  }
+}
+
+function handleCoverImageFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (file.size > COVER_IMAGE_MAX_BYTES) {
+    toast('Cover image is too large (max 8MB) — pick a smaller file', true);
+    input.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => setCoverImagePreview(reader.result);
+  reader.onerror = () => toast('Could not read that image file', true);
+  reader.readAsDataURL(file);
+}
+
+function removeCoverImage() {
+  setCoverImagePreview('');
+  document.getElementById('mCoverImageFile').value = '';
+}
+
 function closeModal() {
   document.getElementById('eventModal').classList.remove('open');
 }
@@ -452,6 +498,7 @@ async function saveEvent() {
       .map(eventTargetRowValue)
       .filter(t => t.notification_channel_id),
     description:     document.getElementById('mDescription').value,
+    cover_image_data: document.getElementById('mCoverImageData').value,
   };
   // Only relevant for a new event while combined mode is selected (the
   // row is hidden, and thus this is empty, in every other case) — see

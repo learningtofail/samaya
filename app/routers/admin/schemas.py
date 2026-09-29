@@ -12,6 +12,7 @@ from pydantic import BaseModel, field_validator, model_validator
 from services.validators import (
     parse_interval_days, parse_duration_hours, parse_scope,
     parse_start_time_utc, parse_anchor_date, parse_notify_minutes_before,
+    parse_cover_image_data,
 )
 
 
@@ -42,6 +43,7 @@ class EventIn(BaseModel):
     notification_channel_id: str = ""
     notification_role_id:    str = ""
     notify_minutes_before:   Optional[int] = None
+    cover_image_data:        Optional[str] = None
     targets:                 list[EventTargetIn] = []
 
     _validate_interval = field_validator("interval_days", mode="before")(parse_interval_days)
@@ -50,6 +52,7 @@ class EventIn(BaseModel):
     _validate_time     = field_validator("start_time_utc", mode="before")(parse_start_time_utc)
     _validate_anchor   = field_validator("anchor_date", mode="before")(parse_anchor_date)
     _validate_notify   = field_validator("notify_minutes_before", mode="before")(parse_notify_minutes_before)
+    _validate_cover_image = field_validator("cover_image_data", mode="before")(parse_cover_image_data)
 
 
 class EventPatch(BaseModel):
@@ -66,6 +69,7 @@ class EventPatch(BaseModel):
     notification_channel_id: Optional[str]  = None
     notification_role_id:    Optional[str]  = None
     notify_minutes_before:   Optional[int]  = None
+    cover_image_data:        Optional[str]  = None
     # None = leave the current target list alone; [] = explicitly clear it.
     # The admin UI always sends one or the other (never omits the key), so
     # in practice this is always a full replace when the modal saves — see
@@ -86,6 +90,8 @@ class EventPatch(BaseModel):
         lambda cls, v: parse_anchor_date(v, allow_none=True))
     _validate_notify   = field_validator("notify_minutes_before", mode="before")(
         lambda cls, v: parse_notify_minutes_before(v, allow_none=True))
+    _validate_cover_image = field_validator("cover_image_data", mode="before")(
+        lambda cls, v: parse_cover_image_data(v, allow_none=True))
 
 
 class EventTenantNotificationIn(BaseModel):
