@@ -25,7 +25,7 @@ router = APIRouter()
 # fresh URL instead of serving a stale cached one. Track this independently
 # of the spec/API version — it only needs to move when a static asset
 # actually changes.
-STATIC_ASSET_VERSION = "1.20.0"
+STATIC_ASSET_VERSION = "1.21.0"
 
 _STATIC_ASSET_REF = re.compile(r'(src|href)="(/static/[^"?]+)"')
 

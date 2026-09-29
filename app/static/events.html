@@ -77,6 +77,81 @@
   #allianceModal.open { display: block; }
   #timezoneModal { display: none; }
   #timezoneModal.open { display: block; }
+  #discordPreviewModal { display: none; }
+  #discordPreviewModal.open { display: block; }
+
+  /* Spec §46 — List/Calendar toggle. List stays the default view; the
+     toggle bar and calendar grid only render once a visitor picks
+     Calendar (setEventsView/renderCalendar). */
+  .samaya-view-toggle { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: var(--pf-t--global--spacer--sm); }
+  .cal-nav { display: flex; align-items: center; gap: 8px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal-dow { text-align: center; font-size: var(--pf-t--global--font--size--body--sm); color: var(--pf-t--global--text--color--subtle); text-transform: uppercase; letter-spacing: .06em; padding-block-end: 4px; }
+  .cal-cell {
+    min-height: 84px; border: 1px solid var(--pf-t--global--border--color--default, #444);
+    border-radius: 6px; padding: 4px; cursor: pointer; display: flex; flex-direction: column; gap: 2px;
+    background: var(--pf-t--global--background--color--primary--default);
+  }
+  .cal-cell:hover { border-color: var(--pf-t--global--color--brand--default); }
+  .cal-cell.cal-empty { visibility: hidden; cursor: default; }
+  .cal-cell.cal-today { border-color: var(--pf-t--global--color--brand--default); border-width: 2px; }
+  .cal-daynum { font-size: var(--pf-t--global--font--size--body--sm); font-weight: var(--pf-t--global--font--weight--body--bold); }
+  .cal-today .cal-daynum { color: var(--pf-t--global--color--brand--default); }
+  .cal-item {
+    font-size: 0.72rem; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    padding: 1px 4px; border-radius: 3px; cursor: pointer; color: #fff;
+  }
+  .cal-item.cal-item-event { background: var(--pf-t--global--color--nonstatus--orange--default, #c9590c); }
+  .cal-item.cal-item-announcement { background: var(--pf-t--global--color--nonstatus--purple--default, #7d5260); }
+  .cal-more { font-size: 0.7rem; color: var(--pf-t--global--text--color--subtle); }
+  @media (max-width: 600px) {
+    .cal-cell { min-height: 56px; }
+    .cal-item { font-size: 0.62rem; }
+  }
+
+  /* Spec §46 — "what this would look like on Discord" preview. Mirrors
+     admin.html's discord-preview-* CSS exactly (duplicated, not shared —
+     this page has no shared JS/CSS with admin.html by design, §22), plus
+     a second, Scheduled-Event-shaped look for events (a plain chat-message
+     bubble doesn't represent what an Event actually renders as on Discord). */
+  .discord-preview-msg {
+    display: flex; gap: 12px; align-items: flex-start;
+    background: #313338; color: #dbdee1; border-radius: 8px; padding: 12px 14px;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .discord-preview-avatar {
+    flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
+    background: #5865f2; color: #fff; display: flex; align-items: center; justify-content: center;
+    font-weight: 600;
+  }
+  .discord-preview-body { min-width: 0; flex: 1; }
+  .discord-preview-header { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; flex-wrap: wrap; }
+  .discord-preview-name { color: #fff; font-weight: 600; font-size: 0.95em; }
+  .discord-preview-bot-tag { background: #5865f2; color: #fff; font-size: 0.62em; font-weight: 700; border-radius: 3px; padding: 1px 4px; letter-spacing: 0.02em; }
+  .discord-preview-timestamp { color: #949ba4; font-size: 0.75em; }
+  .discord-preview-text { font-size: 0.92em; line-height: 1.45; word-wrap: break-word; white-space: normal; }
+  .discord-preview-text .preview-quote { border-left: 4px solid #4e5058; padding-left: 8px; margin: 4px 0; color: #b5bac1; }
+  .discord-preview-text .preview-inline-code { background: #2b2d31; border-radius: 3px; padding: 1px 4px; font-family: monospace; }
+  .discord-preview-text .preview-codeblock { background: #2b2d31; border-radius: 4px; padding: 8px; font-family: monospace; overflow-x: auto; margin: 4px 0; }
+  .discord-preview-text .preview-h { margin: 4px 0; color: #fff; }
+  .discord-preview-text .preview-mention { background: rgba(88,101,242,0.3); color: #c9cdfb; border-radius: 3px; padding: 0 2px; }
+  .discord-preview-note { color: var(--pf-t--global--text--color--subtle); font-size: 0.8em; margin-top: 6px; }
+  .discord-preview-event {
+    background: #313338; color: #dbdee1; border-radius: 8px; overflow: hidden;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .discord-preview-event-cover { display: block; width: 100%; max-height: 220px; object-fit: cover; }
+  .discord-preview-event-body { padding: 14px 16px; }
+  .discord-preview-event-title { font-size: 1.1em; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  .discord-preview-event-time { font-size: 0.88em; margin-bottom: 4px; }
+  .discord-preview-event-meta { font-size: 0.85em; color: #949ba4; margin-bottom: 8px; }
+  .discord-preview-event-desc { margin-bottom: 12px; }
+  .discord-preview-event-interested {
+    background: transparent; border: 1px solid #4e5058; color: #dbdee1;
+    border-radius: 4px; padding: 6px 14px; font-size: 0.85em; cursor: default;
+  }
+  .samaya-card-clickable { cursor: pointer; }
+  .samaya-card-clickable:hover { outline: 2px solid var(--pf-t--global--color--brand--default); outline-offset: -1px; }
   /* Same X-close + Escape treatment as admin.html's modals. */
   .pf-v6-c-modal-box__header { position: relative; }
   .samaya-modal-close {
@@ -154,6 +229,24 @@
     </div>
   </div>
 
+  <!-- DISCORD PREVIEW MODAL (spec §46) -->
+  <div class="pf-v6-c-backdrop" id="discordPreviewModal" data-close-fn="closeDiscordPreviewModal">
+    <div class="pf-v6-l-bullseye">
+      <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="discordPreviewModalTitle">
+        <header class="pf-v6-c-modal-box__header">
+          <h2 class="pf-v6-c-modal-box__title" id="discordPreviewModalTitle"><span class="pf-v6-c-modal-box__title-text">Discord Preview</span></h2>
+          <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeDiscordPreviewModal()">&times;</button>
+        </header>
+        <div class="pf-v6-c-modal-box__body">
+          <div id="discordPreviewModalBody"></div>
+        </div>
+        <footer class="pf-v6-c-modal-box__footer">
+          <button class="pf-v6-c-button pf-m-link" onclick="closeDiscordPreviewModal()">Close</button>
+        </footer>
+      </div>
+    </div>
+  </div>
+
   <div class="pf-v6-c-page__main-container">
   <main class="pf-v6-c-page__main" tabindex="-1" id="main-content">
     <section class="pf-v6-c-page__main-section">
@@ -184,12 +277,36 @@
 
       <div id="lastActivityMarquee" class="samaya-marquee" style="display:none"></div>
 
+      <!-- Spec §46 — List/Calendar toggle. List is the default; picking
+           Calendar persists via localStorage (setEventsView). -->
+      <div class="samaya-view-toggle">
+        <button id="viewListBtn" class="pf-v6-c-button pf-m-primary pf-m-small" onclick="setEventsView('list')">📋 List</button>
+        <button id="viewCalendarBtn" class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="setEventsView('calendar')">📆 Calendar</button>
+      </div>
+
       <div id="content">
         <div class="pf-v6-c-empty-state">
           <div class="pf-v6-c-empty-state__content">
             <div class="pf-v6-c-empty-state__body">Loading events…</div>
           </div>
         </div>
+      </div>
+
+      <div id="calendarWrap" style="display:none">
+        <div class="pf-v6-c-card pf-v6-u-mb-lg">
+          <div class="pf-v6-c-card__body">
+            <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
+              <div class="cal-nav">
+                <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="calendarPrevMonth()" aria-label="Previous month">◀</button>
+                <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="calendarToday()">Today</button>
+                <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="calendarNextMonth()" aria-label="Next month">▶</button>
+              </div>
+              <h2 class="pf-v6-c-title pf-m-md" id="calMonthLabel"></h2>
+            </div>
+            <div class="cal-grid" id="calGrid"></div>
+          </div>
+        </div>
+        <div id="calDayDetail"></div>
       </div>
     </section>
   </main>
@@ -222,8 +339,9 @@ document.getElementById('icsLinkBottom').href = ICS_URL;
 document.getElementById('footerText').innerHTML =
   `Times shown in UTC and your local time · <a href="${ICS_URL}">ICS Calendar Feed</a> · Powered by Samaya`;
 
-const DOW_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-const MONTH    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DOW_FULL   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MONTH      = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 // ── Modal close: Escape key ──────────────────────────────────
 // Mirrors admin.html's common.js listener — every modal backdrop here
@@ -576,6 +694,45 @@ function weekLabel(dateStr) {
   return `${monthName} ${d.getUTCDate()} week`;
 }
 
+// Spec §46 — a card's full markup, extracted out of loadEvents()'s list
+// loop so the calendar's day-detail panel (renderCalendarDayDetail) can
+// render the exact same card rather than a second, thinner copy. Every
+// card is clickable (opens the Discord preview) except where noted.
+function buildEventCardHtml(ev, dayNum, dowLabel, isToday) {
+  const isAnnouncement = ev.kind === 'announcement';
+  const dateCol = dayNum != null ? `
+    <div class="samaya-date-col${isToday ? ' samaya-today' : ''}">
+      <div class="samaya-date-day">${dayNum}</div>
+      <div class="samaya-date-dow">${dowLabel}</div>
+    </div>` : '';
+  return `
+    <div class="pf-v6-c-card pf-v6-u-mb-sm samaya-card-clickable${isToday ? ' pf-m-selected' : ''}${isAnnouncement ? ' samaya-announcement-card' : ' samaya-event-card'}"
+         onclick="openDiscordPreview(${escapeHtml(JSON.stringify(ev))})" tabindex="0" role="button"
+         title="Click to preview how this looks on Discord">
+      <div class="pf-v6-c-card__body">
+        <div class="samaya-event-row">
+          ${dateCol}
+          <div style="flex:1;min-width:0">
+            <div class="pf-v6-l-flex pf-m-align-items-center pf-m-space-items-sm pf-v6-u-mb-xs">
+              ${isAnnouncement ? announcementKindBadge() : eventKindBadge()}
+              <span><strong>${escapeHtml(ev.event_name)}</strong></span>
+              ${tenantBadge(ev)}
+              ${scopeBadge(ev.scope)}
+            </div>
+            <div class="samaya-event-meta pf-v6-u-mb-xs">
+              <span class="pf-v6-u-font-size-sm">🕐 ${formatTime(ev.start_datetime_utc)}</span>
+              ${!isAnnouncement ? `<span class="pf-v6-u-font-size-sm">⏱ ${formatDuration(ev.duration_hours)}</span>` : ''}
+              ${ev.discord_channel ? `<span class="pf-v6-u-font-size-sm">💬 ${escapeHtml(ev.discord_channel)}</span>` : ''}
+              ${notifyBadge(ev)}
+              ${isAnnouncement ? announcementStatusBadge(ev.post_status) : statusBadge(ev.post_status)}
+            </div>
+            ${ev.description ? `<p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle)">${escapeHtml(ev.description)}</p>` : ''}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
 function emptyState(title, body) {
   return `
     <div class="pf-v6-c-empty-state">
@@ -588,75 +745,333 @@ function emptyState(title, body) {
     </div>`;
 }
 
+// Cached so the calendar view (renderCalendar/renderCalendarDayDetail,
+// spec §46) can bucket/re-render from the same fetch the list view already
+// did, rather than a second round trip.
+let EVENTS_DATA = [];
+
 async function loadEvents() {
   const content = document.getElementById('content');
   try {
     const res    = await fetch(API_URL);
     const events = await res.json();
+    EVENTS_DATA = events;
 
     if (!events.length) {
       content.innerHTML = emptyState(
         'No events scheduled',
         'Nothing in the next 28 days. Check back soon, or subscribe to the ICS feed to get notified automatically.'
       );
-      return;
-    }
+    } else {
+      const today = new Date().toISOString().slice(0, 10);
 
-    const today = new Date().toISOString().slice(0, 10);
-
-    const groups = new Map();
-    events.forEach(ev => {
-      const label = weekLabel(ev.occurrence_date);
-      if (!groups.has(label)) groups.set(label, []);
-      groups.get(label).push(ev);
-    });
-
-    let html = '';
-    groups.forEach((evs, label) => {
-      html += `<h2 class="pf-v6-c-title pf-m-md samaya-week-header" style="color:var(--pf-t--global--text--color--subtle)">${label}</h2>`;
-      evs.forEach(ev => {
-        const d        = new Date(ev.occurrence_date + 'T12:00:00Z');
-        const isToday  = ev.occurrence_date === today;
-        const dayNum   = d.getUTCDate();
-        const dowLabel = DOW_FULL[d.getUTCDay()].slice(0, 3);
-
-        const isAnnouncement = ev.kind === 'announcement';
-
-        html += `
-          <div class="pf-v6-c-card pf-v6-u-mb-sm${isToday ? ' pf-m-selected' : ''}${isAnnouncement ? ' samaya-announcement-card' : ' samaya-event-card'}">
-            <div class="pf-v6-c-card__body">
-              <div class="samaya-event-row">
-                <div class="samaya-date-col${isToday ? ' samaya-today' : ''}">
-                  <div class="samaya-date-day">${dayNum}</div>
-                  <div class="samaya-date-dow">${dowLabel}</div>
-                </div>
-                <div style="flex:1;min-width:0">
-                  <div class="pf-v6-l-flex pf-m-align-items-center pf-m-space-items-sm pf-v6-u-mb-xs">
-                    ${isAnnouncement ? announcementKindBadge() : eventKindBadge()}
-                    <span><strong>${escapeHtml(ev.event_name)}</strong></span>
-                    ${tenantBadge(ev)}
-                    ${scopeBadge(ev.scope)}
-                  </div>
-                  <div class="samaya-event-meta pf-v6-u-mb-xs">
-                    <span class="pf-v6-u-font-size-sm">🕐 ${formatTime(ev.start_datetime_utc)}</span>
-                    ${!isAnnouncement ? `<span class="pf-v6-u-font-size-sm">⏱ ${formatDuration(ev.duration_hours)}</span>` : ''}
-                    ${ev.discord_channel ? `<span class="pf-v6-u-font-size-sm">💬 ${escapeHtml(ev.discord_channel)}</span>` : ''}
-                    ${notifyBadge(ev)}
-                    ${isAnnouncement ? announcementStatusBadge(ev.post_status) : statusBadge(ev.post_status)}
-                  </div>
-                  ${ev.description ? `<p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle)">${escapeHtml(ev.description)}</p>` : ''}
-                </div>
-              </div>
-            </div>
-          </div>`;
+      const groups = new Map();
+      events.forEach(ev => {
+        const label = weekLabel(ev.occurrence_date);
+        if (!groups.has(label)) groups.set(label, []);
+        groups.get(label).push(ev);
       });
-    });
 
-    content.innerHTML = html;
+      let html = '';
+      groups.forEach((evs, label) => {
+        html += `<h2 class="pf-v6-c-title pf-m-md samaya-week-header" style="color:var(--pf-t--global--text--color--subtle)">${label}</h2>`;
+        evs.forEach(ev => {
+          const d        = new Date(ev.occurrence_date + 'T12:00:00Z');
+          const isToday  = ev.occurrence_date === today;
+          const dayNum   = d.getUTCDate();
+          const dowLabel = DOW_FULL[d.getUTCDay()].slice(0, 3);
+          html += buildEventCardHtml(ev, dayNum, dowLabel, isToday);
+        });
+      });
+
+      content.innerHTML = html;
+    }
 
   } catch (e) {
     content.innerHTML = emptyState('Could not load events', escapeHtml(e.message));
   }
+
+  // The calendar view reads from the same EVENTS_DATA this fetch just
+  // populated (or cleared, on failure) — refresh it too when it's the
+  // currently-visible view, same as the list content above.
+  if (getEventsView() === 'calendar') renderCalendar();
+}
+
+// ── List/Calendar toggle (spec §46) ──────────────────────────────
+function getEventsView() {
+  return localStorage.getItem('samaya_events_view') || 'list';
+}
+
+function setEventsView(view) {
+  localStorage.setItem('samaya_events_view', view);
+  document.getElementById('content').style.display = view === 'list' ? '' : 'none';
+  document.getElementById('calendarWrap').style.display = view === 'calendar' ? '' : 'none';
+  document.getElementById('viewListBtn').className = 'pf-v6-c-button pf-m-small ' + (view === 'list' ? 'pf-m-primary' : 'pf-m-secondary');
+  document.getElementById('viewCalendarBtn').className = 'pf-v6-c-button pf-m-small ' + (view === 'calendar' ? 'pf-m-primary' : 'pf-m-secondary');
+  if (view === 'calendar') renderCalendar();
+}
+
+// ── Calendar view (spec §46) ──────────────────────────────────────
+// Buckets by the event's calendar day *in the selected display time
+// zone*, not UTC — a 11 PM UTC event can be "tomorrow" locally, and the
+// calendar should put it on the day a viewer would actually expect to
+// find it on, same reasoning as fmtDateTime's own local-date handling
+// (events.js, admin side).
+function tzDateParts(date, tz) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date).reduce((a, p) => (a[p.type] = p.value, a), {});
+  return { y: Number(parts.year), m: Number(parts.month) - 1, d: Number(parts.day) };
+}
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+let CAL_YEAR = null, CAL_MONTH = null;
+
+function initCalendarIfNeeded() {
+  if (CAL_YEAR !== null) return;
+  const t = tzDateParts(new Date(), getDisplayTz());
+  CAL_YEAR = t.y;
+  CAL_MONTH = t.m;
+}
+
+function calendarPrevMonth() {
+  initCalendarIfNeeded();
+  CAL_MONTH--;
+  if (CAL_MONTH < 0) { CAL_MONTH = 11; CAL_YEAR--; }
+  renderCalendar();
+}
+
+function calendarNextMonth() {
+  initCalendarIfNeeded();
+  CAL_MONTH++;
+  if (CAL_MONTH > 11) { CAL_MONTH = 0; CAL_YEAR++; }
+  renderCalendar();
+}
+
+function calendarToday() {
+  const t = tzDateParts(new Date(), getDisplayTz());
+  CAL_YEAR = t.y;
+  CAL_MONTH = t.m;
+  renderCalendar();
+}
+
+function renderCalendar() {
+  initCalendarIfNeeded();
+  const grid = document.getElementById('calGrid');
+  const label = document.getElementById('calMonthLabel');
+  if (!grid || !label) return;
+
+  label.textContent = `${MONTH_FULL[CAL_MONTH]} ${CAL_YEAR}`;
+
+  const tz = getDisplayTz();
+  const todayKey = (() => {
+    const t = tzDateParts(new Date(), tz);
+    return `${t.y}-${pad2(t.m + 1)}-${pad2(t.d)}`;
+  })();
+
+  // Bucket every fetched item by its own calendar day in the display zone —
+  // only the currently-loaded ~28-day window has data; months outside it
+  // simply render empty (still navigable, just nothing to show yet).
+  const byDay = new Map();
+  EVENTS_DATA.forEach(ev => {
+    const t = tzDateParts(new Date(ev.start_datetime_utc), tz);
+    const key = `${t.y}-${pad2(t.m + 1)}-${pad2(t.d)}`;
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key).push(ev);
+  });
+
+  const firstOfMonth = new Date(Date.UTC(CAL_YEAR, CAL_MONTH, 1));
+  const leadingBlanks = (firstOfMonth.getUTCDay() + 6) % 7; // Monday-first
+  const daysInMonth = new Date(Date.UTC(CAL_YEAR, CAL_MONTH + 1, 0)).getUTCDate();
+
+  let html = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => `<div class="cal-dow">${d}</div>`).join('');
+  for (let i = 0; i < leadingBlanks; i++) html += '<div class="cal-cell cal-empty"></div>';
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const key = `${CAL_YEAR}-${pad2(CAL_MONTH + 1)}-${pad2(day)}`;
+    const items = (byDay.get(key) || []).sort((a, b) => new Date(a.start_datetime_utc) - new Date(b.start_datetime_utc));
+    const isToday = key === todayKey;
+    const shown = items.slice(0, 3);
+    const itemsHtml = shown.map(ev => {
+      const cls = ev.kind === 'announcement' ? 'cal-item-announcement' : 'cal-item-event';
+      return `<div class="cal-item ${cls}" title="${escapeHtml(ev.event_name)}" onclick="event.stopPropagation();openDiscordPreview(${escapeHtml(JSON.stringify(ev))})">${escapeHtml(ev.event_name)}</div>`;
+    }).join('');
+    const moreHtml = items.length > 3 ? `<div class="cal-more">+${items.length - 3} more</div>` : '';
+    html += `<div class="cal-cell${isToday ? ' cal-today' : ''}" onclick="openCalendarDay('${key}')">
+      <div class="cal-daynum">${day}</div>
+      ${itemsHtml}${moreHtml}
+    </div>`;
+  }
+
+  grid.innerHTML = html;
+}
+
+function openCalendarDay(dayKey) {
+  const tz = getDisplayTz();
+  const items = EVENTS_DATA
+    .filter(ev => {
+      const t = tzDateParts(new Date(ev.start_datetime_utc), tz);
+      return `${t.y}-${pad2(t.m + 1)}-${pad2(t.d)}` === dayKey;
+    })
+    .sort((a, b) => new Date(a.start_datetime_utc) - new Date(b.start_datetime_utc));
+
+  const detail = document.getElementById('calDayDetail');
+  if (!detail) return;
+  if (!items.length) {
+    detail.innerHTML = emptyState('Nothing scheduled', `Nothing on ${dayKey}.`);
+  } else {
+    const dateLabel = new Date(dayKey + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
+    detail.innerHTML = `<h2 class="pf-v6-c-title pf-m-md samaya-week-header" style="color:var(--pf-t--global--text--color--subtle)">${escapeHtml(dateLabel)}</h2>`
+      + items.map(ev => buildEventCardHtml(ev)).join('');
+  }
+  detail.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// ── Discord preview (spec §46) ────────────────────────────────────
+// A deliberately-simplified port of announcements.js's composer preview
+// (admin side, renderDiscordMarkdownPreview/clientRenderPlaceholders) —
+// duplicated rather than shared (this page has no shared JS with
+// admin.html, §22) and missing that version's role/channel *name*
+// resolution, since this is a public, unauthenticated page with no access
+// to a guild's actual role/channel list — a raw <@&id>/<#id> mention
+// renders as a generic "@role mention"/"#channel mention" instead of a
+// real name, which is honest about what this page can and can't know.
+function formatDiscordAbsolutePreview(date) {
+  return date.toLocaleString(undefined, {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  }) + ' (preview)';
+}
+
+function formatDiscordRelativePreview(date) {
+  const diffMs = date.getTime() - Date.now();
+  const mins = Math.round(diffMs / 60000);
+  const abs = Math.abs(mins);
+  let text;
+  if (abs < 60) text = `${abs} min`;
+  else if (abs < 1440) text = `${Math.round(abs / 60)} hr`;
+  else text = `${Math.round(abs / 1440)} day${Math.round(abs / 1440) === 1 ? '' : 's'}`;
+  return (mins >= 0 ? `in ${text}` : `${text} ago`) + ' (preview)';
+}
+
+function clientRenderPlaceholders(text, { allianceName, kingdomName, scheduledFor, eventOffsetMinutes }) {
+  const eventTime = new Date(scheduledFor.getTime() + (eventOffsetMinutes || 0) * 60000);
+  const values = {
+    alliance_name: allianceName || '',
+    kingdom_name: kingdomName || '',
+    send_time: formatDiscordAbsolutePreview(scheduledFor),
+    send_time_relative: formatDiscordRelativePreview(scheduledFor),
+    event_time: formatDiscordAbsolutePreview(eventTime),
+    event_time_relative: formatDiscordRelativePreview(eventTime),
+  };
+  return text.replace(/\{(alliance_name|kingdom_name|send_time|send_time_relative|event_time|event_time_relative)\}/g,
+    (m, name) => (values[name] !== undefined ? values[name] : m));
+}
+
+function renderDiscordMarkdownPreview(text) {
+  let html = escapeHtml(text);
+
+  const codeStash = [];
+  html = html.replace(/```([\s\S]*?)```/g, (m, code) => {
+    codeStash.push('<pre class="preview-codeblock"><code>' + code.replace(/^\n/, '') + '</code></pre>');
+    return `\u0000CODEBLOCK${codeStash.length - 1}\u0000`;
+  });
+  html = html.replace(/`([^`\n]+)`/g, (m, code) => {
+    codeStash.push('<code class="preview-inline-code">' + code + '</code>');
+    return `\u0000CODEBLOCK${codeStash.length - 1}\u0000`;
+  });
+
+  html = html.replace(/^(?:&gt; ?.*(?:\n|$))+/gm, (m) =>
+    '<blockquote class="preview-quote">' + m.replace(/^&gt; ?/gm, '').trim() + '</blockquote>'
+  );
+
+  html = html.replace(/^### (.*)\n?/gm, '<h3 class="preview-h">$1</h3>');
+  html = html.replace(/^## (.*)\n?/gm, '<h2 class="preview-h">$1</h2>');
+  html = html.replace(/^# (.*)\n?/gm, '<h1 class="preview-h">$1</h1>');
+
+  html = html.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__([^_]+)__/g, '<u>$1</u>');
+  html = html.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
+  html = html.replace(/~~([^~]+)~~/g, '<s>$1</s>');
+  html = html.replace(/\|\|([^|]+)\|\|/g, '<span class="preview-spoiler" onclick="this.classList.add(\'revealed\')">$1</span>');
+
+  // No role/channel list available on this public page — render generic
+  // labels rather than a raw numeric id.
+  html = html.replace(/&lt;@&amp;(\d+)&gt;/g, '<span class="preview-mention">@role mention</span>');
+  html = html.replace(/&lt;#(\d+)&gt;/g, '<span class="preview-mention">#channel mention</span>');
+
+  html = html.replace(/^- (.*)$/gm, '&nbsp;&nbsp;• $1');
+  html = html.replace(/\n/g, '<br>');
+  html = html.replace(/\u0000CODEBLOCK(\d+)\u0000/g, (m, i) => codeStash[Number(i)]);
+
+  return html || '<span style="color:#949ba4">(nothing to preview yet)</span>';
+}
+
+// ev is one row from the combined /api/events shape (kind: "event" |
+// "announcement") — the same object list view/calendar cards already
+// carry, round-tripped through the card's own onclick attribute.
+function openDiscordPreview(ev) {
+  const modal = document.getElementById('discordPreviewModal');
+  const pane = document.getElementById('discordPreviewModalBody');
+  if (!modal || !pane) return;
+
+  const isAnnouncement = ev.kind === 'announcement';
+  const allianceName = ev.tenant_name || (!COMBINED_MODE ? (ALLIANCES.find(a => a.slug === TENANT_SLUG) || {}).name : '') || '';
+
+  let scheduledFor, eventOffsetMinutes;
+  if (isAnnouncement) {
+    scheduledFor = new Date(ev.start_datetime_utc);
+    eventOffsetMinutes = ev.event_offset_minutes || 0;
+  } else {
+    // An Event's own {send_time} is always "now" (spec §32.2) — this
+    // page has no record of when it actually posted, so "now" is also
+    // the honest answer for a preview opened at any point afterward.
+    scheduledFor = new Date();
+    eventOffsetMinutes = Math.round((new Date(ev.start_datetime_utc).getTime() - Date.now()) / 60000);
+  }
+
+  // kingdom_name has no public, unauthenticated source on this page
+  // (GET /api/kingdoms requires login) — left blank, same "degrades
+  // gracefully, not fatal" precedent the admin composer's preview uses
+  // when its own kingdom-name fetch fails.
+  const resolved = clientRenderPlaceholders(ev.description || '', {
+    allianceName, kingdomName: '', scheduledFor, eventOffsetMinutes,
+  });
+  const html = renderDiscordMarkdownPreview(resolved);
+
+  if (isAnnouncement) {
+    pane.innerHTML = `
+      <div class="discord-preview-msg">
+        <div class="discord-preview-avatar">S</div>
+        <div class="discord-preview-body">
+          <div class="discord-preview-header">
+            <span class="discord-preview-name">Samaya</span><span class="discord-preview-bot-tag">BOT</span>
+            <span class="discord-preview-timestamp">${formatDiscordAbsolutePreview(scheduledFor)}</span>
+          </div>
+          <div class="discord-preview-text">${html}</div>
+        </div>
+      </div>`;
+  } else {
+    const eventStart = new Date(scheduledFor.getTime() + eventOffsetMinutes * 60000);
+    pane.innerHTML = `
+      <div class="discord-preview-event">
+        ${ev.cover_image_data ? `<img class="discord-preview-event-cover" src="${escapeHtml(ev.cover_image_data)}" alt="">` : ''}
+        <div class="discord-preview-event-body">
+          <div class="discord-preview-event-title">${escapeHtml(ev.event_name)}</div>
+          <div class="discord-preview-event-time">🗓️ ${formatDiscordAbsolutePreview(eventStart)} <span style="color:#949ba4">(${formatDiscordRelativePreview(eventStart)})</span></div>
+          <div class="discord-preview-event-meta">${ev.duration_hours ? '⏱ ' + formatDuration(ev.duration_hours) : ''}${ev.discord_channel ? (ev.duration_hours ? ' · ' : '') + '💬 ' + escapeHtml(ev.discord_channel) : ''}</div>
+          <div class="discord-preview-text discord-preview-event-desc">${html}</div>
+          <button type="button" class="discord-preview-event-interested" disabled>✓ Interested</button>
+        </div>
+      </div>`;
+  }
+
+  modal.classList.add('open');
+}
+
+function closeDiscordPreviewModal() {
+  document.getElementById('discordPreviewModal').classList.remove('open');
 }
 
 // Spec §38.9: a small marquee naming the last message actually sent for
@@ -694,6 +1109,7 @@ fetch('/api/kingdom-branding').then(r => r.json()).then(b => {
 }).catch(() => {});
 
 renderLegend();
+setEventsView(getEventsView());
 loadEvents();
 loadAlliances();
 loadLastActivity();

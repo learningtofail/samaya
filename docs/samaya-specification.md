@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.19.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.20.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -1036,3 +1036,36 @@ Small, well-scoped ideas that have come up but are deliberately not built yet �
 
 - A real Discord Gateway connection (so `GUILD_SCHEDULED_EVENT_UPDATE`/`_DELETE` could genuinely be received) — a persistent WebSocket client is a materially different deployment shape (a long-running process rather than a stateless request-served FastAPI app) and out of scope for what fixing this particular symptom needs; the schedule-derived heuristic above is sufficient for reconciliation purposes.
 - Automatically calling `POST /api/sync/mark-completed/{id}` for every naturally-completed row on a schedule — left as a one-click coordinator action for now, consistent with every other Sync fix action being manually triggered rather than automatic.
+
+## 46. Month Calendar View and Discord Preview
+
+**Status:** Implemented.
+
+**Problem.** Two related gaps on the public events page, plus one shared across the admin console: (1) the public page only ever showed a flat chronological list — there was no month-at-a-glance way to see how a week's events land relative to each other; (2) neither the public page nor the admin console gave any way to see what an event or announcement would actually look like once it reaches Discord short of posting it for real, so "does this description read right," "is the cover image going to look OK," or "did I get the placeholders right" could only be answered by publishing and then checking Discord directly.
+
+### 46.1 List/Calendar Toggle (public events page)
+
+`events.html` gained a "📋 List / 📆 Calendar" toggle (`setEventsView()`/`getEventsView()`, persisted in `localStorage` as `samaya_events_view`) sitting above the event list. **List remains the default view** for both new visitors and anyone who hasn't picked Calendar before.
+
+The calendar renders a standard month grid (Monday-first), built entirely client-side from the same `EVENTS_DATA` the list view already fetched — no new endpoint. Each event/announcement is bucketed onto a calendar day using `tzDateParts()`, which reads the day/month/year **in the visitor's selected display time zone** (§15.4's existing `samaya_display_tz`), not UTC — an event at 11 PM UTC can be "tomorrow" for a visitor several hours ahead, and the calendar places it on the day a viewer would actually expect to find it, the same reasoning `fmtDateTime()` already applies to the admin side's local-date handling. Switching time zones re-renders whichever view (list or calendar) is currently showing.
+
+A day cell shows up to three compact colored items (orange for events, purple for announcements, matching the existing kind-badge colors) plus a "+N more" when there are more; clicking an item opens the Discord preview (§46.2) directly, while clicking anywhere else on the day cell opens a day-detail panel below the grid listing that day's full cards. Prev/Today/Next navigate by month; since the underlying data is still the existing 28-day-forward window (`WINDOW_DAYS`, `routers/events.py`), a month outside that window simply renders empty rather than fetching anything new — full historical/future month browsing would need a materially different (paginated or unbounded) backend query, which is out of scope here.
+
+### 46.2 "Preview as it would look on Discord"
+
+Every event/announcement card on the public page, and every row on the admin Dashboard's occurrence cards, Schedule table, Events table, and Announcements table, is now clickable and opens a "Discord Preview" modal (X-close/Escape, same convention as every other modal in this app) rendering an approximation of how that item would actually appear on Discord:
+
+- **Announcements** render as a plain Discord message bubble (avatar, "Samaya BOT" header, timestamp, body).
+- **Events** render as a Scheduled-Event-shaped card instead (title, 🗓️ start time, duration/channel meta, description, a disabled "✓ Interested" button, and the cover image banner when `cover_image_data` is set) — a plain chat bubble would misrepresent what an Event actually looks like on Discord.
+
+Both reuse the exact placeholder-resolution and Discord-markdown-to-HTML rendering the Announcement/Template/Event-description composer preview already built (spec §27/§28/§32.2 — `clientRenderPlaceholders`/`renderDiscordMarkdownPreview`), rather than a third implementation: on the admin side directly (`common.js`'s new `openDiscordPreview(kind, item)`, called from `dashboard.js`/`schedule.js`/`events.js`/`announcements.js`'s row click handlers), and as a deliberately-simplified duplicate on the public page (`events.html`, no shared JS with admin per §22) that renders role/channel mentions as generic "@role mention"/"#channel mention" labels rather than resolved names, since a public unauthenticated page has no access to a guild's actual role/channel list the way the logged-in admin composer does.
+
+An `EventDefinition` row in the admin Events tab (as opposed to a concrete `Occurrence`) has no single "next occurrence" to preview against, so it previews using its own `anchor_date`/`start_time_utc` — the same convention the Events modal's own live description preview (§32.2) already uses. `_occurrence_dict` (`routers/admin/serializers.py`) gained two previously-omitted fields, `description` and `cover_image_data`, so the Dashboard/Schedule preview has the same content Discord itself actually received.
+
+Every row-level click handler (`handleRowPreviewClick`, `common.js`) ignores clicks on an actual control inside the row (a button, a checkbox, a `<select>`) so Post/Cancel/Edit/Duplicate/the post-to-Discord toggle keep working exactly as before — only a click on the row's otherwise-inert surface opens the preview.
+
+### 46.3 Out of Scope
+
+- Browsing calendar months outside the existing 28-day-forward data window — see §46.1; would need a different backend query shape than exists today.
+- A live re-fetch of Discord's actual current role/channel names for the public page's preview — the public page has no authenticated path to that data at all (see §46.2); this is an inherent limitation of previewing from an unauthenticated context, not a bug.
+- Any interactivity in the preview itself (actually clicking "Interested," reacting, replying) — it's a static visual approximation, not an embedded Discord widget.

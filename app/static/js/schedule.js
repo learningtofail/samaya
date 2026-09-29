@@ -49,7 +49,7 @@ function renderSchedule() {
     const isToday = o.occurrence_date === today;
     const allyColor = TENANT_COLORS[o.owning_tenant_id] || '#475569';
     const rowStyle = 'border-left:3px solid ' + allyColor + (isToday ? ';background:var(--amber)' : '');
-    return `<tr class="pf-v6-c-table__tr" style="${rowStyle}">
+    return `<tr class="pf-v6-c-table__tr samaya-row-clickable" style="${rowStyle}" onclick="handleRowPreviewClick(event,'occurrence',${escapeHtml(JSON.stringify(o))})" title="Click to preview how this looks on Discord">
       <td class="pf-v6-c-table__td" style="${isToday?'font-weight:600':''}">${o.occurrence_date}</td>
       <td class="pf-v6-c-table__td">${DOW3[new Date(o.occurrence_date+'T12:00:00Z').getUTCDay()]}</td>
       <td class="pf-v6-c-table__td"><span class="cat-dot" style="background:${allyColor}"></span>${escapeHtml(o.event_name)}${o.scope === 'kingdom-wide' ? ' 🌐' : ''}${o.leadership_only ? ' 👑' : ' 🛡️'}${getTabFilter('schedule') === COMBINED_SLUG ? ' <span style="color:var(--muted);font-size:var(--fs-sm)">(' + escapeHtml(tenantName(o.owning_tenant_id)) + ')</span>' : ''}</td>

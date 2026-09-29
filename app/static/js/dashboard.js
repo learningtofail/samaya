@@ -88,7 +88,7 @@ async function loadDashboard() {
     function occurrenceCard(o) {
       const allianceName = tenantNameFor(o.owning_tenant_id);
       return `
-      <div class="pf-v6-c-card pf-v6-u-mb-sm">
+      <div class="pf-v6-c-card pf-v6-u-mb-sm samaya-row-clickable" onclick="handleRowPreviewClick(event,'occurrence',${escapeHtml(JSON.stringify(o))})" title="Click to preview how this looks on Discord">
         <div class="pf-v6-c-card__body" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           ${o.scope === 'kingdom-wide' ? '<span title="Kingdom-wide">🌐</span> ' : ''}
           <strong>${escapeHtml(o.event_name)}</strong>${o.leadership_only ? ' <span title="Leadership only">👑</span>' : ' <span title="Alliance">🛡️</span>'}

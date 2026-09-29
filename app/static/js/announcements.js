@@ -535,7 +535,8 @@ async function loadAnnouncements() {
       const recurringBadge = a.recurring
         ? pfLabel('Every ' + a.interval_days + 'd', 'pf-m-purple')
         : pfLabel('One-time', 'pf-m-gray');
-      return '<tr class="pf-v6-c-table__tr">'
+      const previewData = escapeHtml(JSON.stringify(a));
+      return '<tr class="pf-v6-c-table__tr samaya-row-clickable" onclick="handleRowPreviewClick(event,\'announcement\',' + previewData + ')" title="Click to preview how this looks on Discord">'
         + '<td class="pf-v6-c-table__td">' + escapeHtml(a.title) + leadershipBadge + '</td>'
         + '<td class="pf-v6-c-table__td">' + fmtDateTime(a.scheduled_for) + '</td>'
         + '<td class="pf-v6-c-table__td">' + recurringBadge + '</td>'

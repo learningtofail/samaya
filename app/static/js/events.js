@@ -133,7 +133,7 @@ function renderEventsTable(allEvents) {
       var tenantTag = getTabFilter('events') === COMBINED_SLUG
         ? ' <span style="color:var(--muted);font-size:var(--fs-sm)">(' + escapeHtml(tenantName(e.owning_tenant_id)) + ')</span>'
         : '';
-      return '<tr class="pf-v6-c-table__tr" style="border-left:3px solid ' + allyColor + '">'
+      return '<tr class="pf-v6-c-table__tr samaya-row-clickable" style="border-left:3px solid ' + allyColor + '" onclick="handleRowPreviewClick(event,\'eventdef\',' + editData + ')" title="Click to preview how this looks on Discord">'
         + '<td class="pf-v6-c-table__td"><span class="cat-dot" style="background:' + allyColor + '"></span>' + escapeHtml(e.name) + tenantTag + '</td>'
         + '<td class="pf-v6-c-table__td">' + scopeLabel + '</td>'
         + '<td class="pf-v6-c-table__td">' + intervalLabel(e.interval_days) + '</td>'

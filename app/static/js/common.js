@@ -418,3 +418,108 @@ function toggleEmojiPicker(buttonEl, textareaId) {
   picker.style.left = (rect.left + window.scrollX) + 'px';
   picker.classList.add('open');
 }
+
+// ── "Preview as it would look on Discord" modal (spec §46) ──────────
+// Click-to-preview for an event/announcement row/card across Dashboard,
+// Schedule, Events, and Announcements — reuses the exact rendering
+// announcements.js's composer preview already built (renderDiscordMarkdownPreview/
+// clientRenderPlaceholders/formatDiscordAbsolutePreview/formatDiscordRelativePreview,
+// all defined there — safe to call from here since every admin script has
+// already loaded and defined its top-level functions by the time a user
+// can click anything). `kind` is 'occurrence' (Dashboard/Schedule row —
+// an Occurrence dict), 'eventdef' (Events tab row — an EventDefinition
+// dict, previewed against its own anchor_date/start_time_utc since it has
+// no concrete "next occurrence" the way a real Occurrence does), or
+// 'announcement' (an Announcement dict, ANNOUNCEMENTS-shaped).
+// Row-level click target for the tables/cards below — lets the whole
+// row/card open the preview while a click on an actual control inside it
+// (Post, Cancel, Edit, a checkbox, a <select>...) keeps doing what it
+// already does instead of also popping the preview open underneath it.
+function handleRowPreviewClick(evt, kind, item) {
+  if (evt.target.closest('button, a, select, input, .pf-v6-c-check')) return;
+  openDiscordPreview(kind, item);
+}
+
+async function openDiscordPreview(kind, item) {
+  const modal = document.getElementById('discordPreviewModal');
+  const pane = document.getElementById('discordPreviewModalBody');
+  if (!modal || !pane) return;
+  pane.innerHTML = '<p style="color:var(--muted)">Loading preview…</p>';
+  modal.classList.add('open');
+
+  let tenantSlug, title, rawBody, scheduledFor, eventOffsetMinutes, coverImage, channelLabel, durationHours;
+  const isAnnouncement = kind === 'announcement';
+
+  if (kind === 'occurrence') {
+    tenantSlug = tenantSlugFor(item.owning_tenant_id);
+    title = item.event_name;
+    rawBody = item.description || '';
+    scheduledFor = new Date();
+    eventOffsetMinutes = Math.round((new Date(item.start_datetime_utc).getTime() - Date.now()) / 60000);
+    coverImage = item.cover_image_data || null;
+    channelLabel = item.discord_channel;
+    durationHours = item.duration_hours;
+  } else if (kind === 'eventdef') {
+    tenantSlug = tenantSlugFor(item.owning_tenant_id);
+    title = item.name;
+    rawBody = item.description || '';
+    scheduledFor = new Date();
+    const start = new Date(item.anchor_date + 'T' + (item.start_time_utc || '00:00') + ':00Z');
+    eventOffsetMinutes = Math.round((start.getTime() - Date.now()) / 60000);
+    coverImage = item.cover_image_data || null;
+    channelLabel = item.discord_channel;
+    durationHours = item.duration_hours;
+  } else {
+    tenantSlug = item.owning_tenant_slug;
+    title = item.title;
+    rawBody = item.body_markdown || '';
+    scheduledFor = new Date(item.scheduled_for);
+    eventOffsetMinutes = item.event_offset_minutes || 0;
+  }
+
+  const tenant = TENANTS.find(t => t.slug === tenantSlug);
+  const allianceName = tenant ? tenant.name : (tenantSlug || '');
+
+  const kingdomNames = await ensureKingdomNamesLoaded();
+  const [roles, channels] = await Promise.all([
+    ensurePreviewRolesLoaded(tenantSlug),
+    ensurePreviewChannelsLoaded(tenantSlug),
+  ]);
+
+  const resolved = clientRenderPlaceholders(rawBody, {
+    allianceName, kingdomName: tenant ? kingdomNames[tenant.kingdom_id] : '',
+    scheduledFor, eventOffsetMinutes,
+  });
+  const html = renderDiscordMarkdownPreview(resolved, { roles, channels });
+
+  if (isAnnouncement) {
+    pane.innerHTML = `
+      <div class="discord-preview-msg">
+        <div class="discord-preview-avatar">S</div>
+        <div class="discord-preview-body">
+          <div class="discord-preview-header">
+            <span class="discord-preview-name">Samaya</span><span class="discord-preview-bot-tag">BOT</span>
+            <span style="color:#949ba4;font-size:0.75em">${formatDiscordAbsolutePreview(scheduledFor)}</span>
+          </div>
+          <div class="discord-preview-text">${html}</div>
+        </div>
+      </div>`;
+  } else {
+    const eventStart = new Date(scheduledFor.getTime() + eventOffsetMinutes * 60000);
+    pane.innerHTML = `
+      <div class="discord-preview-event">
+        ${coverImage ? `<img class="discord-preview-event-cover" src="${coverImage}" alt="">` : ''}
+        <div class="discord-preview-event-body">
+          <div class="discord-preview-event-title">${escapeHtml(title)}</div>
+          <div class="discord-preview-event-time">🗓️ ${formatDiscordAbsolutePreview(eventStart)} <span style="color:#949ba4">(${formatDiscordRelativePreview(eventStart)})</span></div>
+          <div class="discord-preview-event-meta">${durationHours ? '⏱ ' + durationHours + 'h' : ''}${channelLabel ? (durationHours ? ' · ' : '') + '💬 ' + escapeHtml(channelLabel) : ''}</div>
+          <div class="discord-preview-text discord-preview-event-desc">${html}</div>
+          <button type="button" class="discord-preview-event-interested" disabled>✓ Interested</button>
+        </div>
+      </div>`;
+  }
+}
+
+function closeDiscordPreviewModal() {
+  document.getElementById('discordPreviewModal').classList.remove('open');
+}
