@@ -3,7 +3,77 @@
 // alliance" surface. Depends on common.js.
 
 async function loadPlatform() {
-  await Promise.all([loadPlatformKingdoms(), loadPlatformKingdomCoordinators(), loadPlatformTenants(), loadPlatformUsers()]);
+  await Promise.all([loadPlatformKingdoms(), loadPlatformKingdomCoordinators(), loadPlatformDiscordServers(), loadPlatformTenants(), loadPlatformUsers()]);
+}
+
+// Discord Servers (spec §25) — the shared guild/bot-credential entity
+// Tenants now reference via server_id, instead of each carrying its own
+// copy of guild_id/bot_token/public_key.
+let DISCORD_SERVERS = [];
+
+async function loadPlatformDiscordServers() {
+  try {
+    DISCORD_SERVERS = await api('GET', '/api/discord-servers', null, /*skipTenantHeader=*/true);
+    document.getElementById('discordServersBody').innerHTML = DISCORD_SERVERS.length
+      ? DISCORD_SERVERS.map(s =>
+          '<tr class="pf-v6-c-table__tr">'
+          + '<td class="pf-v6-c-table__td">' + escapeHtml(s.name) + '</td>'
+          + '<td class="pf-v6-c-table__td" style="font-size:var(--fs-sm);color:var(--muted)">' + escapeHtml(s.guild_id) + '</td>'
+          + '<td class="pf-v6-c-table__td">' + (s.has_own_bot_token ? 'Own bot' : 'Platform bot') + '</td>'
+          + '<td class="pf-v6-c-table__td" style="font-size:var(--fs-sm);color:var(--muted)">' + (s.tenant_names.length ? escapeHtml(s.tenant_names.join(', ')) : '—') + '</td>'
+          + '<td class="pf-v6-c-table__td">'
+          + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="editDiscordServer(' + escapeHtml(JSON.stringify(s)) + ')" '
+          + 'title="Edit this server\'s name, guild ID, or bot credentials.">Edit</button>'
+          + '</td>'
+          + '</tr>'
+        ).join('')
+      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="5" style="color:var(--muted);padding:20px">No Discord servers yet.</td></tr>';
+  } catch(e) { toast(e.message, true); }
+}
+
+async function createDiscordServer() {
+  const name = prompt('Discord server name (e.g. "HTD"):');
+  if (!name) return;
+  const guildId = prompt('Discord guild (server) ID:');
+  if (!guildId) return;
+  const botToken = prompt('Bot token for this server (leave blank to use the shared platform bot):', '');
+
+  try {
+    await api('POST', '/api/discord-servers', {name, guild_id: guildId, bot_token: botToken || null}, /*skipTenantHeader=*/true);
+    toast('Discord server created — it can now be assigned to a tenant below');
+    loadPlatformDiscordServers();
+  } catch(e) { toast(e.message, true); }
+}
+
+// Same prompt-based editing convention as editKingdom()/editTenant() —
+// Cancel on any one field leaves it unchanged rather than aborting the
+// whole edit. bot_token can't be pre-filled (write-only, never returned
+// by the API), same reasoning as editTenant() below.
+async function editDiscordServer(s) {
+  const name = prompt('Server name:', s.name);
+  const guildId = (name !== null) ? prompt('Discord guild (server) ID:', s.guild_id) : null;
+  const tokenNote = s.has_own_bot_token
+    ? 'This server has its own bot token set. Leave blank to keep it unchanged, or type CLEAR to remove it and fall back to the shared platform bot.'
+    : 'This server currently uses the shared platform bot. Leave blank to keep it that way, or paste a bot token to give it its own.';
+  const botTokenInput = (guildId !== null) ? prompt(tokenNote, '') : null;
+
+  const payload = {};
+  if (name !== null && name !== s.name)         payload.name = name;
+  if (guildId !== null && guildId !== s.guild_id) payload.guild_id = guildId;
+  if (botTokenInput !== null && botTokenInput !== '') {
+    payload.bot_token = (botTokenInput.trim().toUpperCase() === 'CLEAR') ? '' : botTokenInput.trim();
+  }
+
+  if (!Object.keys(payload).length) {
+    toast('No changes made');
+    return;
+  }
+
+  try {
+    await api('PATCH', `/api/discord-servers/${s.id}`, payload, /*skipTenantHeader=*/true);
+    toast('Discord server updated');
+    loadPlatformDiscordServers();
+  } catch(e) { toast(e.message, true); }
 }
 
 async function loadPlatformKingdoms() {
@@ -128,15 +198,14 @@ async function loadPlatformTenants() {
           + '<td class="pf-v6-c-table__td"><span class="cat-dot" style="background:' + escapeHtml(t.color) + '"></span>' + escapeHtml(t.name) + '</td>'
           + '<td class="pf-v6-c-table__td">' + escapeHtml(t.slug) + '</td>'
           + '<td class="pf-v6-c-table__td">' + t.kingdom_id + '</td>'
-          + '<td class="pf-v6-c-table__td" style="font-size:var(--fs-sm);color:var(--muted)">' + escapeHtml(t.guild_id) + '</td>'
-          + '<td class="pf-v6-c-table__td">' + (t.has_own_bot_token ? 'Own bot' : 'Platform bot') + '</td>'
+          + '<td class="pf-v6-c-table__td">' + escapeHtml(t.server_name) + '<div style="font-size:var(--fs-sm);color:var(--muted)">' + escapeHtml(t.guild_id) + '</div></td>'
           + '<td class="pf-v6-c-table__td">'
           + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="editTenant(' + escapeHtml(JSON.stringify(t)) + ')" '
-          + 'title="Edit this alliance\'s name, slug, guild, or bot credentials.">Edit</button>'
+          + 'title="Edit this alliance\'s name, slug, or which Discord server it belongs to.">Edit</button>'
           + '</td>'
           + '</tr>'
         ).join('')
-      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="6" style="color:var(--muted);padding:20px">No tenants yet.</td></tr>';
+      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="5" style="color:var(--muted);padding:20px">No tenants yet.</td></tr>';
   } catch(e) { toast(e.message, true); }
 }
 
@@ -158,6 +227,10 @@ async function createTenant() {
     toast('Create a Kingdom first', true);
     return;
   }
+  if (!DISCORD_SERVERS.length) {
+    toast('Create a Discord Server first (above)', true);
+    return;
+  }
   const kingdomList = kingdoms.map(k => k.id + '=' + k.name).join(', ');
   const kingdomIdStr = prompt('Kingdom ID for this alliance (' + kingdomList + '):', String(kingdoms[0].id));
   if (!kingdomIdStr) return;
@@ -165,14 +238,13 @@ async function createTenant() {
   if (!name) return;
   const slug = prompt('URL slug (lowercase — e.g. "mod"):', name.toLowerCase().replace(/[^a-z0-9]+/g, ''));
   if (!slug) return;
-  const guildId = prompt('Discord guild (server) ID for this alliance:');
-  if (!guildId) return;
-  const botToken = prompt('Bot token for this alliance (leave blank to use the shared platform bot):', '');
+  const serverList = DISCORD_SERVERS.map(s => s.id + '=' + s.name + ' (' + s.guild_id + ')').join(', ');
+  const serverIdStr = prompt('Discord Server ID for this alliance (' + serverList + '):', String(DISCORD_SERVERS[0].id));
+  if (!serverIdStr) return;
 
   try {
     await api('POST', '/api/tenants', {
-      kingdom_id: parseInt(kingdomIdStr, 10), name, slug, guild_id: guildId,
-      bot_token: botToken || null,
+      kingdom_id: parseInt(kingdomIdStr, 10), name, slug, server_id: parseInt(serverIdStr, 10),
     }, /*skipTenantHeader=*/true);
     toast('Tenant created — ' + name + ' can now be invited (see the Access tab once you switch into it)');
     loadPlatformTenants();
@@ -180,30 +252,23 @@ async function createTenant() {
   } catch(e) { toast(e.message, true); }
 }
 
-// Edits an existing Tenant via PATCH /api/tenants/{id} (the backend has
-// supported this since Phase 4 — this just wires up the UI). Each field
-// prompts pre-filled with its current value; pressing Cancel on any one
-// of them leaves that field unchanged rather than aborting the whole
-// edit, since re-typing every other field just to fix one is tedious.
-// bot_token can't be pre-filled (write-only, never returned by the API,
-// same reasoning as createTenant never showing an existing token) — its
-// prompt explains the two ways to leave it alone vs. actually change it.
+// Edits an existing Tenant via PATCH /api/tenants/{id}. Each field prompts
+// pre-filled with its current value; pressing Cancel on any one of them
+// leaves that field unchanged rather than aborting the whole edit, since
+// re-typing every other field just to fix one is tedious. Bot credentials
+// are no longer edited here at all (spec §25) — that's the Discord
+// Server's own concern now (editDiscordServer above); this only picks
+// which server the alliance belongs to.
 async function editTenant(t) {
   const name = prompt('Alliance name:', t.name);
   const slug = (name !== null) ? prompt('URL slug:', t.slug) : null;
-  const guildId = (slug !== null) ? prompt('Discord guild (server) ID:', t.guild_id) : null;
-  const tokenNote = t.has_own_bot_token
-    ? 'This alliance has its own bot token set. Leave blank to keep it unchanged, or type CLEAR to remove it and fall back to the shared platform bot.'
-    : 'This alliance currently uses the shared platform bot. Leave blank to keep it that way, or paste a bot token to give it its own.';
-  const botTokenInput = (guildId !== null) ? prompt(tokenNote, '') : null;
+  const serverList = DISCORD_SERVERS.map(s => s.id + '=' + s.name + ' (' + s.guild_id + ')').join(', ');
+  const serverIdStr = (slug !== null) ? prompt('Discord Server ID (' + serverList + '):', String(t.server_id)) : null;
 
   const payload = {};
-  if (name !== null && name !== t.name)         payload.name = name;
-  if (slug !== null && slug !== t.slug)         payload.slug = slug;
-  if (guildId !== null && guildId !== t.guild_id) payload.guild_id = guildId;
-  if (botTokenInput !== null && botTokenInput !== '') {
-    payload.bot_token = (botTokenInput.trim().toUpperCase() === 'CLEAR') ? '' : botTokenInput.trim();
-  }
+  if (name !== null && name !== t.name) payload.name = name;
+  if (slug !== null && slug !== t.slug) payload.slug = slug;
+  if (serverIdStr !== null && parseInt(serverIdStr, 10) !== t.server_id) payload.server_id = parseInt(serverIdStr, 10);
 
   if (!Object.keys(payload).length) {
     toast('No changes made');

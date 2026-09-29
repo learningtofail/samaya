@@ -11,14 +11,15 @@ into) alliances they don't belong to.
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from models import get_db
-from models.db import Kingdom, Tenant, User, UserTenant
+from models.db import DiscordServer, Kingdom, Tenant, User, UserTenant
 from services.audit import log_change
 from services.discord_api import verify_token
 
 from .deps import get_current_user, require_superadmin
-from .schemas import KingdomIn, KingdomPatch, TenantIn, TenantPatch
+from .schemas import DiscordServerIn, DiscordServerPatch, KingdomIn, KingdomPatch, TenantIn, TenantPatch
 
 router = APIRouter()
 
@@ -27,15 +28,31 @@ def _kingdom_dict(k: Kingdom) -> dict:
     return {"id": k.id, "name": k.name, "slug": k.slug}
 
 
+def _server_dict(s: DiscordServer, tenant_names: list[str] | None = None) -> dict:
+    """`tenant_names` must be passed explicitly wherever `s.tenants` isn't
+    already eager-loaded on this object (e.g. right after create/update) —
+    accessing an unloaded relationship here would attempt a lazy load,
+    which fails under the async engine (see spec §25.2's MissingGreenlet
+    note). list_discord_servers below eager-loads it and can omit this."""
+    return {
+        "id":                s.id,
+        "name":              s.name,
+        "guild_id":          s.guild_id,
+        "has_own_bot_token": bool(s.bot_token),
+        "tenant_names":      tenant_names if tenant_names is not None else [t.name for t in s.tenants],
+    }
+
+
 def _tenant_dict(t: Tenant) -> dict:
     return {
-        "id":         t.id,
-        "kingdom_id": t.kingdom_id,
-        "name":       t.name,
-        "slug":       t.slug,
-        "guild_id":   t.guild_id,
-        "has_own_bot_token": bool(t.bot_token),
-        "color":      t.color,
+        "id":          t.id,
+        "kingdom_id":  t.kingdom_id,
+        "name":        t.name,
+        "slug":        t.slug,
+        "server_id":   t.server_id,
+        "server_name": t.server.name,
+        "guild_id":    t.server.guild_id,
+        "color":       t.color,
     }
 
 
@@ -104,18 +121,15 @@ async def list_tenants(user: User = Depends(get_current_user), db: AsyncSession 
 async def create_tenant(
     payload: TenantIn, user: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)
 ):
-    if payload.bot_token:
-        ok, result = await verify_token(payload.bot_token)
-        if not ok:
-            raise HTTPException(status_code=400, detail=f"Bot token verification failed: {result}")
+    server = await db.get(DiscordServer, payload.server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Discord server not found")
 
     tenant = Tenant(
         kingdom_id = payload.kingdom_id,
         name       = payload.name,
         slug       = payload.slug,
-        guild_id   = payload.guild_id,
-        bot_token  = payload.bot_token,
-        public_key = payload.public_key,
+        server_id  = payload.server_id,
         color      = payload.color,
     )
     db.add(tenant)
@@ -125,15 +139,16 @@ async def create_tenant(
         await db.rollback()
         raise HTTPException(status_code=422, detail=f"Could not create tenant: {e}")
 
-    # bot_token/public_key deliberately excluded from the log entry — a
-    # secret has no business sitting in a table other people can read.
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id,
         table_name="tenants", row_id=tenant.id, action="create",
-        after={"name": tenant.name, "slug": tenant.slug, "kingdom_id": tenant.kingdom_id},
+        after={"name": tenant.name, "slug": tenant.slug, "kingdom_id": tenant.kingdom_id, "server_id": tenant.server_id},
     )
     await db.commit()
-    await db.refresh(tenant)
+    # A plain refresh() wouldn't populate the `server` relationship (it
+    # was never loaded on this brand-new object) — re-select instead,
+    # which picks up Tenant.server's lazy="joined" default.
+    tenant = (await db.execute(select(Tenant).where(Tenant.id == tenant.id))).scalar_one()
     return _tenant_dict(tenant)
 
 
@@ -147,23 +162,104 @@ async def update_tenant(
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
+    if payload.server_id is not None:
+        server = await db.get(DiscordServer, payload.server_id)
+        if not server:
+            raise HTTPException(status_code=404, detail="Discord server not found")
+
+    if payload.name is not None:      tenant.name      = payload.name
+    if payload.slug is not None:      tenant.slug      = payload.slug
+    if payload.server_id is not None: tenant.server_id = payload.server_id
+    if payload.color is not None:     tenant.color     = payload.color
+
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id,
+        table_name="tenants", row_id=tenant.id, action="update",
+        after={"name": tenant.name, "slug": tenant.slug, "server_id": tenant.server_id},
+    )
+    await db.commit()
+    # `tenant` was already fetched (with `.server` eager-loaded) at the top
+    # of this function, so a plain re-select would return the same
+    # identity-mapped object with its now-stale `.server` still attached —
+    # a re-select only populates attributes that were never loaded (that's
+    # why create_tenant's version above works). Explicitly refresh the
+    # relationship instead, whenever server_id itself just changed.
+    if payload.server_id is not None:
+        await db.refresh(tenant, attribute_names=["server"])
+    return _tenant_dict(tenant)
+
+
+@router.get("/api/discord-servers")
+async def list_discord_servers(user: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)):
+    """Superadmin-only, same tier as Kingdoms/Tenants/Users (spec §25.3).
+    A coordinator/owner never needs this list directly — their access to
+    a server's channels/roles flows through their Tenant, via
+    get_discord_config (routers/admin/deps.py), not through this table."""
+    result = await db.execute(
+        select(DiscordServer).options(selectinload(DiscordServer.tenants)).order_by(DiscordServer.name)
+    )
+    return [_server_dict(s) for s in result.scalars().all()]
+
+
+@router.post("/api/discord-servers", status_code=201)
+async def create_discord_server(
+    payload: DiscordServerIn, user: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)
+):
+    if payload.bot_token:
+        ok, result = await verify_token(payload.bot_token)
+        if not ok:
+            raise HTTPException(status_code=400, detail=f"Bot token verification failed: {result}")
+
+    server = DiscordServer(
+        name       = payload.name,
+        guild_id   = payload.guild_id,
+        bot_token  = payload.bot_token,
+        public_key = payload.public_key,
+    )
+    db.add(server)
+    try:
+        await db.flush()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=f"Could not create Discord server: {e}")
+
+    # bot_token/public_key deliberately excluded from the log entry — a
+    # secret has no business sitting in a table other people can read.
+    await log_change(
+        db, user_id=user.id, tenant_id=None,
+        table_name="discord_servers", row_id=server.id, action="create",
+        after={"name": server.name, "guild_id": server.guild_id},
+    )
+    await db.commit()
+    await db.refresh(server)
+    return _server_dict(server, tenant_names=[])  # brand new — nothing references it yet
+
+
+@router.patch("/api/discord-servers/{server_id}")
+async def update_discord_server(
+    server_id: int, payload: DiscordServerPatch,
+    user: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db),
+):
+    server = await db.get(DiscordServer, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Discord server not found")
+
     if payload.bot_token is not None and payload.bot_token != "":
         ok, verify_result = await verify_token(payload.bot_token)
         if not ok:
             raise HTTPException(status_code=400, detail=f"Bot token verification failed: {verify_result}")
 
-    if payload.name is not None:       tenant.name       = payload.name
-    if payload.slug is not None:       tenant.slug       = payload.slug
-    if payload.guild_id is not None:   tenant.guild_id   = payload.guild_id
-    if payload.bot_token is not None:  tenant.bot_token  = payload.bot_token or None
-    if payload.public_key is not None: tenant.public_key = payload.public_key or None
-    if payload.color is not None:      tenant.color      = payload.color
+    if payload.name is not None:       server.name       = payload.name
+    if payload.guild_id is not None:   server.guild_id   = payload.guild_id
+    if payload.bot_token is not None:  server.bot_token  = payload.bot_token or None
+    if payload.public_key is not None: server.public_key = payload.public_key or None
 
     await log_change(
-        db, user_id=user.id, tenant_id=tenant.id,
-        table_name="tenants", row_id=tenant.id, action="update",
-        after={"name": tenant.name, "slug": tenant.slug, "guild_id": tenant.guild_id},
+        db, user_id=user.id, tenant_id=None,
+        table_name="discord_servers", row_id=server.id, action="update",
+        after={"name": server.name, "guild_id": server.guild_id},
     )
     await db.commit()
-    await db.refresh(tenant)
-    return _tenant_dict(tenant)
+    await db.refresh(server)
+    names_result = await db.execute(select(Tenant.name).where(Tenant.server_id == server.id))
+    return _server_dict(server, tenant_names=list(names_result.scalars().all()))

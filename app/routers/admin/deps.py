@@ -141,13 +141,13 @@ class DiscordCreds:
 
 
 async def get_discord_config(tenant: Tenant = Depends(get_current_tenant)) -> DiscordCreds:
-    token = tenant.bot_token or PLATFORM_BOT_TOKEN
+    token = tenant.server.bot_token or PLATFORM_BOT_TOKEN
     if not token:
         raise HTTPException(
             status_code=400,
-            detail="No Discord bot token set for this tenant, and no platform fallback configured",
+            detail="No Discord bot token set for this tenant's server, and no platform fallback configured",
         )
-    return DiscordCreds(bot_token=token, guild_id=tenant.guild_id)
+    return DiscordCreds(bot_token=token, guild_id=tenant.server.guild_id)
 
 
 async def get_occurrence_with_event(

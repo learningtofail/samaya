@@ -103,19 +103,33 @@ class TenantIn(BaseModel):
     kingdom_id: int
     name:       str
     slug:       str
-    guild_id:   str
-    bot_token:  Optional[str] = None
-    public_key: Optional[str] = None
+    server_id:  int
     color:      str = "#475569"
 
 
 class TenantPatch(BaseModel):
     name:       Optional[str] = None
     slug:       Optional[str] = None
+    server_id:  Optional[int] = None
+    color:      Optional[str] = None
+
+
+class DiscordServerIn(BaseModel):
+    """spec §25 — a Discord guild this app posts to, independent of any
+    one alliance. bot_token/public_key are optional: left unset, the
+    server (and every Tenant referencing it) falls back to the
+    platform-wide bot."""
+    name:       str
+    guild_id:   str
+    bot_token:  Optional[str] = None
+    public_key: Optional[str] = None
+
+
+class DiscordServerPatch(BaseModel):
+    name:       Optional[str] = None
     guild_id:   Optional[str] = None
     bot_token:  Optional[str] = None
     public_key: Optional[str] = None
-    color:      Optional[str] = None
 
 
 class KingdomIn(BaseModel):

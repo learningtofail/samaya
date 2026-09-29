@@ -135,7 +135,7 @@ async def _post_to_one_tenant(db: AsyncSession, occ: Occurrence, event, target_t
     if await find_post_log(db, target_tenant.id, event.name, occ.occurrence_date):
         return {"tenant_slug": target_tenant.slug, "status": "skipped", "detail": "Already posted"}
 
-    token = target_tenant.bot_token or PLATFORM_BOT_TOKEN
+    token = target_tenant.server.bot_token or PLATFORM_BOT_TOKEN
     if not token:
         return {"tenant_slug": target_tenant.slug, "status": "error",
                 "detail": "No Discord bot token configured for this tenant"}
@@ -152,7 +152,7 @@ async def _post_to_one_tenant(db: AsyncSession, occ: Occurrence, event, target_t
         event_id          = event.id,
         event_name        = event.name,
         occurrence_date   = occ.occurrence_date,
-        discord_guild_id  = target_tenant.guild_id,
+        discord_guild_id  = target_tenant.server.guild_id,
         posted_by         = "coordinator",
         status            = "pending",
     )
@@ -166,7 +166,7 @@ async def _post_to_one_tenant(db: AsyncSession, occ: Occurrence, event, target_t
 
     discord_id, error = await create_discord_event(
         token       = token,
-        guild_id    = target_tenant.guild_id,
+        guild_id    = target_tenant.server.guild_id,
         name        = event.name,
         start       = occ.start_datetime_utc,
         end         = occ.end_datetime_utc,
@@ -194,7 +194,7 @@ async def _post_to_one_tenant(db: AsyncSession, occ: Occurrence, event, target_t
             f"{role_mention}📅 **{event.name}** has been scheduled\n"
             f"{date_str} · {time_str}"
             + (f" · {event.discord_channel}" if event.discord_channel else "")
-            + (f"\nhttps://discord.com/events/{target_tenant.guild_id}/{discord_id}" if discord_id else "")
+            + (f"\nhttps://discord.com/events/{target_tenant.server.guild_id}/{discord_id}" if discord_id else "")
             + "\n\nClick **Interested** to get a reminder 30 minutes before."
         )
         await send_channel_message(token, notify_channel, announce_msg)
@@ -279,11 +279,11 @@ async def cancel_occurrence_discord(
     if not log or not log.discord_event_id:
         raise HTTPException(status_code=404, detail="No Discord event ID found in PostLog")
 
-    token = tenant.bot_token or PLATFORM_BOT_TOKEN
+    token = tenant.server.bot_token or PLATFORM_BOT_TOKEN
     if not token:
         raise HTTPException(status_code=400, detail="No Discord bot token configured for this tenant")
 
-    success, error = await cancel_discord_event(token, tenant.guild_id, log.discord_event_id)
+    success, error = await cancel_discord_event(token, tenant.server.guild_id, log.discord_event_id)
 
     # discord_event_id keeps the real Discord ID rather than being
     # overwritten with a "CANCELLED — was {id}" marker string — status

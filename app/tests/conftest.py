@@ -59,36 +59,44 @@ async def db_session(db_engine):
 async def tenant(db_engine):
     """The default tenant almost every test operates in. Multi-tenant/
     kingdom-wide tests that need a second one use second_tenant below
-    instead of re-seeding by hand."""
-    from models.db import Kingdom, Tenant
+    instead of re-seeding by hand. Each tenant gets its own DiscordServer
+    (spec §25) — none of the existing tests assume any two tenants share
+    one, so this preserves that isolation rather than introducing sharing
+    incidentally."""
+    from models.db import DiscordServer, Kingdom, Tenant
     TestSessionLocal = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
     async with TestSessionLocal() as session:
         kingdom = Kingdom(name="Kingdom 138", slug="k138")
         session.add(kingdom)
         await session.commit()
-        t = Tenant(
-            kingdom_id=kingdom.id, name="MOD", slug="mod",
-            guild_id="test-guild-mod", bot_token="test-bot-token-mod", public_key="test-pubkey-mod",
+        server = DiscordServer(
+            name="MOD's server", guild_id="test-guild-mod", bot_token="test-bot-token-mod", public_key="test-pubkey-mod",
         )
+        session.add(server)
+        await session.commit()
+        t = Tenant(kingdom_id=kingdom.id, server_id=server.id, name="MOD", slug="mod")
         session.add(t)
         await session.commit()
-        return {"id": t.id, "slug": t.slug, "kingdom_id": kingdom.id}
+        return {"id": t.id, "slug": t.slug, "kingdom_id": kingdom.id, "server_id": server.id}
 
 
 @pytest_asyncio.fixture(scope="function")
 async def second_tenant(db_engine, tenant):
     """A second tenant in the same Kingdom as `tenant` — for kingdom-wide
-    fan-out and cross-tenant-isolation tests."""
-    from models.db import Tenant
+    fan-out and cross-tenant-isolation tests. Its own DiscordServer, same
+    reasoning as `tenant` above."""
+    from models.db import DiscordServer, Tenant
     TestSessionLocal = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
     async with TestSessionLocal() as session:
-        t = Tenant(
-            kingdom_id=tenant["kingdom_id"], name="NSR", slug="nsr",
-            guild_id="test-guild-nsr", bot_token="test-bot-token-nsr", public_key="test-pubkey-nsr",
+        server = DiscordServer(
+            name="NSR's server", guild_id="test-guild-nsr", bot_token="test-bot-token-nsr", public_key="test-pubkey-nsr",
         )
+        session.add(server)
+        await session.commit()
+        t = Tenant(kingdom_id=tenant["kingdom_id"], server_id=server.id, name="NSR", slug="nsr")
         session.add(t)
         await session.commit()
-        return {"id": t.id, "slug": t.slug, "kingdom_id": tenant["kingdom_id"]}
+        return {"id": t.id, "slug": t.slug, "kingdom_id": tenant["kingdom_id"], "server_id": server.id}
 
 
 @pytest_asyncio.fixture(scope="function")

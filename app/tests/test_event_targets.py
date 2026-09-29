@@ -11,7 +11,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.db import EventDefinition, EventTarget, Kingdom, Occurrence, PostLog, Tenant
+from models.db import DiscordServer, EventDefinition, EventTarget, Kingdom, Occurrence, PostLog, Tenant
 
 
 async def _third_tenant(db_session: AsyncSession) -> dict:
@@ -22,10 +22,12 @@ async def _third_tenant(db_session: AsyncSession) -> dict:
     kingdom = Kingdom(name="Kingdom 999", slug="k999")
     db_session.add(kingdom)
     await db_session.commit()
-    t = Tenant(
-        kingdom_id=kingdom.id, name="HTD", slug="htd",
-        guild_id="test-guild-htd", bot_token="test-bot-token-htd", public_key="test-pubkey-htd",
+    server = DiscordServer(
+        name="HTD's server", guild_id="test-guild-htd", bot_token="test-bot-token-htd", public_key="test-pubkey-htd",
     )
+    db_session.add(server)
+    await db_session.commit()
+    t = Tenant(kingdom_id=kingdom.id, server_id=server.id, name="HTD", slug="htd")
     db_session.add(t)
     await db_session.commit()
     await db_session.refresh(t)

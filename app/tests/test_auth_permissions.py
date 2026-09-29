@@ -129,7 +129,7 @@ class TestTenantCrudIsSuperadminOnly:
         client, _ = await make_user_and_client(tenant_grants=[(tenant["id"], "owner")])
         r = await client.post(
             "/admin/api/tenants",
-            json={"kingdom_id": tenant["kingdom_id"], "name": "New Alliance", "slug": "newalliance", "guild_id": "g-1"},
+            json={"kingdom_id": tenant["kingdom_id"], "name": "New Alliance", "slug": "newalliance", "server_id": tenant["server_id"]},
         )
         assert r.status_code == 403
         await client.aclose()
@@ -137,7 +137,7 @@ class TestTenantCrudIsSuperadminOnly:
     async def test_superadmin_can_create_tenant(self, client, tenant: dict):
         r = await client.post(
             "/admin/api/tenants",
-            json={"kingdom_id": tenant["kingdom_id"], "name": "New Alliance", "slug": "newalliance", "guild_id": "g-1"},
+            json={"kingdom_id": tenant["kingdom_id"], "name": "New Alliance", "slug": "newalliance", "server_id": tenant["server_id"]},
         )
         assert r.status_code == 201, r.text
 

@@ -54,7 +54,7 @@ async def send_scheduled_announcements(session_factory=None):
                         target.status_detail = "Tenant no longer exists"
                         continue
 
-                    token = tenant.bot_token or PLATFORM_BOT_TOKEN
+                    token = tenant.server.bot_token or PLATFORM_BOT_TOKEN
                     if not token:
                         target.post_status = "error"
                         target.status_detail = "No Discord bot token configured for this tenant"

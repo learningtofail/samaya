@@ -24,7 +24,7 @@ async def status(
     result = await db.execute(select(SchedulerState).where(SchedulerState.tenant_id == tenant.id))
     states = {s.job_name: s for s in result.scalars().all()}
 
-    token = tenant.bot_token or PLATFORM_BOT_TOKEN
+    token = tenant.server.bot_token or PLATFORM_BOT_TOKEN
     discord_ok, discord_bot = (False, None)
     if token:
         discord_ok, discord_bot = await verify_token(token)

@@ -36,25 +36,58 @@ class Kingdom(Base):
     tenants = relationship("Tenant", back_populates="kingdom")
 
 
+class DiscordServer(Base):
+    """A Discord guild this app posts to — infrastructure, not an alliance.
+    Introduced in spec §25 to make explicit what Tenant.guild_id already
+    allowed implicitly: multiple alliances (Tenants) can share one Discord
+    server. Not scoped to a Kingdom — a server (e.g. HTD, a de facto
+    Kingshot-wide hub per spec §19) can host alliances spanning Kingdoms,
+    or none at all beyond the ones actually created there.
+
+    bot_token/public_key are nullable = falls back to the platform-wide
+    bot (see routers.admin.deps.PLATFORM_BOT_TOKEN and
+    routers.webhooks.PLATFORM_PUBLIC_KEY). Once alliances share a server,
+    they share that server's single bot_token/public_key — there is no
+    per-alliance override once sharing is in effect (spec §25, "one bot
+    per server")."""
+    __tablename__ = "discord_servers"
+
+    id         = Column(Integer, primary_key=True)
+    name       = Column(Text, nullable=False)
+    guild_id   = Column(Text, nullable=False, unique=True)
+    bot_token  = Column(Text, nullable=True)
+    public_key = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    tenants = relationship("Tenant", back_populates="server")
+
+
 class Tenant(Base):
     """An alliance. Replaces the old singleton DiscordConfig — every alliance
-    is its own row, including ones that share a Discord guild (guild_id can
-    repeat across rows) or share a bot token (bot_token/public_key nullable
-    = falls back to the platform-wide bot, see routers.admin.deps.PLATFORM_BOT_TOKEN
-    and routers.webhooks.PLATFORM_PUBLIC_KEY)."""
+    is its own row. Its Discord identity (guild/bot credentials) lives on
+    the DiscordServer it references (spec §25), not on the Tenant itself,
+    since multiple alliances routinely share one Discord server (see
+    DiscordServer's own docstring) — that sharing used to be implicit
+    (repeated guild_id values) and is now a first-class relationship."""
     __tablename__ = "tenants"
 
     id         = Column(Integer, primary_key=True)
     kingdom_id = Column(Integer, ForeignKey("kingdoms.id"), nullable=False)
+    server_id  = Column(Integer, ForeignKey("discord_servers.id"), nullable=False)
     name       = Column(Text, nullable=False)
     slug       = Column(Text, nullable=False, unique=True)
-    guild_id   = Column(Text, nullable=False)
-    bot_token  = Column(Text, nullable=True)
-    public_key = Column(Text, nullable=True)
     color      = Column(Text, nullable=False, default="#475569")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     kingdom = relationship("Kingdom", back_populates="tenants")
+    # Eager by default (lazy="joined"): a single cheap FK join, always
+    # needed wherever a Tenant's Discord credentials matter (deps.py,
+    # discord_sync.py, occurrences.py, the announcement/reminder
+    # schedulers, ...) — eager-loading here avoids auditing every one of
+    # those call sites individually to eager-load it per query, and
+    # avoids the MissingGreenlet class of bug a missed spot would cause
+    # (see spec §25.2).
+    server     = relationship("DiscordServer", back_populates="tenants", lazy="joined")
 
 
 class User(Base):

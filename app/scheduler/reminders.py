@@ -89,7 +89,7 @@ async def send_pre_event_reminders(session_factory=None):
                     if not notify_channel:
                         continue
 
-                    token = tenant.bot_token or PLATFORM_BOT_TOKEN
+                    token = tenant.server.bot_token or PLATFORM_BOT_TOKEN
                     if not token:
                         continue
 

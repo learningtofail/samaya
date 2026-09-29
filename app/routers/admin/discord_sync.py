@@ -33,12 +33,12 @@ async def sync_discord(
     - discord_only: on Discord but not in PostLog
     - postlog_only: in PostLog as posted but not found on Discord
     """
-    token = tenant.bot_token or PLATFORM_BOT_TOKEN
+    token = tenant.server.bot_token or PLATFORM_BOT_TOKEN
     if not token:
         raise HTTPException(status_code=400, detail="No Discord bot token configured for this tenant")
 
     from services.discord_api import get_guild_events
-    discord_events = await get_guild_events(token, tenant.guild_id)
+    discord_events = await get_guild_events(token, tenant.server.guild_id)
 
     # Build lookup maps
     discord_map = {str(e["id"]): e for e in discord_events}
@@ -162,13 +162,13 @@ async def sync_push_to_discord(
     if not log or not log.discord_event_id:
         raise HTTPException(status_code=404, detail="No Discord event ID in PostLog")
 
-    token = tenant.bot_token or PLATFORM_BOT_TOKEN
+    token = tenant.server.bot_token or PLATFORM_BOT_TOKEN
     if not token:
         raise HTTPException(status_code=400, detail="No Discord bot token configured for this tenant")
 
     success, error = await update_discord_event(
         token             = token,
-        guild_id          = tenant.guild_id,
+        guild_id          = tenant.server.guild_id,
         discord_event_id  = log.discord_event_id,
         name              = event.name,
         description       = event.description,
@@ -190,12 +190,12 @@ async def acknowledge_discord_event(
     Adds a Discord-only event to this tenant's PostLog as a manually-created
     record.
     """
-    token = tenant.bot_token or PLATFORM_BOT_TOKEN
+    token = tenant.server.bot_token or PLATFORM_BOT_TOKEN
     if not token:
         raise HTTPException(status_code=400, detail="No Discord bot token configured for this tenant")
 
     from services.discord_api import get_guild_events
-    discord_events = await get_guild_events(token, tenant.guild_id)
+    discord_events = await get_guild_events(token, tenant.server.guild_id)
     d_event = next((e for e in discord_events if str(e["id"]) == discord_event_id), None)
     if not d_event:
         raise HTTPException(status_code=404, detail="Discord event not found")
@@ -219,7 +219,7 @@ async def acknowledge_discord_event(
         event_name        = d_event.get("name", "Unknown"),
         occurrence_date   = occ_date,
         discord_event_id  = discord_event_id,
-        discord_guild_id  = tenant.guild_id,
+        discord_guild_id  = tenant.server.guild_id,
         posted_at_utc     = datetime.now(timezone.utc),
         posted_by         = "manual (acknowledged via sync)",
         status            = "posted",
@@ -256,13 +256,13 @@ async def sync_push_by_log(
     if not event:
         raise HTTPException(status_code=404, detail="Event definition not found")
 
-    token = tenant.bot_token or PLATFORM_BOT_TOKEN
+    token = tenant.server.bot_token or PLATFORM_BOT_TOKEN
     if not token:
         raise HTTPException(status_code=400, detail="No Discord bot token configured for this tenant")
 
     success, error = await update_discord_event(
         token             = token,
-        guild_id          = tenant.guild_id,
+        guild_id          = tenant.server.guild_id,
         discord_event_id  = log.discord_event_id,
         name              = event.name,
         description       = event.description,
