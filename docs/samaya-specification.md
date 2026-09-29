@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.17.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.18.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -885,3 +885,128 @@ A thin strip on `events.html` (`#lastActivityMarquee`), under the masthead's inf
 - Any change to the `UserTenant`/`is_superadmin` access-control model itself, or to what any of the three roles can actually do server-side — §38.6's two-tier model is a UI visibility simplification only.
 - Granular (more than two-tier) UI role distinctions — explicitly deferred per the user's own stated assumption that this deployment doesn't have enough distinct admins to warrant it yet.
 - A live re-fetch of Discord's actual current channel/role list on every Discord Config page load — the accordion (§38.5) shows this app's own stored config, exactly as the old single-tenant page already did.
+
+## 39. Public Status/Kind Legend
+
+**Status:** Implemented.
+
+**Problem.** §37 gave events and announcements consistent kind badges (📅/📢) and a standardized six-value status vocabulary (§"Standardize the list of statuses" work), but a first-time visitor to the public events page had no way to learn what "Scheduled" vs. "Announced," or the gray/green/blue/red colors, actually mean without asking someone.
+
+**Implementation.** A legend card (`#statusLegend`, `renderLegend()` in `events.html`) is the first thing in `<main>` — above the "Subscribe to stay up to date" card, the last-activity marquee, and the event list itself, satisfying "at least above-the-fold, if not first on the page." It renders three rows explaining the 📅 Event / 📢 Announcement / 🌐 Kingdom-wide badges, followed by one row per entry in `STATUS_META` (now carrying a `desc` string alongside its `text`/`color`), each shown as the real `pfLabel()` pill next to a one-line plain-English explanation. Deliberately generated from `STATUS_META`/`eventKindBadge()`/`announcementKindBadge()`/`scopeBadge()` — the same functions the event rows below it call — rather than a second hand-written copy of the same six statuses, so the legend cannot drift out of sync with what the page actually shows.
+
+### 39.1 Out of Scope
+
+- A dismiss/collapse control for returning visitors — the legend is short (nine rows, wraps to a few lines on mobile) and is not judged intrusive enough to warrant persisted collapsed state.
+- Per-alliance customization of the legend's wording — the status vocabulary is deliberately fixed and shared across every alliance (§"Standardize" work); a legend that could say different things for different alliances would undermine that.
+
+## 40. Feedback Form (Proposed)
+
+**Status:** Spec only — not yet implemented. Written at the same time as §41–43, which share its underlying storage and public listing page (§43); implement together.
+
+**Problem.** There is currently no channel for a community member browsing the public events page to tell the alliance/kingdom leadership "this is confusing," "it would help if X existed," or any other general feedback about Samaya itself — as opposed to a specific event or announcement being wrong (§42) or a new one being wanted (§41).
+
+**Design.** A general-purpose feedback form, reachable from the public tickets page (§43) via a "+ Submit Feedback" button — not tied to any specific event/announcement row. Fields:
+
+- **Category** (select): `Bug` / `Suggestion` / `Other` — stored as `Ticket.kind = 'feedback'` with `error_type` (reused column name, see §42) holding the category for a feedback-kind ticket.
+- **Title** (short text, required, ~120 char limit) — becomes the ticket's headline on the public board.
+- **Description** (textarea, required, same ~2000-char ceiling `Announcement.body_markdown` already uses, for consistency) — the actual feedback.
+- **Contact** (optional free text — Discord handle or email) — so leadership can follow up; never shown on the public board, admin-only (see §43.3's admin surface).
+
+Submission posts to `POST /api/tickets` (§43.1) with `kind='feedback'`, no `tenant_id` (general feedback isn't alliance-scoped), and no `related_occurrence_id`/`related_announcement_id`. On success, the visitor is shown their new ticket on the public board (§43) so they can immediately upvote-confirm it or watch it move through triage — the same "you get to see where it landed" pattern §42's error report gives.
+
+### 40.1 Out of Scope
+
+- Any reply/notification mechanism back to the submitter (e.g. emailing them when status changes) — `Ticket.submitter_contact` is stored for a human to read and manually reach out if they choose, not wired to `services/notifications.py`.
+- Authenticated/attributed feedback (tying a ticket to a `User` row) — the public page has no login, and requiring one would defeat the point of a low-friction feedback channel.
+
+## 41. Event/Announcement Request Form (Proposed)
+
+**Status:** Spec only — not yet implemented. Shares storage/listing with §40/§43; implement together.
+
+**Problem.** A community member (or an alliance leader without admin access) currently has no structured way to propose a new recurring event or a one-off announcement — it happens ad hoc, over Discord DMs or in a general chat channel, with no record and no way for other members to signal "yes, we want this too."
+
+**Design.** A request form, reachable from the public tickets page (§43) via a "+ Request an Event or Announcement" button. Fields:
+
+- **Request type** (select): `Event` / `Announcement` — stored as `Ticket.kind = 'event_request'` or `'announcement_request'`.
+- **Alliance** (select, populated from the existing public `GET /api/alliances`, plus a `Kingdom-wide / not sure` option) — stored as `Ticket.tenant_id` when a specific alliance is picked, `null` for kingdom-wide-or-unsure. Purely informational at this stage; it does **not** grant the requester any access or pre-fill an actual `EventDefinition`'s `scope`.
+- **Proposed name** (short text, required) — what the event/announcement should be called.
+- **Proposed timing** (free text, optional — deliberately not a real date/time picker bound to `EventDefinition`'s recurrence model, since a request is a suggestion, not a finished spec an admin can just save) — e.g. "every Saturday evening" or "one-time, sometime next week."
+- **Details** (textarea, required) — what it is, why it matters, anything an admin needs to actually build it.
+- **Contact** (optional, same as §40).
+
+Submission posts to `POST /api/tickets` with the corresponding `kind` and the fields above folded into `description` (the timing/name/details are concatenated into one stored description with light labeling, rather than three separate DB columns, since nothing downstream needs to query them independently — an admin reads the ticket and manually creates the real `EventDefinition`/`Announcement` through the existing admin UI if they approve it).
+
+### 41.1 Out of Scope
+
+- Any automatic creation of an `EventDefinition` or `Announcement` from an approved request — this form produces a ticket for a human admin to read and act on manually through the existing admin console (§"Events"/"Announcements" tabs), exactly like every other admin-created row. Auto-materializing unreviewed community input into a real recurring Discord-posting event is a moderation risk this spec deliberately avoids.
+- Per-alliance approval routing (e.g. only that alliance's owner/coordinator sees requests tagged to their alliance) — every ticket is visible to every admin on the shared Access & Platform-adjacent triage view (§43.3), same as Audit Log's kingdom-wide visibility model (§31.1).
+
+## 42. Error-Flag Button on Events and Announcements (Proposed)
+
+**Status:** Spec only — not yet implemented. Shares storage/listing with §40/§41/§43; implement together.
+
+**Problem.** Event details are admin-typed (times, channels, descriptions) and Discord posting has its own failure modes (§30's retry-failed-targets exists precisely because delivery can fail) — a member who spots something wrong ("this says Tuesday but it's actually Wednesday," "wrong channel," "this posted twice") currently has no way to flag it from the page where they noticed it.
+
+**Design.** Each event and announcement row on the public events page (`events.html`'s per-row card, §37) gets a small "⚑ Report an issue" affordance — an icon-button in the row's meta line, next to the existing 🔔 notify badge, not a full-width button, so it doesn't compete visually with the row's actual content. Clicking it opens a modal (same X-close/Escape convention as every other modal on this page, §"all modals closeable") with:
+
+- **Error type** (select), the values chosen to cover what's actually observable from a public, unauthenticated page: `Wrong date or time` / `Wrong channel` / `Duplicate posting` / `Didn't happen as scheduled` / `Other`. Stored in `Ticket.error_type`.
+- **Description** (textarea, required) — free-text explanation, same length ceiling as §40.
+- **Contact** (optional, same as §40).
+
+The modal is pre-scoped to the row it was opened from — no event/announcement picker — and submission posts to `POST /api/tickets` with `kind='error'`, `tenant_id` set to that row's owning alliance, and `related_occurrence_id` or `related_announcement_id` set to that row's id (the two are mutually exclusive, matching the existing `kind: "event"`/`"kind": "announcement"` split §37 already introduced in the combined public feed). The ticket's public title (§43) is auto-derived as `"Issue: {event_or_announcement_name}"` rather than asked of the reporter, since the row itself already establishes what the report is about.
+
+### 42.1 Out of Scope
+
+- Any automatic action on the underlying `Occurrence`/`Announcement` (e.g. auto-cancelling on N reports) — an error flag only ever produces a ticket for an admin to read; every existing admin action (edit, cancel, retry) remains manual and unchanged.
+- Rate-limiting or deduplicating repeated reports of the same underlying issue beyond what §43.2's per-voter upvote mechanism already provides — a second visitor hitting the same error is expected to upvote the existing ticket (the modal could eventually deep-link to "an issue like this may already be reported," but that lookup/matching UI is left for a future iteration, not this spec).
+
+## 43. Public Tickets Page with Upvoting (Proposed)
+
+**Status:** Spec only — not yet implemented. This is the shared backend and public listing page for §40–42's three submission forms; none of those forms are useful without it, so all four sections ship together.
+
+**Problem.** §40–42 each produce a piece of community input, but without a shared, visible destination there is no way for the community to see that their feedback landed anywhere, or to signal which of several open issues/requests matter most — every report currently either goes nowhere or has to be manually triaged over Discord with no visible record.
+
+### 43.1 Data Model
+
+A new `Ticket` table (`app/models/db.py`, its own section following the existing "grouped by which phase built it" convention):
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | PK | |
+| `kind` | `CheckConstraint`: `feedback` / `event_request` / `announcement_request` / `error` | |
+| `error_type` | nullable text | error-report subtype (§42) or feedback category (§40); unused for request kinds |
+| `title` | text | shown on the public board; auto-derived for `error` (§42), submitter-typed for the other three |
+| `description` | text, same ~2000-char ceiling as `Announcement.body_markdown` | |
+| `tenant_id` | nullable FK → `tenants.id` | null = kingdom-wide/general |
+| `related_occurrence_id` | nullable FK → `occurrences.id` | `error` kind only, mutually exclusive with the next column |
+| `related_announcement_id` | nullable FK → `announcements.id` | `error` kind only |
+| `submitter_contact` | nullable text | admin-visible only, never rendered on the public board |
+| `status` | `CheckConstraint`: `open` / `planned` / `in_progress` / `done` / `declined` | admin-managed triage state, default `open` |
+| `upvote_count` | integer, default `1` | denormalized cache of `TicketVote` rows, incremented/decremented alongside vote writes rather than `COUNT()`-ed on every page load |
+| `created_at` / `updated_at` | `DateTime(timezone=True)` | `ensure_utc()` conventions apply, as everywhere else in this codebase |
+
+A second table, `TicketVote` (`ticket_id` FK, `voter_key` text, `UniqueConstraint(ticket_id, voter_key)`), backs the upvote mechanism below. No `User` FK anywhere in either table — this is an unauthenticated, public-facing feature by design, same trust level as the events page itself.
+
+### 43.2 Anonymous Upvoting
+
+The public page has no login, so "one vote per person" is approximated rather than guaranteed, the same tradeoff every anonymous-upvote system on the open web makes:
+
+- On first visit to `/feedback`, the client generates a random UUID and stores it in `localStorage` (`samaya_voter_id`) — sent as an `X-Voter-Id` header on every vote request. This is a per-browser token, not an identity.
+- `POST /api/tickets/{id}/vote` upserts a `TicketVote(ticket_id, voter_key=hash(X-Voter-Id + server-side pepper))` row (hashed so the raw client-supplied UUID is never stored verbatim) and increments `upvote_count`; calling it again for the same ticket/voter pair deletes the row instead and decrements (a toggle, not an accumulator) — the vote button on `/feedback` reflects this as filled/unfilled per ticket, from a `GET /api/tickets` response that includes each ticket's `voted_by_me` boolean when the request carries a recognized `X-Voter-Id`.
+- Clearing browser storage or using another browser resets a visitor's vote weight to zero on their next vote — an accepted, disclosed limitation (mentioned in `/feedback`'s own `<details class="about-page">`-style footnote, matching §38.8's admin convention), not a bug to engineer around with IP tracking or fingerprinting.
+
+### 43.3 Public Board and Admin Triage
+
+- **Public**: a new standalone page, `static/feedback.html`, served by a new public route at `/feedback` (mirroring `events.html`/`ics.py`'s existing pattern of a public, unauthenticated, no-shared-JS page — §22's architectural precedent), listing every non-`declined` ticket sorted by `upvote_count` descending, each row showing its kind badge (reusing §37/§39's badge pattern — a fourth/fifth/sixth color for feedback/request/error kinds), title, description, status badge, relative "reported N ago" time, and the upvote button/count. `error`-kind tickets additionally link back to the event/announcement they reference (by name, not by admin-only id). `submitter_contact` is never included in this endpoint's public response shape.
+- **Admin**: a new `routers/admin/tickets.py` (`GET /api/tickets` full-detail including `submitter_contact`, `PATCH /api/tickets/{id}` for `status` only) behind `require_not_viewer` (a viewer can see the same triage list everyone with tenant access can, per the existing viewer-role convention of §31.3, but cannot change `status`) and a new "Tickets" admin tab, listing every ticket kingdom-wide (no per-alliance filter — a small enough volume, and cross-alliance visibility is the point, same reasoning as Audit Log's §31.1 kingdom-wide scope) with a status dropdown per row. Changing status does not trigger any Discord post, email, or other notification (§40.1) — it only updates what the public board shows.
+
+### 43.4 Migration
+
+A new hand-written, idempotent migration script (`migrate_add_tickets.py`, same no-Alembic convention as every prior schema change) creates `tickets` and `ticket_votes`.
+
+### 43.5 Out of Scope
+
+- Comments/discussion threads on a ticket — upvoting is the only interaction the public board offers; richer discussion is left to the alliance's existing Discord channels.
+- Merging duplicate tickets, or any admin tool beyond the status dropdown — an admin who spots duplicates handles it by setting the weaker one to `declined` with (informally, over Discord) a pointer to the surviving ticket; no in-app merge/redirect mechanism.
+- Search or filtering on the public board beyond the fixed upvote-count sort — with the volume this deployment expects, a flat sorted list is legible without it; can be revisited if the ticket count grows enough to warrant it.
+- Any change to `services/notifications.py` (email) or Discord posting triggered by ticket activity — every notification path in this section is "a human reads the admin Tickets tab," not an automated alert.
