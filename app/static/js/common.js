@@ -309,6 +309,49 @@ function toast(msg, err) {
   setTimeout(() => t.classList.remove('show'), 3500);
 }
 
+// ── Remembered last-used Discord channel per tenant (spec §29) ──────
+// Coordinators post to the same channel for a given alliance almost every
+// time — a brand-new target row (Events or Announcements) defaults to
+// whatever channel was last picked for that tenant, rather than forcing
+// a fresh "— none —" pick on every single row. Per-browser only
+// (localStorage), never sent to the server, and never overrides an
+// explicit channelId passed in for an edit/duplicate — callers only
+// consult this when there's no real value to prefill with.
+const LAST_CHANNEL_KEY = 'samaya_last_channels';
+
+function getLastChannelForTenant(tenantSlug) {
+  try {
+    const map = JSON.parse(localStorage.getItem(LAST_CHANNEL_KEY) || '{}');
+    return map[tenantSlug] || null;
+  } catch (e) { return null; }
+}
+
+function setLastChannelForTenant(tenantSlug, channelId) {
+  if (!tenantSlug || !channelId) return;
+  try {
+    const map = JSON.parse(localStorage.getItem(LAST_CHANNEL_KEY) || '{}');
+    map[tenantSlug] = channelId;
+    localStorage.setItem(LAST_CHANNEL_KEY, JSON.stringify(map));
+  } catch (e) { /* best-effort convenience only */ }
+}
+
+// ── Relative time ("in 20 minutes" / "3 hours ago") (spec §29) ──────
+// Shared by the Schedule/Dashboard occurrence badges and (via a thin
+// wrapper) the announcement composer's live preview (§28) — one
+// implementation rather than two copies of the same threshold math.
+function formatRelativeTime(date) {
+  const diffSeconds = Math.round((date.getTime() - Date.now()) / 1000);
+  const abs = Math.abs(diffSeconds);
+  const units = [['day', 86400], ['hour', 3600], ['minute', 60], ['second', 1]];
+  for (const [name, secs] of units) {
+    if (abs >= secs || name === 'second') {
+      const count = Math.max(1, Math.round(abs / secs));
+      const plural = count === 1 ? name : name + 's';
+      return diffSeconds >= 0 ? `in ${count} ${plural}` : `${count} ${plural} ago`;
+    }
+  }
+}
+
 // ── Emoji picker (spec §28) ──────────────────────────────────
 // Discord's *default* (standard Unicode) emoji set only — never a
 // server's custom/uploaded emoji, which would need a per-guild fetch and

@@ -2,9 +2,29 @@
 // modal, and row actions (duplicate, activate/deactivate, permanent delete).
 // Depends on common.js (api, toast, escapeHtml, TENANT_COLORS).
 
+// Cached so filterEventsTable() (spec §29) can re-render from a text
+// filter without a round trip — same pattern as ANNOUNCEMENTS/ANNOUNCEMENT_TEMPLATES.
+let EVENTS_CACHE = [];
+
+function filterEventsTable() {
+  renderEventsTable(EVENTS_CACHE);
+}
+
 async function loadEvents() {
   try {
     const events = await api('GET', '/api/events');
+    EVENTS_CACHE = events;
+    renderEventsTable(events);
+  } catch(e) { toast(e.message, true); }
+}
+
+function renderEventsTable(allEvents) {
+    const filterText = (document.getElementById('eventsFilterInput')?.value || '').trim().toLowerCase();
+    const events = filterText
+      ? allEvents.filter(e =>
+          e.name.toLowerCase().includes(filterText) ||
+          tenantName(e.owning_tenant_id).toLowerCase().includes(filterText))
+      : allEvents;
     const tbody = document.getElementById('eventsBody');
     const tbodyLead = document.getElementById('eventsBodyLeadership');
     if (!events.length) {
@@ -70,7 +90,6 @@ async function loadEvents() {
     tbodyLead.innerHTML = leadership.length
       ? leadership.map(buildRow).join('')
       : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="8" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
-  } catch(e) { toast(e.message, true); }
 }
 
 function tenantName(id) {
@@ -275,7 +294,11 @@ function addEventTargetRow(tenantSlug, channelId, roleId) {
   list.appendChild(row);
   const select = row.querySelector('.target-tenant');
   select.addEventListener('change', () => populateEventTargetFields(row, select.value));
-  populateEventTargetFields(row, tenantSlug || select.value, channelId, roleId);
+  // channelId is only passed for a real stored target (edit/duplicate) —
+  // a fresh row has none, so default to that tenant's last-used channel
+  // (spec §29), same convention as the announcement composer.
+  const initialTenantSlug = tenantSlug || select.value;
+  populateEventTargetFields(row, initialTenantSlug, channelId || getLastChannelForTenant(initialTenantSlug), roleId);
 }
 
 async function populateEventTargetFields(row, tenantSlug, channelId, roleId) {
@@ -294,6 +317,8 @@ async function populateEventTargetFields(row, tenantSlug, channelId, roleId) {
     fillSelect(roleSelect, roles.map(r => ({ value: r.id, label: '@' + r.name })), roleId);
     chanSelect.disabled = false;
     roleSelect.disabled = false;
+    chanSelect.addEventListener('change', () => setLastChannelForTenant(tenantSlug, chanSelect.value));
+    if (chanSelect.value) setLastChannelForTenant(tenantSlug, chanSelect.value);
   } catch (e) {
     chanSelect.style.display = 'none';
     roleSelect.style.display = 'none';

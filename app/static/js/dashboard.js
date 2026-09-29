@@ -20,28 +20,48 @@ async function loadDashboard() {
       : '—';
   } catch(e) { toast(e.message, true); }
 
-  // Today's events
+  // Today's events, plus an Upcoming (next 48h) window (spec §29) — "Today"
+  // goes blank by evening even when something's happening early tomorrow,
+  // so a coordinator checking in the night before had nothing to look at.
   try {
     const occs = await api('GET', '/api/occurrences');
     const today = new Date().toISOString().slice(0,10);
+    const now = new Date();
     const todayOccs = occs.filter(o => o.occurrence_date === today);
-    const el = document.getElementById('todayEvents');
-    if (!todayOccs.length) {
-      el.innerHTML = '<p style="color:var(--muted)">No events scheduled for today.</p>';
-      return;
-    }
+    const upcomingOccs = occs
+      .filter(o => {
+        const start = new Date(o.start_datetime_utc);
+        const hoursAhead = (start - now) / 3600000;
+        return o.occurrence_date !== today && hoursAhead > 0 && hoursAhead <= 48;
+      })
+      .sort((a, b) => new Date(a.start_datetime_utc) - new Date(b.start_datetime_utc));
+
     const statusColor = { posted: 'pf-m-green', active: 'pf-m-blue', completed: 'pf-m-grey', cancelled: 'pf-m-red', pending: 'pf-m-grey' };
-    el.innerHTML = todayOccs.map(o => `
+    function occurrenceCard(o) {
+      return `
       <div class="pf-v6-c-card pf-v6-u-mb-sm">
-        <div class="pf-v6-c-card__body" style="display:flex;align-items:center;gap:12px">
+        <div class="pf-v6-c-card__body" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           ${o.scope === 'kingdom-wide' ? '<span title="Kingdom-wide">🌐</span> ' : ''}
           <strong>${escapeHtml(o.event_name)}</strong>${o.leadership_only ? ' <span title="Leadership only">👑</span>' : ' <span title="Alliance">🛡️</span>'}
           <span style="color:var(--muted)">${fmtTime(o.start_datetime_utc)}</span>
+          <span style="color:var(--muted);font-size:0.85em">${formatRelativeTime(new Date(o.start_datetime_utc))}</span>
           <span style="color:var(--muted)">${escapeHtml(o.discord_channel)}</span>
           ${pfLabel(escapeHtml(o.post_status), statusColor[o.post_status] || 'pf-m-grey')}
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }
+
+    const todayEl = document.getElementById('todayEvents');
+    todayEl.innerHTML = todayOccs.length
+      ? todayOccs.map(occurrenceCard).join('')
+      : '<p style="color:var(--muted)">No events scheduled for today.</p>';
+
+    const upcomingEl = document.getElementById('upcomingEvents');
+    if (upcomingEl) {
+      upcomingEl.innerHTML = upcomingOccs.length
+        ? upcomingOccs.map(occurrenceCard).join('')
+        : '<p style="color:var(--muted)">Nothing else in the next 48 hours.</p>';
+    }
   } catch(e) {}
 }
 

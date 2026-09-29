@@ -109,18 +109,9 @@ function formatDiscordAbsolutePreview(date) {
 }
 
 function formatDiscordRelativePreview(date) {
-  const diffSeconds = Math.round((date.getTime() - Date.now()) / 1000);
-  const abs = Math.abs(diffSeconds);
-  const units = [
-    ['day', 86400], ['hour', 3600], ['minute', 60], ['second', 1],
-  ];
-  for (const [name, secs] of units) {
-    if (abs >= secs || name === 'second') {
-      const count = Math.max(1, Math.round(abs / secs));
-      const plural = count === 1 ? name : name + 's';
-      return (diffSeconds >= 0 ? `in ${count} ${plural}` : `${count} ${plural} ago`) + ' (preview)';
-    }
-  }
+  // Thin wrapper over common.js's shared formatRelativeTime() (spec §29)
+  // — this file just adds the "(preview)" qualifier the composer needs.
+  return formatRelativeTime(date) + ' (preview)';
 }
 
 function clientRenderPlaceholders(text, { allianceName, kingdomName, scheduledFor, eventOffsetMinutes }) {
@@ -506,7 +497,11 @@ function addAnnouncementTargetRow(tenantSlug, channelId) {
     refreshPreviewTenantOptions('aPreviewTenant', 'aTargetsList');
     renderAnnouncementPreview();
   });
-  populateAnnouncementTargetChannels(row, tenantSlug || select.value, channelId);
+  // channelId is only ever passed explicitly for a real stored target
+  // (editing/duplicating an announcement) — a brand-new row has none, so
+  // fall back to whatever channel was last used for this tenant (spec §29).
+  const initialTenantSlug = tenantSlug || select.value;
+  populateAnnouncementTargetChannels(row, initialTenantSlug, channelId || getLastChannelForTenant(initialTenantSlug));
   refreshPreviewTenantOptions('aPreviewTenant', 'aTargetsList');
 }
 
@@ -521,12 +516,30 @@ async function populateAnnouncementTargetChannels(row, tenantSlug, channelId) {
     const channels = await api('GET', '/api/discord/channels', null, false, tenantSlug);
     fillSelect(select, channels.map(c => ({ value: c.id, label: '#' + c.name })), channelId);
     select.disabled = false;
+    select.addEventListener('change', () => setLastChannelForTenant(tenantSlug, select.value));
+    if (select.value) setLastChannelForTenant(tenantSlug, select.value);
   } catch (e) {
     select.style.display = 'none';
     fallback.style.display = '';
     fallback.value = channelId || '';
     toast(`Could not load Discord channels for ${tenantSlug} — enter the channel ID manually`, true);
   }
+}
+
+// "+ Add all alliances" (spec §29) — the one-click version of adding a
+// target row for every alliance not already targeted, since a kingdom-wide
+// announcement otherwise means picking tenant+channel one row at a time
+// for every alliance. Each new row still defaults to that alliance's own
+// last-used channel (or "— none —" if it's never been posted to before),
+// same as adding a single row would.
+function addAllAllianceTargets() {
+  const existingSlugs = Array.from(document.querySelectorAll('#aTargetsList .target-tenant')).map(s => s.value);
+  const missing = TENANTS.filter(t => !existingSlugs.includes(t.slug));
+  if (!missing.length) {
+    toast('Every alliance already has a target row');
+    return;
+  }
+  missing.forEach(t => addAnnouncementTargetRow(t.slug));
 }
 
 function announcementTargetChannelValue(row) {

@@ -222,6 +222,9 @@
 
   <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-sm">Today's Events</h2>
   <div id="todayEvents"><p style="color:var(--muted)">Loading…</p></div>
+
+  <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-sm pf-v6-u-mt-md">Upcoming (Next 48h)</h2>
+  <div id="upcomingEvents"><p style="color:var(--muted)">Loading…</p></div>
 </div>
 
 <!-- EVENTS -->
@@ -229,6 +232,7 @@
   <div class="pf-v6-l-flex pf-m-align-items-center pf-v6-u-mb-sm" style="gap:12px">
     <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Event Definitions</h2>
     <button class="pf-v6-c-button pf-m-primary" onclick="openEventModal()" title="Create a new recurring event definition. Check &quot;Leadership Only&quot; inside to make it a channel-notification-only event.">+ Add Event</button>
+    <input class="pf-v6-c-form-control pf-m-small" id="eventsFilterInput" placeholder="Filter by name or alliance…" style="max-width:240px;margin-left:auto" oninput="filterEventsTable()">
   </div>
   <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">🛡️ Alliance Events</h2>
   <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg" id="eventsTable">
@@ -304,6 +308,7 @@
 <div id="v-postlog" class="view">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-md">
     <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Post Log</h2>
+    <input class="pf-v6-c-form-control pf-m-small" id="postLogFilterInput" placeholder="Filter by event, poster, or status…" style="max-width:260px" oninput="filterPostLogTable()">
     <button onclick="exportPostLogCsv()" title="Download all PostLog entries as a CSV file." class="pf-v6-c-button pf-m-secondary pf-m-small">⬇ Export CSV</button>
   </div>
   <table class="pf-v6-c-table pf-m-grid-md">
@@ -694,7 +699,8 @@
               <div class="pf-v6-c-form__group-control">
                 <div id="aTargetsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
                 <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="addAnnouncementTargetRow()">+ Add another target</button>
-                <div class="pf-v6-c-form__helper-text">One row per alliance you want this posted to, with that alliance's Discord channel chosen from its own server.</div>
+                <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="addAllAllianceTargets()" title="Add one row per alliance that doesn't already have one">+ Add all alliances</button>
+                <div class="pf-v6-c-form__helper-text">One row per alliance you want this posted to, with that alliance's Discord channel chosen from its own server. New rows default to that alliance's last-used channel.</div>
               </div>
             </div>
           </div>

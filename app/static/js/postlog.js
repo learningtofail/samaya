@@ -23,9 +23,30 @@ async function exportPostLogCsv() {
   }
 }
 
+// Cached so filterPostLogTable() (spec §29) can re-render from a text
+// filter without a round trip.
+let POSTLOG_CACHE = [];
+
+function filterPostLogTable() {
+  renderPostLogTable(POSTLOG_CACHE);
+}
+
 async function loadPostLog() {
   try {
     const logs = await api('GET', '/api/post-log?limit=100');
+    POSTLOG_CACHE = logs;
+    renderPostLogTable(logs);
+  } catch(e) { toast(e.message, true); }
+}
+
+function renderPostLogTable(allLogs) {
+    const filterText = (document.getElementById('postLogFilterInput')?.value || '').trim().toLowerCase();
+    const logs = filterText
+      ? allLogs.filter(l =>
+          l.event_name.toLowerCase().includes(filterText) ||
+          (l.posted_by || '').toLowerCase().includes(filterText) ||
+          l.status.toLowerCase().includes(filterText))
+      : allLogs;
     const tbody = document.getElementById('logBody');
     if (!logs.length) {
       tbody.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">No posts yet.</td></tr>';
@@ -51,6 +72,5 @@ async function loadPostLog() {
         <td class="pf-v6-c-table__td" style="font-size:var(--fs-xs);color:var(--muted);font-family:monospace">${l.discord_event_id ? escapeHtml(l.discord_event_id.slice(0,20))+'…' : '—'}</td>
       </tr>`;
     }).join('');
-  } catch(e) { toast(e.message, true); }
 }
 
