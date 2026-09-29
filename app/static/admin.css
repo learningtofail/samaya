@@ -100,3 +100,13 @@
   .about-page-body h4 { font-size: var(--fs-sm); color: var(--text); margin: 10px 0 2px; }
   .about-page-body h4:first-child { margin-top: 0; }
   .about-page-body ul { margin: 2px 0 8px 20px; padding: 0; }
+
+  /* Every view header across the admin UI (Dashboard/Events/Schedule/
+     Access/.../Platform) uses this same PatternFly pf-l-flex +
+     space-between pattern for "title on the left, controls on the right".
+     None of those 13 usages ever set flex-wrap, so at narrow viewport
+     widths the right-hand control group (e.g. Access's alliance filter +
+     "+ Invite Coordinator" button) has nowhere to go and gets clipped off
+     the visible page instead of wrapping to its own line. One global rule
+     fixes every occurrence at once rather than patching each view. */
+  .pf-v6-l-flex.pf-m-justify-content-space-between { flex-wrap: wrap; row-gap: 8px; }
