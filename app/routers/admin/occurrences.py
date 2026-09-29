@@ -227,24 +227,14 @@ async def _post_to_one_tenant(db: AsyncSession, occ: Occurrence, event, target_t
     return {"tenant_slug": target_tenant.slug, "status": "posted", "discord_event_id": discord_id}
 
 
-@router.post("/api/occurrences/{occ_id}/post")
-async def post_occurrence(
-    db: AsyncSession = Depends(get_db),
-    occ_and_event: tuple = Depends(get_occurrence_with_event),
-    _: Tenant = Depends(require_not_viewer),
-):
-    occ, event = occ_and_event
-
-    now = datetime.now(timezone.utc)
-    start = ensure_utc(occ.start_datetime_utc)
-    if (start - now).total_seconds() < 900:
-        raise HTTPException(status_code=400, detail="Event starts in less than 15 minutes")
-
-    owning = await db.get(Tenant, event.owning_tenant_id)
-
-    # Kingdom-wide's automatic same-Kingdom fan-out — unchanged from
-    # before §20: every tenant sharing the owning tenant's Kingdom row,
-    # re-evaluated fresh on every post rather than a stored snapshot.
+async def _resolve_post_targets(db: AsyncSession, event, owning: Tenant) -> list[Tenant]:
+    """Every tenant this occurrence should be posted to: the kingdom-wide
+    automatic same-Kingdom fan-out (scope == 'kingdom-wide') plus any
+    explicit EventTarget rows (spec §20), deduplicated. Factored out of
+    post_occurrence (spec §50) so the daily auto-post job
+    (scheduler/auto_post.py) resolves targets identically to the manual
+    Post button, rather than a second, potentially-drifting copy of this
+    logic."""
     if event.scope == "kingdom-wide":
         kingdom_result = await db.execute(select(Tenant).where(Tenant.kingdom_id == owning.kingdom_id))
         base_targets = list(kingdom_result.scalars().all())
@@ -260,7 +250,24 @@ async def post_occurrence(
         .where(EventTarget.event_id == event.id)
     )
     seen_ids = {t.id for t in base_targets}
-    all_targets = base_targets + [t for t in explicit_result.scalars().all() if t.id not in seen_ids]
+    return base_targets + [t for t in explicit_result.scalars().all() if t.id not in seen_ids]
+
+
+@router.post("/api/occurrences/{occ_id}/post")
+async def post_occurrence(
+    db: AsyncSession = Depends(get_db),
+    occ_and_event: tuple = Depends(get_occurrence_with_event),
+    _: Tenant = Depends(require_not_viewer),
+):
+    occ, event = occ_and_event
+
+    now = datetime.now(timezone.utc)
+    start = ensure_utc(occ.start_datetime_utc)
+    if (start - now).total_seconds() < 900:
+        raise HTTPException(status_code=400, detail="Event starts in less than 15 minutes")
+
+    owning = await db.get(Tenant, event.owning_tenant_id)
+    all_targets = await _resolve_post_targets(db, event, owning)
 
     if len(all_targets) == 1:
         # Preserves the original single-target response shape/semantics

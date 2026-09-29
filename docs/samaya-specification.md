@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.25.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.26.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -1143,3 +1143,23 @@ No backend changes — this is a display-only combination of two already-existin
 
 - A combined single table/timeline mixing Events and Announcements row-for-row — kept as separate sections given how different their underlying shapes are (range vs. point-in-time, different action sets).
 - Showing anything other than `status == 'scheduled'` announcements here — posted/failed/cancelled ones remain a concern for the Announcements tab, not a forward-looking 28-day schedule.
+
+## 51. Daily Auto-Post Job
+
+**Status:** Implemented.
+
+**Problem.** Posting an occurrence to Discord was entirely manual: a coordinator had to check the "Post?" box (or leave the default unchecked, in which case nothing happened at all) and click "Post"/"Post Selected" for every upcoming occurrence, every day, across every alliance. Nothing acted on a coordinator's behalf even for the routine case of "this occurrence is coming up and definitely needs to go out."
+
+**Fix.** A fourth scheduler job, `scheduler/auto_post.py`'s `auto_post_upcoming_occurrences`, runs once daily at **UTC 16:00** — deliberately after regeneration's own UTC 00:00 slot, so a fresh day's occurrences are always in place first. For every `Occurrence` starting within the next **7 days** whose `post_status` isn't already `posted`/`cancelled`:
+
+- **Nothing on Discord yet** — posted normally, through the exact same target-resolution path the manual Post button uses. `post_occurrence`'s inline kingdom-wide-fan-out-plus-explicit-targets logic was factored out into `_resolve_post_targets(db, event, owning)` (`routers/admin/occurrences.py`) so the manual endpoint and this job can't drift on what "every target for this occurrence" means; `_post_to_one_tenant` itself (already a plain, non-FastAPI function) is reused as-is, targets and all — same PostLog-reservation-before-Discord-call race protection, same per-target independent success/failure.
+- **A matching Discord event already exists** (same name, start time within 15 minutes of what Samaya would have posted — `MATCH_TOLERANCE_MINUTES`) — this is a Discord Scheduled Event created directly, bypassing Samaya entirely. Rather than create a duplicate, the job records a `PostLog` row against the existing `discord_event_id` with no second Discord API call at all (`posted_by="system (auto-post, synced from Discord)"`).
+- **A same-named Discord event exists but its time doesn't match** — flagged, not overwritten: `Occurrence.post_status` is set to `'error'` and `status_detail` explains the conflict, surfacing via the Schedule page's existing `⚠` status-detail indicator (no new UI needed — this reuses the same field/rendering an ordinary posting failure already uses). The coordinator resolves it deliberately through the existing Discord Sync tooling (`routers/admin/discord_sync.py`) rather than the job guessing which side is "right."
+- **Skipped, not touched at all** — an occurrence whose `EventDefinition.active` is `False`; one starting in under 15 minutes (the same floor `post_occurrence` already enforces on the manual button, since something this imminent is better left to a coordinator's own judgment call); one outside the 7-day window; one already `posted`/`cancelled`.
+
+Deliberately **not** gated on the `post_to_discord` checkbox — that flag defaults to unchecked, so requiring it would just reintroduce the daily per-occurrence chore this job exists to remove. The checkbox (and the manual Post/Post Selected buttons) remain fully available on the Schedule page for anything a coordinator wants to handle by hand.
+
+### Out of Scope
+
+- Diffing an existing-but-matching Discord event's description/channel/cover-image against what Samaya would have posted — matching is judged on name + start time only; a finer-grained content diff is what the Discord Sync tab's own drift report already does for posted occurrences, and is not duplicated here.
+- Any change to the 15-minute-before-start cutoff, the 7-day window, or the 16:00 UTC run time being configurable per-tenant — all three are fixed constants for now (`WINDOW_DAYS`/`MIN_LEAD_TIME_SECONDS`/`MATCH_TOLERANCE_MINUTES` in `scheduler/auto_post.py`, the `CronTrigger(hour=16, minute=0, ...)` in `main.py`).

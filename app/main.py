@@ -18,6 +18,7 @@ from models import AsyncSessionLocal
 from scheduler.regeneration import regenerate_occurrences
 from scheduler.reminders import send_pre_event_reminders
 from scheduler.announcements import send_scheduled_announcements
+from scheduler.auto_post import auto_post_upcoming_occurrences
 from routers import events, admin, webhooks, ics, auth as auth_router, auth_pages
 
 logging.basicConfig(level=logging.INFO)
@@ -108,8 +109,22 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
     )
 
+    # Daily auto-post of upcoming occurrences (spec §51) — deliberately
+    # after regeneration's own UTC 00:00 slot (16:00 UTC), so a fresh
+    # day's regenerated occurrences are always in place before this job
+    # looks for anything to post.
+    scheduler.add_job(
+        auto_post_upcoming_occurrences,
+        CronTrigger(hour=16, minute=0, timezone="UTC"),
+        id="auto_post_upcoming_occurrences",
+        replace_existing=True,
+    )
+
     scheduler.start()
-    logger.info("Samaya scheduler started — daily regen at UTC 00:00, reminders and announcements every minute")
+    logger.info(
+        "Samaya scheduler started — daily regen at UTC 00:00, daily auto-post at UTC 16:00, "
+        "reminders and announcements every minute"
+    )
 
     yield
 

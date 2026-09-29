@@ -27,7 +27,7 @@ FastAPI app entrypoint. Owns: the startup check (`SECRET_KEY` + Discord OAuth
 credentials must be set — the app refuses to boot without them, the same
 fail-closed posture the old `ADMIN_API_KEY` check used before Phase 4 replaced
 it with real sessions), the `lifespan` context (creates tables, runs a catch-up
-regeneration per tenant if overdue, starts APScheduler's three jobs), the
+regeneration per tenant if overdue, starts APScheduler's four jobs), the
 validation-error handler, and wiring all routers/static mount together. Touch
 this for startup/shutdown behavior or to add a new top-level router — not for
 route logic itself.
@@ -74,7 +74,7 @@ route logic itself.
 
 ## `app/scheduler/` — background jobs (APScheduler, registered in `main.py`)
 
-Three genuinely separate jobs, one file each — this used to be one `jobs.py`
+Four genuinely separate jobs, one file each — this used to be one `jobs.py`
 until it grew past the point where that made sense (same reasoning as the
 `admin.py` split in `routers/admin/`). Every public function takes an
 optional `session_factory` (defaults to `models.AsyncSessionLocal`) — these
@@ -85,6 +85,7 @@ to point them at a test database instead of the real one.
 - `regeneration.py` — `regenerate_occurrences` (daily at UTC 00:00, or on-demand per-tenant from the admin "regenerate" button), rebuilds the `Occurrence` table from `EventDefinition` + recurrence rules
 - `reminders.py` — `send_pre_event_reminders` (per-minute)
 - `announcements.py` — `send_scheduled_announcements` (per-minute); independent per-`AnnouncementTarget` delivery, same resilience principle as kingdom-wide `PostLog` fan-out. Resolves `services/templates.py`'s six `{placeholder}`s in `body_markdown` per-target, right before `send_channel_message` — never earlier, since `{alliance_name}` depends on which target is being posted to and a recurring announcement's `{send_time}`/`{event_time}` must reflect that occurrence's own `scheduled_for`, not whichever one existed at creation (spec §27)
+- `auto_post.py` — `auto_post_upcoming_occurrences` (spec §51, daily at UTC 16:00 — deliberately after regeneration's own 00:00 slot); for every not-yet-posted/cancelled occurrence starting within 7 days: posts it via the same `_resolve_post_targets`/`_post_to_one_tenant` (`routers/admin/occurrences.py`) the manual Post button uses if nothing matching exists on Discord yet; quietly records a `PostLog` row without a second Discord API call if a same-named, same-time Discord event already exists (created directly, bypassing Samaya); or flags the occurrence (`post_status='error'`, `status_detail` explains why) without touching it if a same-named Discord event's time differs — never silently overwrites. Skips an occurrence whose `EventDefinition.active` is `False`, or that starts within 15 minutes (same floor `post_occurrence` enforces manually)
 
 ## `app/models/`
 
@@ -121,6 +122,7 @@ Organized by what's tested, not by router file:
 - `test_routes_public.py` — unauthenticated, tenant-scoped public routes (`events.py`, `ics.py`), including cross-tenant isolation
 - `test_routes_events.py` — admin event CRUD, `scope` field validation, kingdom-wide read visibility across tenants
 - `test_post_occurrence.py` — the Discord-posting race-condition/error-path tests, plus kingdom-wide fan-out (`TestKingdomWidePost`); monkeypatches `routers.admin.occurrences.create_discord_event` (patch target must match wherever a name is actually imported, not where it's defined)
+- `test_auto_post.py` (spec §51) — the daily 16:00 UTC auto-post job: posts when nothing conflicts, quietly records (no second Discord call) when a matching Discord event already exists, flags (`post_status='error'`, never posts) when a same-named Discord event's time differs, skips an inactive event/an occurrence starting within 15 minutes/one outside the 7-day window/one already terminal, and kingdom-wide fan-out to every tenant in the Kingdom. Monkeypatches `scheduler.auto_post.get_guild_events` and `routers.admin.occurrences.create_discord_event` (the latter because `_post_to_one_tenant`, imported by the job, still resolves that name in its own defining module)
 - `test_event_targets.py` — spec §20's explicit `EventTarget` rows: the API surface (create/patch/access-control), posting fan-out generalization, dedup against kingdom-wide's automatic fan-out, and notification-resolution isolation between targets
 - `test_auth.py` — session token round-trip/tamper rejection, `_claim_invite`'s atomic race guard, the full HTTP invite-claim round-trip (not just the unit-level function)
 - `test_auth_permissions.py` — the permission model itself: no-session→401, no-tenant-access→403, coordinator-vs-owner, kingdom-coordinator (an alliance owner does NOT automatically get this), superadmin-only tenant/kingdom CRUD. `TestViewerRole` (spec §31.3) covers every router where `get_current_tenant` was swapped for `require_not_viewer` (events/announcements/announcement_templates/occurrences/discord_sync/scheduler_control): a viewer passes every GET the same as a coordinator, but any mutating call 403s — including a nonexistent-row POST like `sync/mark-cancelled/999999`, which proves the permission dependency runs before the route body ever looks the row up
@@ -150,4 +152,4 @@ multipart-form endpoint in this repo.
 - A `kingdom-wide` event has exactly one `Occurrence` row but fans out to one independent `PostLog` row per `Tenant` in its `Kingdom` when posted — each tenant's Discord post succeeds, fails, or gets cancelled independently of the others (see `occurrences.py`'s `_post_to_one_tenant`)
 - Being an `owner` of one alliance does **not** imply kingdom coordinator access (the right to create/edit kingdom-wide events) — that's a separate `UserKingdom` grant, superadmin-issued only, by deliberate design
 - Scheduler jobs (`scheduler/*.py`) open their own DB sessions directly rather than through FastAPI's `get_db` — that's why they take an injectable `session_factory` parameter; a test calling one of these functions directly must pass a test session factory, or it will try to reach the real database
-- Single uvicorn worker only — APScheduler runs in-process in `main.py`'s lifespan; a second worker would double-run the daily regeneration and the two per-minute jobs
+- Single uvicorn worker only — APScheduler runs in-process in `main.py`'s lifespan; a second worker would double-run the two daily jobs and the two per-minute jobs
