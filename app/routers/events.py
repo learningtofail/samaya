@@ -256,13 +256,16 @@ async def list_events_all(db: AsyncSession = Depends(get_db)):
 
 
 async def _last_activity_for_tenants(db: AsyncSession, tenant_ids: list[int]) -> dict | None:
-    """Spec §38.9 — whichever is more recent between a `posted` PostLog
-    row (an event's Discord post) and a `posted` AnnouncementTarget (an
-    announcement's delivery to one specific alliance — deliberately the
-    per-target status, not the parent Announcement's aggregate status:
-    a multi-target announcement can succeed for one alliance and fail for
-    another, and this must never claim a message landed somewhere it
-    didn't)."""
+    """Spec §38.9 — whichever is more recent between a `posted`-or-
+    `completed` PostLog row (an event's Discord post — `completed` included
+    alongside `posted` so a finished event that Sync has since closed out,
+    per §44's "naturally completed" reconciliation, doesn't drop out of
+    "last activity" just because it's no longer literally mid-lifecycle)
+    and a `posted` AnnouncementTarget (an announcement's delivery to one
+    specific alliance — deliberately the per-target status, not the parent
+    Announcement's aggregate status: a multi-target announcement can
+    succeed for one alliance and fail for another, and this must never
+    claim a message landed somewhere it didn't)."""
     if not tenant_ids:
         return None
 
@@ -270,7 +273,7 @@ async def _last_activity_for_tenants(db: AsyncSession, tenant_ids: list[int]) ->
 
     log_result = await db.execute(
         select(PostLog)
-        .where(PostLog.tenant_id.in_(tenant_ids), PostLog.status == "posted")
+        .where(PostLog.tenant_id.in_(tenant_ids), PostLog.status.in_(("posted", "completed")))
         .order_by(PostLog.posted_at_utc.desc())
         .limit(1)
     )

@@ -370,10 +370,12 @@ async function loadAnnouncementTemplates() {
           + '<td class="pf-v6-c-table__td">' + escapeHtml(t.name) + (t.leadership_only ? ' <span title="Leadership only">👑</span>' : '') + '</td>'
           + '<td class="pf-v6-c-table__td">' + escapeHtml(t.title_template) + '</td>'
           + '<td class="pf-v6-c-table__td" style="color:var(--muted)">' + (t.event_offset_minutes ? t.event_offset_minutes + ' min' : '—') + '</td>'
-          + '<td class="pf-v6-c-table__td" style="display:flex;gap:6px;flex-wrap:wrap">'
+          + '<td class="pf-v6-c-table__td">'
+          + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
           + '<button class="pf-v6-c-button pf-m-primary pf-m-small" onclick="useTemplate(' + t.id + ')" title="Open a new announcement pre-filled from this template">Use</button>'
           + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="editTemplate(' + t.id + ')">Edit</button>'
           + '<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="deleteTemplate(' + t.id + ')">Delete</button>'
+          + '</div>'
           + '</td>'
           + '</tr>'
         ).join('')
@@ -539,7 +541,7 @@ async function loadAnnouncements() {
         + '<td class="pf-v6-c-table__td">' + recurringBadge + '</td>'
         + '<td class="pf-v6-c-table__td">' + announcementStatusBadgeAdmin(a.status) + '</td>'
         + '<td class="pf-v6-c-table__td">' + targetsHtml + '</td>'
-        + '<td class="pf-v6-c-table__td" style="display:flex;gap:6px;flex-wrap:wrap">' + [cancelBtn, retryBtn, deleteBtn, duplicateBtn].filter(Boolean).join('') + '</td>'
+        + '<td class="pf-v6-c-table__td"><div style="display:flex;gap:6px;flex-wrap:wrap">' + [cancelBtn, retryBtn, deleteBtn, duplicateBtn].filter(Boolean).join('') + '</div></td>'
         + '</tr>';
     }).join('');
   } catch (e) { toast(e.message, true); }

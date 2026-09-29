@@ -58,6 +58,14 @@ def _occurrence_dict(occ: Occurrence, ev: EventDefinition) -> dict:
         "duration_hours":     float(ev.duration_hours),
         "reminder_sent":      occ.reminder_sent,
         "leadership_only":    ev.leadership_only,
+        # Spec §44 — the admin-side "preview as it would look on Discord"
+        # modal (Dashboard/Schedule) needs the same two fields
+        # occurrences.py's own posting path already sends to Discord
+        # (description, resolved through the same placeholder set at
+        # preview time; cover_image_data verbatim) — previously omitted
+        # here since nothing read them off an Occurrence before.
+        "description":        ev.description,
+        "cover_image_data":   ev.cover_image_data or None,
     }
 
 def _log_dict(l: PostLog, ev: EventDefinition | None = None) -> dict:

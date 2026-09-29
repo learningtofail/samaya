@@ -66,11 +66,29 @@ async def discord_webhook(request: Request):
     if event_type == 1:
         return JSONResponse({"type": 1})
 
-    # Type — GUILD_SCHEDULED_EVENT_UPDATE
+    # Type — GUILD_SCHEDULED_EVENT_UPDATE / GUILD_SCHEDULED_EVENT_DELETE
+    #
+    # KNOWN DEAD CODE, kept only as a no-op safety net rather than deleted
+    # outright (see spec §45): these two branches, and the handlers below,
+    # can never actually run in production. Discord's "Interactions
+    # Endpoint URL" — what this route, its signature verification, and its
+    # PING handling above all exist for — only ever delivers Interaction
+    # objects (PING, application commands, message components, modal
+    # submits). GUILD_SCHEDULED_EVENT_UPDATE/_DELETE are Gateway dispatch
+    # events, which Discord only ever sends over a bot's persistent Gateway
+    # (WebSocket) connection — never as an HTTP POST to this or any other
+    # webhook URL. This app has no Gateway client (it's a stateless FastAPI
+    # service, not a connected bot process), so `data.get("t")` here will
+    # never actually equal either string; `handle_event_update`/
+    # `handle_event_delete` are unreachable. The practical consequence —
+    # PostLog never learns a Discord event finished or was deleted except
+    # through Samaya's own actions — is handled instead by
+    # routers/admin/discord_sync.py's read-only drift check, which derives
+    # "this occurrence has already ended" from Samaya's own schedule data
+    # rather than waiting on a push notification that was never coming.
     if data.get("t") == "GUILD_SCHEDULED_EVENT_UPDATE":
         await handle_event_update(data.get("d", {}))
 
-    # Type — GUILD_SCHEDULED_EVENT_DELETE
     if data.get("t") == "GUILD_SCHEDULED_EVENT_DELETE":
         await handle_event_delete(data.get("d", {}))
 

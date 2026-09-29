@@ -32,13 +32,14 @@ function renderSync(alliances) {
 
   const totals = alliances.reduce((acc, a) => {
     if (a.error) { acc.errors.push(a); return acc; }
-    acc.matched      += a.summary.matched;
-    acc.mismatched   += a.summary.mismatched;
-    acc.discord_only += a.summary.discord_only;
-    acc.postlog_only += a.summary.postlog_only;
-    acc.issues       += a.summary.issues;
+    acc.matched             += a.summary.matched;
+    acc.mismatched          += a.summary.mismatched;
+    acc.discord_only        += a.summary.discord_only;
+    acc.postlog_only        += a.summary.postlog_only;
+    acc.naturally_completed += a.summary.naturally_completed || 0;
+    acc.issues              += a.summary.issues;
     return acc;
-  }, {matched:0, mismatched:0, discord_only:0, postlog_only:0, issues:0, errors:[]});
+  }, {matched:0, mismatched:0, discord_only:0, postlog_only:0, naturally_completed:0, issues:0, errors:[]});
 
   updateSyncBadge(totals.issues);
 
@@ -49,6 +50,7 @@ function renderSync(alliances) {
   html += statCard('Mismatched', totals.mismatched, '#b45309');
   html += statCard('Discord Only', totals.discord_only, '#1d4ed8');
   html += statCard('PostLog Only', totals.postlog_only, '#991b1b');
+  html += statCard('Naturally Completed', totals.naturally_completed, '#166534');
   html += '</div>';
 
   if (totals.errors.length) {
@@ -94,7 +96,7 @@ function renderSync(alliances) {
 
     if (a.postlog_only.length) {
       html += '<h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">🔴 PostLog Only (' + a.postlog_only.length + ')' + tag + '</h2>';
-      html += '<p class="pf-v6-u-font-size-sm pf-v6-u-mb-sm" style="color:var(--pf-t--global--text--color--subtle)">In PostLog as posted but not found on Discord — may have been deleted directly in Discord.</p>';
+      html += '<p class="pf-v6-u-font-size-sm pf-v6-u-mb-sm" style="color:var(--pf-t--global--text--color--subtle)">In PostLog as posted but not found on Discord, and not yet due to have ended — likely deleted directly in Discord. (An event that simply finished shows up under Naturally Completed below instead.)</p>';
       html += '<table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg">';
       html += '<thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Event</th><th class="pf-v6-c-table__th">Date</th><th class="pf-v6-c-table__th">Discord ID</th><th class="pf-v6-c-table__th">Posted At</th><th class="pf-v6-c-table__th">Action</th></tr></thead><tbody class="pf-v6-c-table__tbody">';
       a.postlog_only.forEach(function(p) {
@@ -104,6 +106,31 @@ function renderSync(alliances) {
         html += '<td class="pf-v6-c-table__td" style="font-size:var(--fs-xs);font-family:monospace">' + escapeHtml(p.discord_event_id.slice(0,18)) + '…</td>';
         html += '<td class="pf-v6-c-table__td" style="font-size:var(--fs-sm)">' + (p.posted_at_utc ? p.posted_at_utc.slice(0,16).replace('T',' ') + ' UTC' : '—') + '</td>';
         html += '<td class="pf-v6-c-table__td"><button class="pf-v6-c-button pf-m-secondary pf-m-small" title="Mark this PostLog entry as cancelled — the Discord event no longer exists." onclick="syncMarkCancelled(' + p.post_log_id + ',\'' + a.tenant_slug + '\')">Mark Cancelled</button></td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    // Spec §44 — an event that simply ran its course: posted in PostLog,
+    // no longer listed on Discord (Discord stops surfacing a COMPLETED
+    // scheduled event fairly quickly, and this app has no way to be told
+    // that happened in real time — see _sync_discord_for_tenant's own
+    // comment), and Samaya's own schedule confirms it was already due to
+    // have ended. Shown separately from PostLog Only, in green rather
+    // than red, and deliberately left out of the "issues"/red badge count
+    // — this is the expected, unremarkable outcome, not a drift problem.
+    if (a.naturally_completed && a.naturally_completed.length) {
+      html += '<h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">✅ Naturally Completed (' + a.naturally_completed.length + ')' + tag + '</h2>';
+      html += '<p class="pf-v6-u-font-size-sm pf-v6-u-mb-sm" style="color:var(--pf-t--global--text--color--subtle)">These simply finished — Discord stops listing a scheduled event once it ends, which looks like "not found" but isn’t a deletion. Nothing to fix; mark them completed to clear them from this report.</p>';
+      html += '<table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg">';
+      html += '<thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Event</th><th class="pf-v6-c-table__th">Date</th><th class="pf-v6-c-table__th">Discord ID</th><th class="pf-v6-c-table__th">Posted At</th><th class="pf-v6-c-table__th">Action</th></tr></thead><tbody class="pf-v6-c-table__tbody">';
+      a.naturally_completed.forEach(function(p) {
+        html += '<tr class="pf-v6-c-table__tr">';
+        html += '<td class="pf-v6-c-table__td">' + escapeHtml(p.event_name) + '</td>';
+        html += '<td class="pf-v6-c-table__td">' + p.occurrence_date + '</td>';
+        html += '<td class="pf-v6-c-table__td" style="font-size:var(--fs-xs);font-family:monospace">' + escapeHtml(p.discord_event_id.slice(0,18)) + '…</td>';
+        html += '<td class="pf-v6-c-table__td" style="font-size:var(--fs-sm)">' + (p.posted_at_utc ? p.posted_at_utc.slice(0,16).replace('T',' ') + ' UTC' : '—') + '</td>';
+        html += '<td class="pf-v6-c-table__td"><button class="pf-v6-c-button pf-m-secondary pf-m-small" title="Mark this PostLog entry as completed and clear it from this report." onclick="syncMarkCompleted(' + p.post_log_id + ',\'' + a.tenant_slug + '\')">Mark Completed</button></td>';
         html += '</tr>';
       });
       html += '</tbody></table>';
@@ -186,6 +213,14 @@ async function syncMarkCancelled(postLogId, tenantSlug) {
   try {
     await api('POST', '/api/sync/mark-cancelled/' + postLogId, null, false, tenantSlug);
     toast('PostLog entry marked as cancelled');
+    loadSync();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function syncMarkCompleted(postLogId, tenantSlug) {
+  try {
+    await api('POST', '/api/sync/mark-completed/' + postLogId, null, false, tenantSlug);
+    toast('PostLog entry marked as completed');
     loadSync();
   } catch(e) { toast(e.message, true); }
 }

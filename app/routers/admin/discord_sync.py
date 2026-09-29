@@ -8,6 +8,8 @@ Everything here is scoped to the current tenant's own guild — for a
 kingdom-wide event, each tenant reconciles against its own independent
 PostLog row and its own guild, same as posting and cancelling do.
 """
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,11 +59,14 @@ async def _sync_discord_for_tenant(tenant: Tenant, db: AsyncSession, guild_cache
     ev_result = await db.execute(select(EventDefinition))
     event_defs = {e.id: e for e in ev_result.scalars().all()}
 
-    matched      = []
-    mismatched   = []
-    postlog_only = []
+    matched            = []
+    mismatched         = []
+    postlog_only       = []
+    naturally_completed = []
 
     postlog_discord_ids = set()
+
+    now = datetime.now(timezone.utc)
 
     for log in post_logs:
         if not log.discord_event_id:
@@ -71,14 +76,42 @@ async def _sync_discord_for_tenant(tenant: Tenant, db: AsyncSession, guild_cache
         postlog_discord_ids.add(discord_id)
 
         if discord_id not in discord_map:
-            # Posted in PostLog but not found on Discord
-            postlog_only.append({
+            # Posted in PostLog but not found on Discord. This is the
+            # expected, unremarkable outcome for any event that has simply
+            # already run its course — Discord's own "list scheduled
+            # events" response stops surfacing a COMPLETED event fairly
+            # quickly, and (see routers/webhooks.py's own docstring) this
+            # app has no way to be told that in real time: a Gateway
+            # dispatch event like GUILD_SCHEDULED_EVENT_UPDATE/_DELETE is
+            # only ever delivered over a bot's persistent Gateway
+            # connection, never to an HTTP "Interactions Endpoint URL" the
+            # way that file's handlers assumed — so those handlers can
+            # never actually fire, and PostLog.status is left stuck on
+            # "posted" forever for every event that finishes normally.
+            # Rather than keep reporting that as "may have been deleted"
+            # (which it almost never was), compute whether this occurrence
+            # was already due to have ended by now from Samaya's own
+            # schedule data and, if so, bucket it separately as an
+            # unremarkable, non-issue "naturally completed" row instead of
+            # a drift error.
+            ev = event_defs.get(log.event_id)
+            already_ended = False
+            if ev is not None:
+                start_dt = datetime.combine(log.occurrence_date, ev.start_time_utc, tzinfo=timezone.utc)
+                end_dt = start_dt + timedelta(hours=float(ev.duration_hours))
+                already_ended = end_dt <= now
+
+            entry = {
                 "post_log_id":      log.id,
                 "event_name":       log.event_name,
                 "occurrence_date":  str(log.occurrence_date),
                 "discord_event_id": discord_id,
                 "posted_at_utc":    log.posted_at_utc.isoformat() if log.posted_at_utc else None,
-            })
+            }
+            if already_ended:
+                naturally_completed.append(entry)
+            else:
+                postlog_only.append(entry)
             continue
 
         d_event = discord_map[discord_id]
@@ -138,16 +171,21 @@ async def _sync_discord_for_tenant(tenant: Tenant, db: AsyncSession, guild_cache
     return {
         "tenant_slug": tenant.slug, "tenant_name": tenant.name, "tenant_color": tenant.color,
         "summary": {
-            "matched":       len(matched),
-            "mismatched":    len(mismatched),
-            "discord_only":  len(discord_only),
-            "postlog_only":  len(postlog_only),
-            "issues":        len(mismatched) + len(postlog_only),
+            "matched":             len(matched),
+            "mismatched":          len(mismatched),
+            "discord_only":        len(discord_only),
+            "postlog_only":        len(postlog_only),
+            "naturally_completed": len(naturally_completed),
+            # naturally_completed is deliberately excluded — it's the
+            # expected outcome of an event finishing normally, not
+            # something a coordinator needs to act on.
+            "issues":              len(mismatched) + len(postlog_only),
         },
-        "matched":      matched,
-        "mismatched":   mismatched,
-        "discord_only": discord_only,
-        "postlog_only": postlog_only,
+        "matched":             matched,
+        "mismatched":          mismatched,
+        "discord_only":        discord_only,
+        "postlog_only":        postlog_only,
+        "naturally_completed": naturally_completed,
     }
 
 
@@ -309,5 +347,30 @@ async def sync_mark_cancelled(
         raise HTTPException(status_code=404, detail="PostLog entry not found")
     log.status        = "cancelled"
     log.status_detail = "Marked cancelled via sync — Discord event not found"
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/api/sync/mark-completed/{post_log_id}")
+async def sync_mark_completed(
+    post_log_id: int,
+    tenant: Tenant = Depends(require_not_viewer),
+    db: AsyncSession = Depends(get_db),
+):
+    """The fix action for the sync report's "naturally completed" bucket
+    (see _sync_discord_for_tenant's own comment) — a PostLog row Samaya has
+    already worked out is simply a finished event, not a deletion, gets
+    explicitly closed out to status='completed' here rather than sitting
+    on 'posted' forever. Once marked, it drops out of every future sync's
+    `WHERE status == "posted"` scan entirely, the same way mark-cancelled
+    already retires a genuinely-deleted row."""
+    log_result = await db.execute(
+        select(PostLog).where(PostLog.id == post_log_id, PostLog.tenant_id == tenant.id)
+    )
+    log = log_result.scalar_one_or_none()
+    if not log:
+        raise HTTPException(status_code=404, detail="PostLog entry not found")
+    log.status        = "completed"
+    log.status_detail = "Marked completed via sync — event's scheduled time has already passed"
     await db.commit()
     return {"status": "ok"}
