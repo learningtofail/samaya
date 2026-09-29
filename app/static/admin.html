@@ -154,7 +154,6 @@
       <span id="headerStatus">Kingshot Alliance Event Scheduler</span>
     </div>
     <div class="pf-v6-c-masthead__content">
-      <a href="#" id="tenantLink" class="header-link" onclick="openTenantModal();return false;" title="Which alliance's data you're viewing and editing — click to switch">Loading…</a>
       <a href="#" id="headerClock" class="header-link" onclick="openTimezoneModal();return false;" title="Current UTC time and your local time — click to change your time zone">Loading…</a>
       <form method="post" action="/auth/logout" style="margin:0">
         <button type="submit" class="pf-v6-c-button pf-m-secondary pf-m-small">Log out</button>
@@ -175,9 +174,8 @@
       <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('postlog',this)"><span class="pf-v6-c-tabs__item-text">Post Log</span></button></li>
       <li class="pf-v6-c-tabs__item" id="syncTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('sync',this)"><span class="pf-v6-c-tabs__item-text">Sync <span id="syncBadge" class="pf-v6-c-label pf-m-red pf-m-filled pf-m-compact" style="display:none;margin-inline-start:4px"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text" id="syncBadgeText">0</span></span></span></span></button></li>
       <li class="pf-v6-c-tabs__item" id="configTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('config',this)"><span class="pf-v6-c-tabs__item-text">Config</span></button></li>
-      <li class="pf-v6-c-tabs__item" id="accessTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('access',this)" title="Manage who has coordinator/owner access to this alliance"><span class="pf-v6-c-tabs__item-text">Access</span></button></li>
-      <li class="pf-v6-c-tabs__item" id="auditTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('audit',this)" title="Owner-only: who changed what, and when"><span class="pf-v6-c-tabs__item-text">Audit Log</span></button></li>
-      <li class="pf-v6-c-tabs__item" id="platformTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('platform',this)" title="Superadmin: manage Kingdoms and Tenants"><span class="pf-v6-c-tabs__item-text">Platform</span></button></li>
+      <li class="pf-v6-c-tabs__item" id="accessTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('access',this)" title="Superadmin: manage who has access, and the platform's kingdoms/alliances/servers/users"><span class="pf-v6-c-tabs__item-text">Access &amp; Platform</span></button></li>
+      <li class="pf-v6-c-tabs__item" id="auditTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('audit',this)" title="Superadmin-only: who changed what, and when"><span class="pf-v6-c-tabs__item-text">Audit Log</span></button></li>
     </ul>
   </div>
 
@@ -187,33 +185,16 @@
 
 <!-- DASHBOARD -->
 <div id="v-dashboard" class="view active">
-  <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-md">Dashboard</h2>
+  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-md">
+    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Dashboard</h2>
+    <div style="display:flex;align-items:center;gap:8px">
+      <label for="dashboardFilter" style="color:var(--muted);font-size:0.85em">Alliance:</label>
+      <select class="pf-v6-c-form-control pf-m-small" id="dashboardFilter" style="max-width:200px"></select>
+    </div>
+  </div>
 
-  <div class="pf-v6-l-gallery pf-m-gutter pf-v6-u-mb-md" style="--pf-v6-l-gallery--GridTemplateColumns--min: 200px">
-    <div class="pf-v6-c-card">
-      <div class="pf-v6-c-card__body">
-        <p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle);text-transform:uppercase;letter-spacing:.04em">Service</p>
-        <div id="st-service">—</div>
-      </div>
-    </div>
-    <div class="pf-v6-c-card">
-      <div class="pf-v6-c-card__body">
-        <p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle);text-transform:uppercase;letter-spacing:.04em">Discord</p>
-        <div id="st-discord">—</div>
-      </div>
-    </div>
-    <div class="pf-v6-c-card">
-      <div class="pf-v6-c-card__body">
-        <p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle);text-transform:uppercase;letter-spacing:.04em">Last Regeneration</p>
-        <div id="st-regen" class="pf-v6-u-font-size-sm">—</div>
-      </div>
-    </div>
-    <div class="pf-v6-c-card">
-      <div class="pf-v6-c-card__body">
-        <p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle);text-transform:uppercase;letter-spacing:.04em">Regen Result</p>
-        <div id="st-result">—</div>
-      </div>
-    </div>
+  <div class="pf-v6-c-card pf-v6-u-mb-md">
+    <div class="pf-v6-c-card__body" id="st-alliances"><p style="color:var(--muted)">Loading…</p></div>
   </div>
 
   <div id="syncSummaryCard" class="pf-v6-c-alert pf-m-warning pf-m-inline pf-v6-u-mb-md" style="display:none;cursor:pointer" onclick="showView('sync', document.querySelector('#syncTabItem .pf-v6-c-tabs__link'))">
@@ -236,6 +217,26 @@
   <div class="pf-v6-c-card">
     <div class="pf-v6-c-card__body" id="deliveryHealth"><p style="color:var(--muted)">Loading…</p></div>
   </div>
+
+  <details class="about-page">
+    <summary>About this page</summary>
+    <div class="about-page-body">
+      <h4>Alliance filter</h4>
+      <p>Shows every alliance you have access to at once by default. Narrow it to one alliance if you only want that alliance's status, events, and delivery numbers.</p>
+      <h4>Sections</h4>
+      <ul>
+        <li><strong>Status cards</strong> — whether each alliance's Discord bot is connected, and when its 28-day occurrence window last regenerated.</li>
+        <li><strong>Regenerate Now</strong> — rebuilds the occurrence window immediately instead of waiting for the automatic daily run at UTC 00:00. With "All" selected, this runs once per accessible alliance.</li>
+        <li><strong>Today's Events / Upcoming (Next 48h)</strong> — a quick look at what's coming up, pulled from the Schedule tab's own data.</li>
+        <li><strong>Delivery Health</strong> — a rolling 7-day count of successful vs. failed Discord posts, split between announcements and event posts, per alliance.</li>
+      </ul>
+      <h4>Known limitations</h4>
+      <ul>
+        <li>Delivery Health only looks back 7 days — older failures won't show here (check Post Log or Sync for history).</li>
+        <li>The sync-issue banner above only appears after you've run a Sync check at least once this session.</li>
+      </ul>
+    </div>
+  </details>
 </div>
 
 <!-- EVENTS -->
@@ -246,7 +247,8 @@
     <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="exportEventsCsv()" title="Download this alliance's own alliance-scope events as CSV">Export CSV</button>
     <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="document.getElementById('eventsImportFile').click()" title="Bulk-create alliance-scope events from a CSV in the same column format as Export CSV">Import CSV</button>
     <input type="file" id="eventsImportFile" accept=".csv" style="display:none" onchange="importEventsCsv(this.files[0])">
-    <input class="pf-v6-c-form-control pf-m-small" id="eventsFilterInput" placeholder="Filter by name or alliance…" style="max-width:240px;margin-left:auto" oninput="filterEventsTable()">
+    <select class="pf-v6-c-form-control pf-m-small" id="eventsFilter" style="max-width:180px;margin-left:auto"></select>
+    <input class="pf-v6-c-form-control pf-m-small" id="eventsFilterInput" placeholder="Filter by name or alliance…" style="max-width:240px">
   </div>
   <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">🛡️ Alliance Events</h2>
   <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg" id="eventsTable">
@@ -264,13 +266,35 @@
     </tr></thead>
     <tbody id="eventsBodyLeadership"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="8" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
   </table>
+
+  <details class="about-page">
+    <summary>About this page</summary>
+    <div class="about-page-body">
+      <h4>Alliance filter and text filter</h4>
+      <p>The dropdown narrows the list to one alliance; the text box filters by event name or alliance name within whatever the dropdown currently shows.</p>
+      <h4>Sections</h4>
+      <ul>
+        <li><strong>+ Add Event</strong> — create a new recurring event definition. In combined ("All") view, you'll be asked which alliance owns it.</li>
+        <li><strong>Export/Import CSV</strong> — bulk edit alliance-scope events offline. Both only work against one specific alliance, never "All" — pick one in the dropdown first.</li>
+        <li><strong>🛡️ Alliance Events</strong> vs. <strong>👑 Leadership Notifications</strong> — the latter posts a channel message only, with no Discord Scheduled Event and no public-calendar entry.</li>
+      </ul>
+      <h4>Known limitations</h4>
+      <ul>
+        <li>A kingdom-wide event's Alliance column shows its owning alliance only — it still fans out to every alliance in that kingdom when posted.</li>
+      </ul>
+    </div>
+  </details>
 </div>
 
 <!-- SCHEDULE -->
 <div id="v-schedule" class="view">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
     <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">28-Day Schedule</h2>
-    <button class="pf-v6-c-button pf-m-secondary" onclick="loadSchedule()" title="Reload the 28-day occurrence list from the database.">Refresh</button>
+    <div style="display:flex;align-items:center;gap:8px">
+      <label for="scheduleFilter" style="color:var(--muted);font-size:0.85em">Alliance:</label>
+      <select class="pf-v6-c-form-control pf-m-small" id="scheduleFilter" style="max-width:180px"></select>
+      <button class="pf-v6-c-button pf-m-secondary" onclick="loadSchedule()" title="Reload the 28-day occurrence list from the database.">Refresh</button>
+    </div>
   </div>
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
     <h2 class="pf-v6-c-title pf-m-md" style="margin:0">🛡️ Alliance Events</h2>
@@ -297,6 +321,24 @@
       <tbody id="schedBodyLeadership"></tbody>
     </table>
   </div>
+
+  <details class="about-page">
+    <summary>About this page</summary>
+    <div class="about-page-body">
+      <h4>Alliance filter</h4>
+      <p>Shared with the Gantt tab below — they're two views of the same 28-day occurrence window, so narrowing one narrows the other.</p>
+      <h4>Sections</h4>
+      <ul>
+        <li><strong>Post?</strong> checkbox — whether this occurrence will actually go to Discord; unchecking it skips that one occurrence without deleting anything.</li>
+        <li><strong>Post Selected to Discord</strong> — posts every checked row in that section (Alliance or Leadership) one at a time.</li>
+        <li><strong>Cancel</strong> (on a posted row) — removes the Discord Scheduled Event; the occurrence itself stays and can be posted again later.</li>
+      </ul>
+      <h4>Known limitations</h4>
+      <ul>
+        <li>This window only ever covers the next 28 days — it's rebuilt from Events daily, or on demand from the Dashboard's Regenerate Now.</li>
+      </ul>
+    </div>
+  </details>
 </div>
 
 <!-- GANTT -->
@@ -316,14 +358,22 @@
     <div class="pf-v6-c-card gantt-wrap" id="ganttWrapLeadership" style="background:var(--bg2)"></div>
     <div id="ganttLegendLeadership" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px"></div>
   </div>
+
+  <details class="about-page">
+    <summary>About this page</summary>
+    <div class="about-page-body">
+      <p>A visual timeline of the same 28-day window as the Schedule tab, uses the same alliance filter (see Schedule tab above), grouped by event name across the next 28 days. Hover a filled cell for its exact time; click Refresh after changing events elsewhere to redraw it.</p>
+    </div>
+  </details>
 </div>
 
 <!-- POST LOG -->
 <div id="v-postlog" class="view">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-md">
     <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Post Log</h2>
+    <select class="pf-v6-c-form-control pf-m-small" id="postlogFilter" style="max-width:180px"></select>
     <input class="pf-v6-c-form-control pf-m-small" id="postLogFilterInput" placeholder="Filter by event, poster, or status…" style="max-width:260px" oninput="filterPostLogTable()">
-    <button onclick="exportPostLogCsv()" title="Download all PostLog entries as a CSV file." class="pf-v6-c-button pf-m-secondary pf-m-small">⬇ Export CSV</button>
+    <button onclick="exportPostLogCsv()" title="Download this filter's PostLog entries as a CSV file." class="pf-v6-c-button pf-m-secondary pf-m-small">⬇ Export CSV</button>
   </div>
   <table class="pf-v6-c-table pf-m-grid-md">
     <thead class="pf-v6-c-table__thead">
@@ -336,32 +386,45 @@
       <tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">Loading…</td></tr>
     </tbody>
   </table>
+
+  <details class="about-page">
+    <summary>About this page</summary>
+    <div class="about-page-body">
+      <p>A permanent record of every Discord post this app has made, per alliance — a receipt trail, not something you edit here. Use the alliance dropdown and the text filter together to narrow it down, and Export CSV to save the currently-filtered set (works with "All" alliances too).</p>
+      <h4>Known limitations</h4>
+      <ul>
+        <li>This only records what Samaya itself posted — an event created directly in Discord won't show up here until you Acknowledge it from the Sync tab.</li>
+      </ul>
+    </div>
+  </details>
 </div>
 
 <!-- CONFIG -->
 <div id="v-config" class="view">
-  <h2>Discord Configuration</h2>
-  <p style="font-size:var(--fs-sm);color:var(--muted);margin-bottom:16px">
-    This alliance's own bot token and guild are set up by a superadmin on the Platform tab, not here.
-    This view just lists the current tenant's own Discord channels and roles, for reference when filling
-    in an event's notification settings.
-  </p>
-  <div class="card">
-    <div class="flex mb-16">
-      <h3 style="margin:0;font-size:var(--fs-md)">Channels</h3>
-      <button class="btn btn-ghost btn-sm" onclick="loadDiscordConfig()">↻ Refresh</button>
+  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
+    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Discord Configuration</h2>
+    <div style="display:flex;align-items:center;gap:8px">
+      <select class="pf-v6-c-form-control pf-m-small" id="configFilter" style="max-width:180px"></select>
+      <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="loadDiscordConfig()">↻ Refresh</button>
     </div>
-    <table class="mb-16">
-      <thead><tr><th>Name</th><th>Server</th><th>ID</th></tr></thead>
-      <tbody id="discordChannelsBody"><tr><td colspan="3" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
-    </table>
-
-    <h3 style="font-size:var(--fs-md)">Roles</h3>
-    <table>
-      <thead><tr><th>Name</th><th>ID</th></tr></thead>
-      <tbody id="discordRolesBody"><tr><td colspan="2" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
-    </table>
   </div>
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
+    A Discord server's own bot token/guild are set up by a superadmin on the Access &amp; Platform tab, not here.
+    This is read-only, listing each server's own channels and roles for reference when filling in an event's
+    or announcement's notification settings.
+  </p>
+  <div id="discordConfigAccordion"><p style="color:var(--muted)">Loading…</p></div>
+
+  <details class="about-page">
+    <summary>About this page</summary>
+    <div class="about-page-body">
+      <p>Grouped by Discord server, not by alliance — more than one alliance can share the same server, in which case they're listed together under one entry rather than repeating the same channel/role list twice. Expand a server to see its channels and role IDs; you'll need these when filling in an event's or announcement's notification channel/role fields.</p>
+      <h4>Known limitations</h4>
+      <ul>
+        <li>You only ever see the alliance names for servers you yourself have access to — if a server is shared with an alliance you can't see, that alliance's name is left out, not shown as unknown.</li>
+      </ul>
+    </div>
+  </details>
 </div>
 
 
@@ -369,20 +432,45 @@
 <div id="v-sync" class="view">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
     <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Discord Sync</h2>
-    <button class="pf-v6-c-button pf-m-primary" onclick="loadSync()" title="Fetch all current Discord scheduled events and compare against PostLog.">↻ Run Sync Check</button>
+    <div style="display:flex;align-items:center;gap:8px">
+      <select class="pf-v6-c-form-control pf-m-small" id="syncFilter" style="max-width:180px"></select>
+      <button class="pf-v6-c-button pf-m-primary" onclick="loadSync()" title="Fetch all current Discord scheduled events and compare against PostLog.">↻ Run Sync Check</button>
+    </div>
   </div>
   <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
     Compares PostLog against live Discord events. Run manually whenever you suspect a mismatch.
     Field-level changes made directly in Discord are only visible here — they are not detected automatically.
   </p>
   <div id="syncContent"><p style="color:var(--muted)">Click "Run Sync Check" to fetch current Discord events.</p></div>
+
+  <details class="about-page">
+    <summary>About this page</summary>
+    <div class="about-page-body">
+      <h4>Sections</h4>
+      <ul>
+        <li><strong>Mismatched</strong> — the event exists on both sides, but a field on Discord no longer matches what's in Samaya. <strong>Push to Discord</strong> overwrites Discord's copy with Samaya's.</li>
+        <li><strong>PostLog Only</strong> — Samaya thinks it posted this, but it's gone from Discord (deleted manually). <strong>Mark Cancelled</strong> just updates Samaya's own record to match reality.</li>
+        <li><strong>Discord Only</strong> — exists on Discord but Samaya has no record of it (created manually). <strong>Acknowledge</strong> adopts it into PostLog so Sync stops flagging it.</li>
+        <li><strong>Matched</strong> — everything agrees; collapsed by default since there's nothing to act on.</li>
+      </ul>
+      <h4>Known limitations</h4>
+      <ul>
+        <li>This is a manual, on-demand check — it doesn't run automatically, and nothing here is fixed until you click one of the action buttons.</li>
+        <li>With "All" alliances selected, this queries every alliance's Discord server in one pass, which can take longer than checking a single alliance.</li>
+      </ul>
+    </div>
+  </details>
 </div>
 
-<!-- ACCESS -->
+<!-- ACCESS & PLATFORM (spec §38.6 — merged) -->
 <div id="v-access" class="view">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
     <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Access</h2>
-    <button class="pf-v6-c-button pf-m-primary" onclick="createInvite()">+ Invite Coordinator</button>
+    <div style="display:flex;align-items:center;gap:8px">
+      <label for="accessAllianceSelect" style="color:var(--muted);font-size:0.85em">Alliance:</label>
+      <select class="pf-v6-c-form-control pf-m-small" id="accessAllianceSelect" style="max-width:180px"></select>
+      <button class="pf-v6-c-button pf-m-primary" onclick="createInvite()">+ Invite Coordinator</button>
+    </div>
   </div>
 
   <h3 class="pf-v6-c-title pf-m-md pf-v6-u-mb-sm">Members</h3>
@@ -400,33 +488,34 @@
     Anyone with a link below can claim it via Discord login. Share it in a DM or an officer channel — it's a
     single-use link, not a password.
   </p>
-  <table class="pf-v6-c-table pf-m-grid-md">
+  <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Role</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Expires</th><th class="pf-v6-c-table__th"></th></tr></thead>
     <tbody class="pf-v6-c-table__tbody" id="invitesBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="4" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
   </table>
-</div>
 
-<!-- AUDIT LOG -->
-<div id="v-audit" class="view">
-  <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-sm">Audit Log</h2>
-  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
-    Who changed what, and when, for this alliance. Append-only — nothing here can be edited or rolled back;
-    it's a record, not an undo button.
-  </p>
-  <table class="pf-v6-c-table pf-m-grid-md">
-    <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">When</th><th class="pf-v6-c-table__th">Who</th><th class="pf-v6-c-table__th">Action</th><th class="pf-v6-c-table__th">Table</th><th class="pf-v6-c-table__th">Details</th></tr></thead>
-    <tbody class="pf-v6-c-table__tbody" id="auditLogBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="5" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
-  </table>
-</div>
+  <details class="about-page">
+    <summary>About this section</summary>
+    <div class="about-page-body">
+      <p>Managing standing access for one alliance at a time — pick it with the Alliance dropdown above. There's no "All" option here since access is inherently per-alliance.</p>
+      <ul>
+        <li><strong>Members</strong> — everyone who has already claimed access; change their role or remove them outright, effective immediately.</li>
+        <li><strong>Invites</strong> — single-use links not yet claimed; revoking one only stops that link, it doesn't affect anyone who already claimed a different one.</li>
+      </ul>
+    </div>
+  </details>
 
-<!-- PLATFORM -->
-<div id="v-platform" class="view">
+  <!-- Platform section (spec §38.6 — merged into Access, superadmin-only, shown by access.js's loadAccess() via loadPlatform()) -->
+  <div id="platformSection" style="margin-top:32px;padding-top:24px;border-top:2px solid var(--border)">
   <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-md">Platform</h2>
 
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-    <h3 class="pf-v6-c-title pf-m-md" style="margin:0">Kingdoms</h3>
+    <h3 class="pf-v6-c-title pf-m-md" style="margin:0">Kingdoms &amp; Branding</h3>
     <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="createKingdom()">+ New Kingdom</button>
   </div>
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-sm" style="color:var(--pf-t--global--text--color--subtle)">
+    Editing a kingdom also lets you set custom page titles shown across the public events pages and this admin
+    console for that kingdom (spec §38.7) — leave either blank to use the built-in default.
+  </p>
   <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Slug</th><th class="pf-v6-c-table__th"></th></tr></thead>
     <tbody class="pf-v6-c-table__tbody" id="kingdomsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="3" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
@@ -474,6 +563,47 @@
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Discord Username</th><th class="pf-v6-c-table__th">Superadmin</th><th class="pf-v6-c-table__th">Last Login</th><th class="pf-v6-c-table__th"></th></tr></thead>
     <tbody class="pf-v6-c-table__tbody" id="usersBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="4" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
   </table>
+
+  <details class="about-page">
+    <summary>About this section</summary>
+    <div class="about-page-body">
+      <p>Platform-wide setup — superadmin only, spans every kingdom and alliance in this deployment, not just whichever one the Alliance dropdown above is set to.</p>
+      <ul>
+        <li><strong>Kingdoms &amp; Branding</strong> — a Kingdom groups alliances together for kingdom-wide events; editing one also lets you set the custom page titles shown on its public pages and this console.</li>
+        <li><strong>Discord Servers</strong> — the actual Discord guild(s) this app posts to. More than one alliance can point at the same server and share its bot.</li>
+        <li><strong>Tenants (Alliances)</strong> — create/edit an alliance here, including its 1:1 icon image, which server it belongs to.</li>
+        <li><strong>Users</strong> — grant or revoke superadmin platform-wide. Superadmin can see and edit everything, so grant it sparingly.</li>
+      </ul>
+      <h4>Known limitations</h4>
+      <ul>
+        <li>A Discord Server's bot token is write-only — it can be replaced but never displayed back once set.</li>
+      </ul>
+    </div>
+  </details>
+  </div>
+</div>
+
+<!-- AUDIT LOG -->
+<div id="v-audit" class="view">
+  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
+    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Audit Log</h2>
+    <span id="auditAllianceLabel" style="color:var(--muted);font-size:0.9em" title="Shares the Access tab's alliance selection"></span>
+  </div>
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
+    Who changed what, and when, for the alliance currently selected on the Access tab. Append-only — nothing
+    here can be edited or rolled back; it's a record, not an undo button.
+  </p>
+  <table class="pf-v6-c-table pf-m-grid-md">
+    <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">When</th><th class="pf-v6-c-table__th">Who</th><th class="pf-v6-c-table__th">Action</th><th class="pf-v6-c-table__th">Table</th><th class="pf-v6-c-table__th">Details</th></tr></thead>
+    <tbody class="pf-v6-c-table__tbody" id="auditLogBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="5" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+  </table>
+
+  <details class="about-page">
+    <summary>About this page</summary>
+    <div class="about-page-body">
+      <p>A read-only feed of create/update/delete actions for one alliance at a time — whichever alliance is currently selected on the Access tab. There's no write or undo action here by design; it's a record, not a tool.</p>
+    </div>
+  </details>
 </div>
 
 <!-- ANNOUNCEMENTS (spec §13) -->
@@ -493,6 +623,7 @@
   <div class="pf-v6-l-flex pf-m-align-items-center pf-v6-u-mb-sm" style="gap:12px">
     <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Announcements</h2>
     <button class="pf-v6-c-button pf-m-primary" onclick="openAnnouncementModal()" title="Schedule a one-off channel message — no event or recurrence involved.">+ New Announcement</button>
+    <select class="pf-v6-c-form-control pf-m-small" id="announcementsFilter" style="max-width:180px;margin-left:auto"></select>
   </div>
   <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">Plain channel posts with a title, a Markdown body, and a send time — not tied to any event definition. Once scheduled, an announcement can be cancelled but not edited; cancel and create a new one instead.</p>
   <table class="pf-v6-c-table pf-m-grid-md" id="announcementsTable">
@@ -502,6 +633,24 @@
     </tr></thead>
     <tbody id="announcementsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="6" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
   </table>
+
+  <details class="about-page">
+    <summary>About this page</summary>
+    <div class="about-page-body">
+      <h4>Alliance filter</h4>
+      <p>Narrows the Announcements list below to one alliance's own announcements (matched by its Targets). Templates aren't alliance-scoped, so the filter doesn't affect the Templates table.</p>
+      <h4>Sections</h4>
+      <ul>
+        <li><strong>Templates</strong> — reusable starting points; "Use" pre-fills a new announcement, it doesn't schedule anything by itself.</li>
+        <li><strong>+ New Announcement</strong> — a one-off scheduled message, with one row per alliance/channel it should post to under Targets.</li>
+        <li>Once scheduled, an announcement can be cancelled but not edited — cancel it and create a new one instead.</li>
+      </ul>
+      <h4>Known limitations</h4>
+      <ul>
+        <li>The 2000-character limit on the Body field is Discord's own message limit, not something this app can raise.</li>
+      </ul>
+    </div>
+  </details>
 </div>
 
     </section>
@@ -682,6 +831,13 @@
       <div class="pf-v6-c-modal-box__body">
         <form class="pf-v6-c-form">
           <div class="form-grid">
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aOwningTenant"><span class="pf-v6-c-form__label-text">Owning Alliance</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <select class="pf-v6-c-form-control" id="aOwningTenant"></select>
+                <div class="pf-v6-c-form__helper-text">Which alliance this announcement belongs to for filtering/audit purposes — the Targets list below still controls where it's actually posted.</div>
+              </div>
+            </div>
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aTitle"><span class="pf-v6-c-form__label-text">Title</span></label></div>
               <div class="pf-v6-c-form__group-control">
@@ -865,17 +1021,60 @@
   </div>
 </div>
 
-<!-- TENANT MODAL (spec §24) — replaces the old header <select id="tenantPicker"> -->
+<!-- TENANT (ALLIANCE) MODAL (spec §38 — create/edit, including the 1:1 icon
+     upload; replaces the old prompt()-based createTenant/editTenant, since
+     a file picker needs a real form) -->
 <div class="pf-v6-c-backdrop" id="tenantModal">
   <div class="pf-v6-l-bullseye">
-    <div class="pf-v6-c-modal-box pf-m-sm" role="dialog" aria-modal="true" aria-labelledby="tenantModalTitle">
+    <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="tenantModalTitle">
       <header class="pf-v6-c-modal-box__header">
-        <h2 class="pf-v6-c-modal-box__title" id="tenantModalTitle"><span class="pf-v6-c-modal-box__title-text">Switch Alliance</span></h2>
+        <h2 class="pf-v6-c-modal-box__title" id="tenantModalTitle"><span class="pf-v6-c-modal-box__title-text">New Tenant</span></h2>
       </header>
       <div class="pf-v6-c-modal-box__body">
-        <div id="tenantModalList" style="display:flex;flex-direction:column;gap:4px"></div>
+        <input type="hidden" id="tnId">
+        <form class="pf-v6-c-form">
+          <div class="form-grid">
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="tnName"><span class="pf-v6-c-form__label-text">Alliance Name</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="text" id="tnName" placeholder="MOD">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="tnSlug"><span class="pf-v6-c-form__label-text">URL Slug</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="text" id="tnSlug" placeholder="mod">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="tnKingdom"><span class="pf-v6-c-form__label-text">Kingdom</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <select class="pf-v6-c-form-control" id="tnKingdom"></select>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="tnServer"><span class="pf-v6-c-form__label-text">Discord Server</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <select class="pf-v6-c-form-control" id="tnServer"></select>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="tnIconFile"><span class="pf-v6-c-form__label-text">Icon (1:1)</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input type="hidden" id="tnIconData" value="">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <img id="tnIconPreview" style="display:none;width:64px;height:64px;border-radius:8px;object-fit:cover" alt="Alliance icon preview">
+                  <input type="file" id="tnIconFile" accept="image/png,image/jpeg,image/gif" onchange="handleTenantIconFile(this)">
+                  <button type="button" id="tnIconRemove" class="pf-v6-c-button pf-m-secondary pf-m-small" style="display:none" onclick="removeTenantIcon()">Remove</button>
+                </div>
+                <div class="pf-v6-c-form__helper-text">Square image shown in place of the generic alliance icon everywhere this alliance appears (badges, switchers, roster). Optional.</div>
+              </div>
+            </div>
+          </div>
+        </form>
       </div>
       <footer class="pf-v6-c-modal-box__footer">
+        <button class="pf-v6-c-button pf-m-primary" onclick="saveTenantModal()">Save</button>
         <button class="pf-v6-c-button pf-m-link" onclick="closeTenantModal()">Cancel</button>
       </footer>
     </div>

@@ -4,7 +4,7 @@
 async function exportPostLogCsv() {
   try {
     const res = await fetch('/admin/api/post-log/export.csv', {
-      headers: { 'X-Tenant-Slug': getCurrentTenantSlug() },
+      headers: { 'X-Tenant-Slug': getTabFilter('postlog') },
       credentials: 'same-origin',
     });
     if (res.status === 401) { window.location.href = '/auth/login'; return; }
@@ -32,8 +32,9 @@ function filterPostLogTable() {
 }
 
 async function loadPostLog() {
+  renderAllianceFilterSelect('postlogFilter', 'postlog', loadPostLog);
   try {
-    const logs = await api('GET', '/api/post-log?limit=100');
+    const logs = await api('GET', '/api/post-log?limit=100', null, false, getTabFilter('postlog'));
     POSTLOG_CACHE = logs;
     renderPostLogTable(logs);
   } catch(e) { toast(e.message, true); }
@@ -56,12 +57,13 @@ function renderPostLogTable(allLogs) {
     tbody.innerHTML = logs.map(l => {
       const dimStyle = l.status === 'cancelled' ? 'opacity:.5;' : '';
       const leadStyle = l.leadership_only ? 'background:var(--bg3);' : '';
-      // Combined mode (spec §14.2) mixes tenants in one list — a left
-      // border plus inline tenant name gives the same at-a-glance
-      // attribution the Events/Schedule tables already use.
+      // "All" filter mixes tenants in one list — a left border plus
+      // inline tenant name gives the same at-a-glance attribution the
+      // Events/Schedule tables already use.
+      const showTenantTag = getTabFilter('postlog') === COMBINED_SLUG;
       const allyColor = TENANT_COLORS[l.tenant_id] || '#475569';
-      const borderStyle = isCombinedMode() ? `border-left:3px solid ${allyColor};` : '';
-      const tenantTag = isCombinedMode() ? ` <span style="color:var(--muted);font-size:var(--fs-sm)">(${escapeHtml(tenantName(l.tenant_id))})</span>` : '';
+      const borderStyle = showTenantTag ? `border-left:3px solid ${allyColor};` : '';
+      const tenantTag = showTenantTag ? ` <span style="color:var(--muted);font-size:var(--fs-sm)">(${escapeHtml(tenantName(l.tenant_id))})</span>` : '';
       return `<tr class="pf-v6-c-table__tr" style="${dimStyle}${leadStyle}${borderStyle}">
         <td class="pf-v6-c-table__td">${escapeHtml(l.event_name)}${l.leadership_only ? ' 👑' : ' 🛡️'}${tenantTag}</td>
         <td class="pf-v6-c-table__td">${l.occurrence_date}</td>

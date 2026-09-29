@@ -211,7 +211,7 @@ function refreshPreviewTenantOptions(selectId, targetsListId) {
       .map(s => s.value)
       .filter((v, i, arr) => v && arr.indexOf(v) === i);
   } else {
-    slugs = [getCurrentTenantSlug()].filter(Boolean);
+    slugs = [announcementsTenantSlug()].filter(Boolean);
   }
   select.innerHTML = slugs.map(slug => {
     const t = TENANTS.find(x => x.slug === slug);
@@ -234,6 +234,18 @@ async function renderTemplatePreview() {
     dateId: null, timeId: null, offsetId: 'tEventOffsetMinutes',
     roleSelectId: 'tRoleMention',
   });
+}
+
+// Spec §38.3: Announcements' list is combined by default now
+// (getTabFilter('announcements')); Templates/create/cancel/retry/delete
+// remain genuinely single-tenant server-side (owning_tenant_id), so they
+// resolve to whichever real alliance the tab's filter currently points
+// at, falling back to the first accessible alliance while the filter is
+// "All".
+function announcementsTenantSlug() {
+  const saved = getTabFilter('announcements');
+  if (saved !== COMBINED_SLUG && TENANTS.some(t => t.slug === saved)) return saved;
+  return TENANTS[0] ? TENANTS[0].slug : '';
 }
 
 // Event descriptions (spec §32) get the same composer, but an Event has
@@ -282,7 +294,7 @@ async function renderComposerPreview({
   const pane = document.getElementById(paneId);
   if (!pane) return;
   const body = document.getElementById(bodyId).value;
-  const tenantSlug = document.getElementById(previewTenantSelectId).value || getCurrentTenantSlug();
+  const tenantSlug = document.getElementById(previewTenantSelectId).value || announcementsTenantSlug();
   const tenant = TENANTS.find(t => t.slug === tenantSlug);
 
   let scheduledFor, eventOffsetMinutes, usingFallbackTime;
@@ -350,7 +362,7 @@ let ANNOUNCEMENT_TEMPLATES = [];
 
 async function loadAnnouncementTemplates() {
   try {
-    ANNOUNCEMENT_TEMPLATES = await api('GET', '/api/announcement-templates');
+    ANNOUNCEMENT_TEMPLATES = await api('GET', '/api/announcement-templates', null, false, announcementsTenantSlug());
     const tbody = document.getElementById('templatesBody');
     tbody.innerHTML = ANNOUNCEMENT_TEMPLATES.length
       ? ANNOUNCEMENT_TEMPLATES.map(t =>
@@ -409,10 +421,10 @@ async function saveTemplate() {
   };
   try {
     if (id) {
-      await api('PATCH', `/api/announcement-templates/${id}`, payload);
+      await api('PATCH', `/api/announcement-templates/${id}`, payload, false, announcementsTenantSlug());
       toast('Template updated');
     } else {
-      await api('POST', '/api/announcement-templates', payload);
+      await api('POST', '/api/announcement-templates', payload, false, announcementsTenantSlug());
       toast('Template created');
     }
     closeTemplateModal();
@@ -424,7 +436,7 @@ async function deleteTemplate(id) {
   const t = ANNOUNCEMENT_TEMPLATES.find(x => x.id === id);
   if (!confirm(`Delete the template "${t ? t.name : ''}"? This cannot be undone.`)) return;
   try {
-    await api('DELETE', `/api/announcement-templates/${id}`);
+    await api('DELETE', `/api/announcement-templates/${id}`, null, false, announcementsTenantSlug());
     toast('Template deleted');
     loadAnnouncementTemplates();
   } catch (e) { toast(e.message, true); }
@@ -467,15 +479,16 @@ async function saveCurrentAsTemplate() {
     return;
   }
   try {
-    await api('POST', '/api/announcement-templates', payload);
+    await api('POST', '/api/announcement-templates', payload, false, announcementsTenantSlug());
     toast(`Template "${name}" saved`);
     loadAnnouncementTemplates();
   } catch (e) { toast(e.message, true); }
 }
 
 async function loadAnnouncements() {
+  renderAllianceFilterSelect('announcementsFilter', 'announcements', loadAnnouncements);
   try {
-    const items = await api('GET', '/api/announcements');
+    const items = await api('GET', '/api/announcements', null, false, getTabFilter('announcements'));
     ANNOUNCEMENTS = items;
     const tbody = document.getElementById('announcementsBody');
     if (!items.length) {
@@ -645,14 +658,19 @@ function openAnnouncementModal(source) {
   document.getElementById('aIntervalGroup').style.display = (source && source.recurring) ? '' : 'none';
   document.getElementById('aLeadershipOnly').checked = !!(source && source.leadership_only);
   document.getElementById('aEventOffsetMinutes').value = (source && source.event_offset_minutes) ? source.event_offset_minutes : 0;
+  // Spec §38.3 — an announcement is authored by (owned by) one alliance
+  // even though it can target several; there's no more ambient "current
+  // tenant" to imply which one, so this always shows an explicit picker,
+  // defaulting to the source's own owning alliance when duplicating/using
+  // a template-derived source, or the Announcements tab's own filter
+  // otherwise.
+  const ownerDefault = (source && source.owning_tenant_slug) || announcementsTenantSlug();
+  renderOwningTenantSelect('aOwningTenant', ownerDefault);
   document.getElementById('aTargetsList').innerHTML = '';
   if (source && source.targets && source.targets.length) {
     source.targets.forEach(t => addAnnouncementTargetRow(tenantSlugFor(t.tenant_id), t.discord_channel_id));
   } else {
-    // The Announcements tab is single-tenant-only (see common.js's
-    // SINGLE_TENANT_ONLY_VIEWS) — the picker is never on '*' while this
-    // modal is reachable, so the first target can default to it directly.
-    addAnnouncementTargetRow(getCurrentTenantSlug());
+    addAnnouncementTargetRow(ownerDefault);
   }
   document.querySelector('#announcementModalTitle .pf-v6-c-modal-box__title-text').textContent =
     source ? 'Duplicate Announcement' : 'New Announcement';
@@ -729,18 +747,31 @@ async function saveAnnouncement() {
     event_offset_minutes: parseInt(document.getElementById('aEventOffsetMinutes').value, 10) || 0,
   };
 
+  const owningTenantOverride = document.getElementById('aOwningTenant').value;
+
   try {
-    await api('POST', '/api/announcements', payload);
+    await api('POST', '/api/announcements', payload, false, owningTenantOverride);
     toast('Announcement scheduled');
     closeAnnouncementModal();
     loadAnnouncements();
   } catch (e) { toast(e.message, true); }
 }
 
+// Spec §38.3 — an announcement's owning alliance is fixed once created;
+// these three actions resolve it from ANNOUNCEMENTS' own cached
+// owning_tenant_slug (populated by list_announcements' combined-mode
+// response) rather than any ambient/current tenant, since the row being
+// acted on may belong to a different alliance than whatever this tab's
+// filter currently shows.
+function announcementOwningSlug(id) {
+  const a = ANNOUNCEMENTS.find(x => x.id === id);
+  return a ? a.owning_tenant_slug : undefined;
+}
+
 async function cancelAnnouncement(id) {
   if (!confirm('Cancel this announcement? It will not be posted.')) return;
   try {
-    await api('POST', `/api/announcements/${id}/cancel`);
+    await api('POST', `/api/announcements/${id}/cancel`, null, false, announcementOwningSlug(id));
     toast('Announcement cancelled');
     loadAnnouncements();
   } catch (e) { toast(e.message, true); }
@@ -748,7 +779,7 @@ async function cancelAnnouncement(id) {
 
 async function retryFailedTargets(id) {
   try {
-    await api('POST', `/api/announcements/${id}/retry-failed-targets`);
+    await api('POST', `/api/announcements/${id}/retry-failed-targets`, null, false, announcementOwningSlug(id));
     toast('Failed target(s) requeued — will retry on the next delivery tick');
     loadAnnouncements();
   } catch (e) { toast(e.message, true); }
@@ -757,7 +788,7 @@ async function retryFailedTargets(id) {
 async function deleteAnnouncement(id) {
   if (!confirm('Delete this announcement permanently? This cannot be undone.')) return;
   try {
-    await api('DELETE', `/api/announcements/${id}`);
+    await api('DELETE', `/api/announcements/${id}`, null, false, announcementOwningSlug(id));
     toast('Announcement deleted');
     loadAnnouncements();
   } catch (e) { toast(e.message, true); }

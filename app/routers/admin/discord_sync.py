@@ -17,31 +17,32 @@ from models.db import EventDefinition, PostLog, Tenant
 from services.discord_api import update_discord_event
 
 from .deps import (
-    PLATFORM_BOT_TOKEN, find_post_log, get_current_tenant, get_occurrence_with_event,
-    require_not_viewer,
+    PLATFORM_BOT_TOKEN, find_post_log, get_current_tenant, get_current_tenants,
+    get_occurrence_with_event, require_not_viewer,
 )
 
 router = APIRouter()
 
 
-@router.get("/api/sync/discord")
-async def sync_discord(
-    tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
-):
-    """
-    Fetches all current Discord scheduled events (in this tenant's guild)
-    and compares against this tenant's own PostLog. Returns four categories:
-    - matched: in both, details align
-    - mismatched: in both, but fields differ from event definition
-    - discord_only: on Discord but not in PostLog
-    - postlog_only: in PostLog as posted but not found on Discord
-    """
+async def _sync_discord_for_tenant(tenant: Tenant, db: AsyncSession, guild_cache: dict) -> dict:
+    """One tenant's drift report — the exact logic the single-tenant
+    version of this endpoint always had, just pulled out so spec §38.4's
+    combined mode can call it once per accessible tenant. `guild_cache`
+    (keyed by DiscordServer.id) is shared across the whole request so two
+    tenants sharing one Discord server (server_id has no unique
+    constraint — see models.db.Tenant) trigger exactly one Discord API
+    call for that guild, not one per tenant."""
     token = tenant.server.bot_token or PLATFORM_BOT_TOKEN
     if not token:
-        raise HTTPException(status_code=400, detail="No Discord bot token configured for this tenant")
+        return {
+            "tenant_slug": tenant.slug, "tenant_name": tenant.name, "tenant_color": tenant.color,
+            "error": "No Discord bot token configured for this alliance",
+        }
 
     from services.discord_api import get_guild_events
-    discord_events = await get_guild_events(token, tenant.server.guild_id)
+    if tenant.server_id not in guild_cache:
+        guild_cache[tenant.server_id] = await get_guild_events(token, tenant.server.guild_id)
+    discord_events = guild_cache[tenant.server_id]
 
     # Build lookup maps
     discord_map = {str(e["id"]): e for e in discord_events}
@@ -135,6 +136,7 @@ async def sync_discord(
             })
 
     return {
+        "tenant_slug": tenant.slug, "tenant_name": tenant.name, "tenant_color": tenant.color,
         "summary": {
             "matched":       len(matched),
             "mismatched":    len(mismatched),
@@ -147,6 +149,22 @@ async def sync_discord(
         "discord_only": discord_only,
         "postlog_only": postlog_only,
     }
+
+
+@router.get("/api/sync/discord")
+async def sync_discord(
+    tenants: list[Tenant] = Depends(get_current_tenants), db: AsyncSession = Depends(get_db)
+):
+    """Spec §38.4: moved from get_current_tenant to get_current_tenants —
+    "X-Tenant-Slug: *" (the consolidated Sync page's default) returns one
+    drift report per accessible alliance instead of one tenant's. Each
+    alliance's own per-row "push fix" actions below are unaffected — they
+    already take an explicit tenant via require_not_viewer's own header,
+    which the frontend sets to that specific row's alliance regardless of
+    what the list view above is currently filtered to."""
+    guild_cache: dict = {}
+    alliances = [await _sync_discord_for_tenant(t, db, guild_cache) for t in tenants]
+    return {"alliances": alliances}
 
 
 @router.post("/api/sync/push/{occ_id}")

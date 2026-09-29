@@ -11,8 +11,9 @@ function filterEventsTable() {
 }
 
 async function loadEvents() {
+  renderAllianceFilterSelect('eventsFilter', 'events', loadEvents);
   try {
-    const events = await api('GET', '/api/events');
+    const events = await api('GET', '/api/events', null, false, getTabFilter('events'));
     EVENTS_CACHE = events;
     renderEventsTable(events);
   } catch(e) { toast(e.message, true); }
@@ -25,9 +26,14 @@ async function loadEvents() {
 // multipart form data, outside the api() helper since api() always sends
 // JSON.
 async function exportEventsCsv() {
+  const slug = getTabFilter('events');
+  if (slug === COMBINED_SLUG) {
+    toast('Pick one alliance in the filter above before exporting — CSV export is per-alliance', true);
+    return;
+  }
   try {
     const res = await fetch('/admin/api/events/export.csv', {
-      headers: { 'X-Tenant-Slug': getCurrentTenantSlug() },
+      headers: { 'X-Tenant-Slug': slug },
       credentials: 'same-origin',
     });
     if (res.status === 401) { window.location.href = '/auth/login'; return; }
@@ -48,12 +54,17 @@ async function exportEventsCsv() {
 
 async function importEventsCsv(file) {
   if (!file) return;
+  const slug = getTabFilter('events');
+  if (slug === COMBINED_SLUG) {
+    toast('Pick one alliance in the filter above before importing — CSV import is per-alliance', true);
+    return;
+  }
   const formData = new FormData();
   formData.append('file', file);
   try {
     const res = await fetch('/admin/api/events/import.csv', {
       method: 'POST',
-      headers: { 'X-Tenant-Slug': getCurrentTenantSlug() },
+      headers: { 'X-Tenant-Slug': slug },
       credentials: 'same-origin',
       body: formData,
     });
@@ -119,7 +130,7 @@ function renderEventsTable(allEvents) {
       // In combined mode (spec §14.2), rows come from several tenants
       // at once, so the tenant color dot alone is no longer enough —
       // add the tenant name inline.
-      var tenantTag = isCombinedMode()
+      var tenantTag = getTabFilter('events') === COMBINED_SLUG
         ? ' <span style="color:var(--muted);font-size:var(--fs-sm)">(' + escapeHtml(tenantName(e.owning_tenant_id)) + ')</span>'
         : '';
       return '<tr class="pf-v6-c-table__tr" style="border-left:3px solid ' + allyColor + '">'
@@ -157,17 +168,22 @@ function openEventModal(event) {
   document.getElementById('modalTitle').textContent = event ? 'Edit Event' : 'Add Event';
   document.getElementById('modalEventId').value = event && event.id ? event.id : '';
 
-  // While combined mode is selected, there's no ambient tenant for a new
-  // event to belong to (spec §14.3) — show an explicit picker instead.
-  // Editing an existing event keeps its current owning tenant fixed;
-  // only creation needs the choice.
+  // Spec §38.1: there's no more ambient "current tenant" at all — a new
+  // event always needs an explicit Alliance picker. Editing an existing
+  // event keeps its current owning tenant fixed (shown as plain text,
+  // not editable — moving an event to a different alliance isn't a
+  // supported action); only creation needs the choice.
   const ownerRow = document.getElementById('mOwningTenantRow');
   const ownerSelect = document.getElementById('mOwningTenant');
-  if (isCombinedMode() && !event) {
+  let resolvedTenantSlug;
+  if (!event) {
     ownerRow.style.display = '';
-    ownerSelect.innerHTML = TENANTS.map(t => `<option value="${escapeHtml(t.slug)}">${escapeHtml(t.name)}</option>`).join('');
+    renderOwningTenantSelect('mOwningTenant', TENANTS[0]?.slug);
+    resolvedTenantSlug = ownerSelect.value;
+    ownerSelect.onchange = () => populateDiscordFields(event, ownerSelect.value);
   } else {
     ownerRow.style.display = 'none';
+    resolvedTenantSlug = tenantSlugFor(event.owning_tenant_id);
   }
   document.getElementById('mName').value        = event?.name || '';
   document.getElementById('mKingdomWide').checked = event?.scope === 'kingdom-wide';
@@ -182,7 +198,7 @@ function openEventModal(event) {
   document.getElementById('mCoverImageFile').value = '';
   toggleLeadershipNote();
   document.getElementById('previewResult').textContent = '';
-  populateDiscordFields(event);
+  populateDiscordFields(event, resolvedTenantSlug);
 
   document.getElementById('mTargetsList').innerHTML = '';
   (event?.targets || []).forEach(t => addEventTargetRow(tenantSlugFor(t.tenant_id), t.notification_channel_id, t.notification_role_id));
@@ -288,7 +304,7 @@ function fmtDateTime(utcIso) {
 
 // ── Discord channel/role dropdowns ─────────────────────────────
 
-async function populateDiscordFields(event) {
+async function populateDiscordFields(event, tenantSlug) {
   const chanSelect = document.getElementById('mChannel');
   const chanFallback = document.getElementById('mChannelFallback');
   const notifChanSelect = document.getElementById('mNotifChannel');
@@ -305,8 +321,8 @@ async function populateDiscordFields(event) {
 
   try {
     const [channels, roles] = await Promise.all([
-      api('GET', '/api/discord/channels'),
-      api('GET', '/api/discord/roles'),
+      api('GET', '/api/discord/channels', null, false, tenantSlug),
+      api('GET', '/api/discord/roles', null, false, tenantSlug),
     ]);
 
     fillSelect(chanSelect, channels.map(c => ({ value: c.name, label: '#' + c.name })), event?.discord_channel);
@@ -500,17 +516,18 @@ async function saveEvent() {
     description:     document.getElementById('mDescription').value,
     cover_image_data: document.getElementById('mCoverImageData').value,
   };
-  // Only relevant for a new event while combined mode is selected (the
-  // row is hidden, and thus this is empty, in every other case) — see
-  // openEventModal(). undefined/'' falls through to the picker's own
-  // current tenant inside api().
+  // Spec §38.1/§38.3: no more ambient "current tenant" — a create sends
+  // the modal's explicit Alliance picker; an edit sends the event's own
+  // (fixed, non-editable) owning tenant, looked up from EVENTS_CACHE
+  // since editing doesn't keep the full original event object around
+  // beyond its id.
   const owningTenantOverride = document.getElementById('mOwningTenantRow').style.display !== 'none'
     ? document.getElementById('mOwningTenant').value
-    : undefined;
+    : tenantSlugFor((EVENTS_CACHE.find(e => String(e.id) === String(id)) || {}).owning_tenant_id);
 
   try {
     if (id) {
-      await api('PATCH', `/api/events/${id}`, payload);
+      await api('PATCH', `/api/events/${id}`, payload, false, owningTenantOverride);
       toast('Event updated');
     } else {
       await api('POST', '/api/events', payload, false, owningTenantOverride);
@@ -534,16 +551,18 @@ async function permanentDelete(btn) {
     return;
   }
 
+  const tenantSlug = tenantSlugFor((EVENTS_CACHE.find(e => String(e.id) === String(id)) || {}).owning_tenant_id);
   try {
-    var data = await api('DELETE', '/api/events/' + id + '/permanent');
+    var data = await api('DELETE', '/api/events/' + id + '/permanent', null, false, tenantSlug);
     toast('Deleted "' + data.event_name + '". ' + data.post_log_entries_preserved + ' PostLog entries preserved.');
     loadEvents();
   } catch(e) { toast(e.message, true); }
 }
 
 async function toggleActive(id, current) {
+  const tenantSlug = tenantSlugFor((EVENTS_CACHE.find(e => String(e.id) === String(id)) || {}).owning_tenant_id);
   try {
-    await api('PATCH', `/api/events/${id}`, { active: !current });
+    await api('PATCH', `/api/events/${id}`, { active: !current }, false, tenantSlug);
     toast(current ? 'Event deactivated' : 'Event activated');
     loadEvents();
   } catch(e) { toast(e.message, true); }

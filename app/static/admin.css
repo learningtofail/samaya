@@ -88,3 +88,15 @@
   .flex { display: flex; align-items: center; gap: 8px; }
   .mb-16 { margin-bottom: 16px; }
   #configForm { max-width: 480px; }
+
+  /* "About this page" footer (spec §38.8) — a collapsed <details> at the
+     bottom of every admin tab explaining its sections/buttons/known
+     limitations for end users of the panel, not developers. Collapsed by
+     default so it doesn't compete with the tab's actual content. */
+  .about-page { margin-top: 32px; border-top: 1px solid var(--border); padding-top: 12px; }
+  .about-page summary { cursor: pointer; font-weight: 600; color: var(--muted); font-size: var(--fs-sm); padding: 4px 0; }
+  .about-page summary:hover { color: var(--text); }
+  .about-page-body { font-size: var(--fs-sm); color: var(--muted); margin-top: 8px; line-height: 1.6; }
+  .about-page-body h4 { font-size: var(--fs-sm); color: var(--text); margin: 10px 0 2px; }
+  .about-page-body h4:first-child { margin-top: 0; }
+  .about-page-body ul { margin: 2px 0 8px 20px; padding: 0; }

@@ -56,6 +56,13 @@
      with the actual option list. */
   .header-link { color: var(--pf-t--global--text--color--inverse); font-size: var(--pf-t--global--font--size--body--sm); text-decoration: none; white-space: nowrap; padding: 4px 8px; border-radius: 4px; }
   .header-link:hover { background: rgba(255,255,255,.1); text-decoration: underline; }
+  /* Spec §38: 1:1 alliance icon images, replacing the generic 🛡️/color-dot
+     wherever an alliance is named — masthead, switcher, per-row badge. */
+  .samaya-tenant-icon { width: 1.1em; height: 1.1em; border-radius: 3px; object-fit: cover; vertical-align: -0.2em; margin-inline-end: 0.25em; }
+  #pageTitleIcon { width: 1.5rem; height: 1.5rem; border-radius: 4px; object-fit: cover; vertical-align: -0.3rem; margin-inline-end: 0.4rem; display: none; }
+  /* Spec §38.9 — last-activity marquee: a single-line strip naming the
+     most recent Discord message sent, sitting just under the info card. */
+  .samaya-marquee { display: flex; align-items: center; gap: 8px; font-size: var(--pf-t--global--font--size--body--sm); color: var(--pf-t--global--text--color--subtle); padding: 6px 0 14px; }
   #allianceModal { display: none; }
   #allianceModal.open { display: block; }
   #timezoneModal { display: none; }
@@ -81,7 +88,7 @@
   <header class="pf-v6-c-masthead">
     <div class="pf-v6-c-masthead__main">
       <span class="pf-v6-c-masthead__brand">
-        <h1 id="pageTitle" style="color:var(--pf-t--global--text--color--inverse);margin:0;font-size:var(--pf-t--global--font--size--heading--lg);font-weight:var(--pf-t--global--font--weight--heading--bold)">⏱ Kingshot Event Schedule</h1>
+        <h1 style="color:var(--pf-t--global--text--color--inverse);margin:0;font-size:var(--pf-t--global--font--size--heading--lg);font-weight:var(--pf-t--global--font--weight--heading--bold)"><img id="pageTitleIcon" alt=""><span id="pageTitle">⏱ Kingshot Event Schedule</span></h1>
       </span>
     </div>
     <div class="pf-v6-c-masthead__content" style="display:flex;align-items:center;gap:var(--pf-t--global--spacer--sm)">
@@ -147,6 +154,8 @@
           </div>
         </div>
       </div>
+
+      <div id="lastActivityMarquee" class="samaya-marquee" style="display:none"></div>
 
       <div id="content">
         <div class="pf-v6-c-empty-state">
@@ -283,7 +292,22 @@ function renderAllianceLink() {
   if (!link) return;
   const current = ALLIANCES.find(a => a.slug === TENANT_SLUG);
   const label = COMBINED_MODE ? '— All Alliances —' : (current ? current.name : TENANT_SLUG.toUpperCase());
-  link.textContent = label + ' ▾';
+  const icon = (!COMBINED_MODE && current && current.icon_image_data)
+    ? `<img class="samaya-tenant-icon" src="${escapeHtml(current.icon_image_data)}" alt="">` : '';
+  link.innerHTML = icon + escapeHtml(label) + ' ▾';
+
+  // Spec §38.9: the masthead's own icon mirrors whichever single alliance
+  // this page is scoped to — hidden in combined mode, since there's no one
+  // alliance to represent.
+  const titleIcon = document.getElementById('pageTitleIcon');
+  if (titleIcon) {
+    if (!COMBINED_MODE && current && current.icon_image_data) {
+      titleIcon.src = current.icon_image_data;
+      titleIcon.style.display = '';
+    } else {
+      titleIcon.style.display = 'none';
+    }
+  }
 }
 
 function openAllianceModal() {
@@ -292,7 +316,8 @@ function openAllianceModal() {
   list.innerHTML = options.map(o => {
     const isCurrent = (COMBINED_MODE && o.slug === '') || (!COMBINED_MODE && o.slug === TENANT_SLUG);
     const href = o.slug ? `/t/${o.slug}/events` : '/events';
-    return `<a href="${href}" class="pf-v6-c-button ${isCurrent ? 'pf-m-primary' : 'pf-m-secondary'}" style="justify-content:flex-start;text-decoration:none">${escapeHtml(o.name)}</a>`;
+    const icon = o.icon_image_data ? `<img class="samaya-tenant-icon" src="${escapeHtml(o.icon_image_data)}" alt="">` : '';
+    return `<a href="${href}" class="pf-v6-c-button ${isCurrent ? 'pf-m-primary' : 'pf-m-secondary'}" style="justify-content:flex-start;text-decoration:none">${icon}${escapeHtml(o.name)}</a>`;
   }).join('');
   document.getElementById('allianceModal').classList.add('open');
 }
@@ -400,7 +425,10 @@ function tenantBadge(ev) {
   // what an inline style below can override with an arbitrary hex.
   if (!COMBINED_MODE || !ev.tenant_name) return '';
   const color = escapeHtml(ev.tenant_color || '#6a6e73');
-  return `<span class="pf-v6-c-label pf-m-filled pf-m-custom" style="--pf-v6-c-label--m-custom--BackgroundColor:${color};--pf-v6-c-label--m-custom--Color:#fff"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${escapeHtml(ev.tenant_name)}</span></span></span>`;
+  const alliance = ALLIANCES.find(a => a.slug === ev.tenant_slug);
+  const icon = alliance && alliance.icon_image_data
+    ? `<img class="samaya-tenant-icon" src="${escapeHtml(alliance.icon_image_data)}" alt="">` : '';
+  return `<span class="pf-v6-c-label pf-m-filled pf-m-custom" style="--pf-v6-c-label--m-custom--BackgroundColor:${color};--pf-v6-c-label--m-custom--Color:#fff"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${icon}${escapeHtml(ev.tenant_name)}</span></span></span>`;
 }
 
 function weekLabel(dateStr) {
@@ -507,9 +535,45 @@ async function loadEvents() {
   }
 }
 
+// Spec §38.9: a small marquee naming the last message actually sent for
+// this page's scope — one alliance's own last post (single-alliance page)
+// or the most recent post among every alliance (the combined page). Purely
+// informational, no action attached; renders nothing when there's no
+// delivery history yet rather than showing a misleading "never".
+async function loadLastActivity() {
+  const el = document.getElementById('lastActivityMarquee');
+  if (!el) return;
+  const url = COMBINED_MODE ? '/api/last-activity' : `/t/${TENANT_SLUG}/api/last-activity`;
+  try {
+    const res = await fetch(url);
+    const activity = await res.json();
+    if (!activity) { el.style.display = 'none'; return; }
+    const kindLabel = activity.kind === 'announcement' ? '📢 Last message' : '📅 Last event posted';
+    const allianceBit = COMBINED_MODE && activity.tenant_name ? ` — ${escapeHtml(activity.tenant_name)}` : '';
+    el.innerHTML = `<span>${kindLabel}: <strong>${escapeHtml(activity.name)}</strong>${allianceBit} · ${formatTime(activity.at)}</span>`;
+    el.style.display = '';
+  } catch (e) {
+    el.style.display = 'none';
+  }
+}
+
+// Spec §38.7: the public page title is editable per-kingdom via the Access
+// & Platform admin tab — fetched and applied after the hardcoded default
+// above, so a deployment that hasn't set one keeps behaving exactly as
+// before this field existed.
+fetch('/api/kingdom-branding').then(r => r.json()).then(b => {
+  if (b.public_site_title && !COMBINED_MODE) {
+    document.getElementById('pageTitle').textContent = `⏱ ${TENANT_SLUG.toUpperCase()} — ${b.public_site_title}`;
+  } else if (b.public_site_title) {
+    document.getElementById('pageTitle').textContent = `⏱ ${b.public_site_title} — All Alliances`;
+  }
+}).catch(() => {});
+
 loadEvents();
 loadAlliances();
+loadLastActivity();
 setInterval(loadEvents, 600000);
+setInterval(loadLastActivity, 600000);
 </script>
 </body>
 </html>

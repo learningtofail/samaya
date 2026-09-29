@@ -5,13 +5,30 @@
 // invites list alone can't do either, since revoke only works on a
 // still-pending invite. Depends on common.js.
 
+// Spec §38.6: invites/members are still inherently per-alliance
+// (UserTenant grants), so this section keeps its own "Alliance: [x]"
+// selector — always one real alliance, never "All", since there's no
+// combined-mode form of "who has access." Reuses the same
+// samaya_filter_access localStorage slot as every other tab's filter.
+function accessTenantSlug() {
+  const saved = getTabFilter('access');
+  if (saved !== COMBINED_SLUG && TENANTS.some(t => t.slug === saved)) return saved;
+  return TENANTS[0] ? TENANTS[0].slug : '';
+}
+
 async function loadAccess() {
+  const select = document.getElementById('accessAllianceSelect');
+  if (select) {
+    renderOwningTenantSelect('accessAllianceSelect', accessTenantSlug());
+    select.onchange = () => { setTabFilter('access', select.value); loadAccess(); };
+  }
   await Promise.all([loadAccessInvites(), loadAccessMembers()]);
+  if (typeof loadPlatform === 'function' && isSuperadmin()) loadPlatform();
 }
 
 async function loadAccessInvites() {
   try {
-    const invites = await api('GET', '/api/invites');
+    const invites = await api('GET', '/api/invites', null, false, accessTenantSlug());
     const tbody = document.getElementById('invitesBody');
     if (!invites.length) {
       tbody.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="4" style="color:var(--muted);padding:20px">No invites yet.</td></tr>';
@@ -23,7 +40,7 @@ async function loadAccessInvites() {
 
 async function loadAccessMembers() {
   try {
-    const members = await api('GET', '/api/members');
+    const members = await api('GET', '/api/members', null, false, accessTenantSlug());
     const tbody = document.getElementById('membersBody');
     tbody.innerHTML = members.length
       ? members.map(buildMemberRow).join('')
@@ -56,7 +73,7 @@ async function changeMemberRole(id, currentRole) {
   }
   if (!confirm('Change this person\'s role from ' + currentRole + ' to ' + next + '?')) return;
   try {
-    await api('PATCH', '/api/members/' + id, {role: next});
+    await api('PATCH', '/api/members/' + id, {role: next}, false, accessTenantSlug());
     toast('Role updated');
     loadAccessMembers();
   } catch(e) { toast(e.message, true); }
@@ -65,7 +82,7 @@ async function changeMemberRole(id, currentRole) {
 async function removeMember(id, name) {
   if (!confirm('Remove ' + name + '\'s access to this tenant? They will need a new invite to get back in.')) return;
   try {
-    await api('DELETE', '/api/members/' + id);
+    await api('DELETE', '/api/members/' + id, null, false, accessTenantSlug());
     toast('Access removed');
     loadAccessMembers();
   } catch(e) { toast(e.message, true); }
@@ -101,7 +118,7 @@ async function createInvite() {
     return;
   }
   try {
-    const inv = await api('POST', '/api/invites', {role});
+    const inv = await api('POST', '/api/invites', {role}, false, accessTenantSlug());
     await loadAccess();
     copyInviteLink(window.location.origin + '/invite/' + inv.token);
   } catch(e) { toast(e.message, true); }
@@ -110,7 +127,7 @@ async function createInvite() {
 async function revokeInvite(id) {
   if (!confirm('Revoke this invite? Anyone who has the link will no longer be able to use it.')) return;
   try {
-    await api('DELETE', '/api/invites/' + id);
+    await api('DELETE', '/api/invites/' + id, null, false, accessTenantSlug());
     toast('Invite revoked');
     loadAccess();
   } catch(e) { toast(e.message, true); }

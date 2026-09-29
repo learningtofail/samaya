@@ -2,10 +2,20 @@
 // Discord, toggle post_to_discord). Depends on common.js.
 
 async function loadSchedule() {
+  renderAllianceFilterSelect('scheduleFilter', 'schedule', loadSchedule);
   try {
-    occurrenceData = await api('GET', '/api/occurrences');
+    occurrenceData = await api('GET', '/api/occurrences', null, false, getTabFilter('schedule'));
     renderSchedule();
   } catch(e) { toast(e.message, true); }
+}
+
+// Spec §38.1: an occurrence's own owning alliance (not whatever this
+// tab's filter is currently set to) is what the write endpoints below
+// actually need — get_occurrence_with_event checks the header tenant
+// against the occurrence's real tenant/kingdom, so the wrong slug 404s.
+function occurrenceOwningSlug(id) {
+  const o = occurrenceData.find(x => x.id === id);
+  return o ? tenantSlugFor(o.owning_tenant_id) : undefined;
 }
 
 function renderSchedule() {
@@ -31,7 +41,7 @@ function renderSchedule() {
     return `<tr class="pf-v6-c-table__tr" style="${rowStyle}">
       <td class="pf-v6-c-table__td" style="${isToday?'font-weight:600':''}">${o.occurrence_date}</td>
       <td class="pf-v6-c-table__td">${DOW3[new Date(o.occurrence_date+'T12:00:00Z').getUTCDay()]}</td>
-      <td class="pf-v6-c-table__td"><span class="cat-dot" style="background:${allyColor}"></span>${escapeHtml(o.event_name)}${o.scope === 'kingdom-wide' ? ' 🌐' : ''}${o.leadership_only ? ' 👑' : ' 🛡️'}${isCombinedMode() ? ' <span style="color:var(--muted);font-size:var(--fs-sm)">(' + escapeHtml(tenantName(o.owning_tenant_id)) + ')</span>' : ''}</td>
+      <td class="pf-v6-c-table__td"><span class="cat-dot" style="background:${allyColor}"></span>${escapeHtml(o.event_name)}${o.scope === 'kingdom-wide' ? ' 🌐' : ''}${o.leadership_only ? ' 👑' : ' 🛡️'}${getTabFilter('schedule') === COMBINED_SLUG ? ' <span style="color:var(--muted);font-size:var(--fs-sm)">(' + escapeHtml(tenantName(o.owning_tenant_id)) + ')</span>' : ''}</td>
       <td class="pf-v6-c-table__td">${fmtTime(o.start_datetime_utc)}<br><span style="color:var(--muted);font-size:0.8em">${formatRelativeTime(new Date(o.start_datetime_utc))}</span></td>
       <td class="pf-v6-c-table__td">${o.duration_hours}h</td>
       <td class="pf-v6-c-table__td" style="color:var(--muted);font-size:var(--fs-sm)">${escapeHtml(o.discord_channel)}</td>
@@ -74,7 +84,7 @@ function renderSchedule() {
 
 async function togglePostFlag(id, checked) {
   try {
-    await api('PATCH', `/api/occurrences/${id}`, { post_to_discord: checked });
+    await api('PATCH', `/api/occurrences/${id}`, { post_to_discord: checked }, false, occurrenceOwningSlug(id));
     const occ = occurrenceData.find(o => o.id === id);
     if (occ) occ.post_to_discord = checked;
   } catch(e) { toast(e.message, true); }
@@ -82,7 +92,7 @@ async function togglePostFlag(id, checked) {
 
 async function postOne(id) {
   try {
-    const result = await api('POST', `/api/occurrences/${id}/post`);
+    const result = await api('POST', `/api/occurrences/${id}/post`, null, false, occurrenceOwningSlug(id));
     toast(`Posted — Discord ID: ${result.discord_event_id}`);
     loadSchedule();
   } catch(e) { toast(e.message, true); }
@@ -91,7 +101,7 @@ async function postOne(id) {
 async function cancelOccurrence(id) {
   if (!confirm('Cancel this Discord event? This cannot be undone.')) return;
   try {
-    await api('DELETE', `/api/occurrences/${id}/discord`);
+    await api('DELETE', `/api/occurrences/${id}/discord`, null, false, occurrenceOwningSlug(id));
     toast('Event cancelled on Discord');
     loadSchedule();
   } catch(e) { toast(e.message, true); }
@@ -103,7 +113,7 @@ async function postSelected(scope) {
   let posted = 0, errors = 0;
   for (const cb of checked) {
     try {
-      await api('POST', `/api/occurrences/${cb.dataset.occId}/post`);
+      await api('POST', `/api/occurrences/${cb.dataset.occId}/post`, null, false, occurrenceOwningSlug(parseInt(cb.dataset.occId, 10)));
       posted++;
     } catch(e) { errors++; }
   }

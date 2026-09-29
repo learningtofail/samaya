@@ -1,47 +1,68 @@
-// Config view (#v-config): lists the current tenant's own Discord
-// channels/roles, for reference when filling in an event's notification
-// settings elsewhere. Read-only — setting a tenant's own bot token/guild
-// is a superadmin action done via the Platform tab (platform.js), not
-// here; this view used to have that form, calling an endpoint
-// (PUT /api/config/discord) that no longer exists after the Phase 1
-// multi-tenant migration moved that responsibility to tenants.py. Fixed
-// as part of removing the theme switcher this file also used to render.
-// Depends on common.js.
+// Config view (#v-config): read-only Discord metadata (channels/roles),
+// for reference when filling in an event's notification settings
+// elsewhere. Setting a server's own bot token/guild is a superadmin
+// action done via the Platform tab (platform.js) against DiscordServer,
+// not here.
+//
+// Spec §38.5: rebuilt as an accordion grouped by Discord server (not by
+// alliance) — GET /api/discord/config-overview already does that
+// grouping server-side, since more than one alliance can share one
+// Discord server (Tenant.server_id has no unique constraint) and a
+// per-alliance list would just show the same channel/role list twice
+// under two names. Depends on common.js.
 
 async function loadDiscordConfig() {
-  await Promise.all([loadDiscordChannels(), loadDiscordRoles()]);
-}
-
-// The guild's own Discord display name — distinct from the tenant/alliance
-// name shown everywhere else in the UI, and worth surfacing here since
-// more than one tenant can point at the same guild_id (e.g. MOD/NSR).
-// Fetched once per load and reused for every channel row, rather than a
-// per-row call, since it's the same value for all of them (Config is
-// single-tenant — see common.js's SINGLE_TENANT_ONLY_VIEWS).
-async function loadDiscordChannels() {
-  const tbody = document.getElementById('discordChannelsBody');
+  renderAllianceFilterSelect('configFilter', 'config', loadDiscordConfig);
+  const wrap = document.getElementById('discordConfigAccordion');
+  if (!wrap) return;
+  wrap.innerHTML = '<p style="color:var(--muted)">Loading…</p>';
   try {
-    const [channels, guild] = await Promise.all([
-      api('GET', '/api/discord/channels'),
-      api('GET', '/api/discord/guild').catch(() => null),
-    ]);
-    const guildName = guild ? escapeHtml(guild.name) : '<span style="color:var(--muted)">—</span>';
-    tbody.innerHTML = channels.length
-      ? channels.map(c => `<tr><td>${escapeHtml(c.name)}</td><td>${guildName}</td><td style="color:var(--muted);font-size:var(--fs-sm)">${escapeHtml(c.id)}</td></tr>`).join('')
-      : '<tr><td colspan="3" style="color:var(--muted);padding:20px">No channels found.</td></tr>';
+    const data = await api('GET', '/api/discord/config-overview', null, false, getTabFilter('config'));
+    renderDiscordConfigAccordion(data.servers);
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="3" style="color:var(--muted);padding:20px">${escapeHtml(e.message)}</td></tr>`;
+    wrap.innerHTML = `<p style="color:#991b1b">${escapeHtml(e.message)}</p>`;
   }
 }
 
-async function loadDiscordRoles() {
-  const tbody = document.getElementById('discordRolesBody');
-  try {
-    const roles = await api('GET', '/api/discord/roles');
-    tbody.innerHTML = roles.length
-      ? roles.map(r => `<tr><td>${escapeHtml(r.name)}</td><td style="color:var(--muted);font-size:var(--fs-sm)">${escapeHtml(r.id)}</td></tr>`).join('')
-      : '<tr><td colspan="2" style="color:var(--muted);padding:20px">No roles found.</td></tr>';
-  } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="2" style="color:var(--muted);padding:20px">${escapeHtml(e.message)}</td></tr>`;
+function renderDiscordConfigAccordion(servers) {
+  const wrap = document.getElementById('discordConfigAccordion');
+  if (!servers.length) {
+    wrap.innerHTML = '<p style="color:var(--muted);padding:20px">No Discord servers configured yet.</p>';
+    return;
   }
+
+  wrap.innerHTML = servers.map((s, idx) => {
+    const alliancesLabel = s.tenants
+      .map(t => `<span style="color:${t.color || 'var(--muted)'};font-weight:500">${escapeHtml(t.name)}</span>`)
+      .join(', ');
+
+    if (s.error) {
+      return `<details class="pf-v6-u-mb-md" ${idx === 0 ? 'open' : ''}>
+        <summary style="cursor:pointer;font-weight:600;padding:10px 0">${escapeHtml(s.server_name)} <span style="font-weight:400;color:var(--muted);font-size:var(--fs-sm)">(${alliancesLabel})</span></summary>
+        <div class="pf-v6-c-alert pf-m-warning pf-m-inline pf-v6-u-mb-md"><div class="pf-v6-c-alert__icon">⚠</div><p class="pf-v6-c-alert__title">${escapeHtml(s.error)}</p></div>
+      </details>`;
+    }
+
+    const guildName = s.guild_name ? escapeHtml(s.guild_name) : '<span style="color:var(--muted)">—</span>';
+    const channelRows = s.channels.length
+      ? s.channels.map(c => `<tr><td>${escapeHtml(c.name)}</td><td style="color:var(--muted);font-size:var(--fs-sm)">${escapeHtml(c.id)}</td></tr>`).join('')
+      : '<tr><td colspan="2" style="color:var(--muted);padding:12px">No channels found.</td></tr>';
+    const roleRows = s.roles.length
+      ? s.roles.map(r => `<tr><td>${escapeHtml(r.name)}</td><td style="color:var(--muted);font-size:var(--fs-sm)">${escapeHtml(r.id)}</td></tr>`).join('')
+      : '<tr><td colspan="2" style="color:var(--muted);padding:12px">No roles found.</td></tr>';
+
+    return `<details class="pf-v6-u-mb-md" ${idx === 0 ? 'open' : ''}>
+      <summary style="cursor:pointer;font-weight:600;padding:10px 0">${escapeHtml(s.server_name)} — ${guildName} <span style="font-weight:400;color:var(--muted);font-size:var(--fs-sm)">(${alliancesLabel})</span></summary>
+      <div class="pf-v6-l-gallery pf-m-gutter" style="--pf-v6-l-gallery--GridTemplateColumns--min: 260px">
+        <div>
+          <h3 class="pf-v6-c-title pf-m-sm pf-v6-u-mb-xs">Channels</h3>
+          <table class="pf-v6-c-table pf-m-grid-md"><thead><tr><th>Name</th><th>ID</th></tr></thead><tbody>${channelRows}</tbody></table>
+        </div>
+        <div>
+          <h3 class="pf-v6-c-title pf-m-sm pf-v6-u-mb-xs">Roles</h3>
+          <table class="pf-v6-c-table pf-m-grid-md"><thead><tr><th>Name</th><th>ID</th></tr></thead><tbody>${roleRows}</tbody></table>
+        </div>
+      </div>
+    </details>`;
+  }).join('');
 }

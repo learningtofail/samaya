@@ -13,16 +13,21 @@ from models.db import Announcement, AnnouncementTarget, PostLog
 
 
 class TestStatus:
+    """Spec §38.2: GET /api/status returns one "alliances" row per
+    accessible tenant (a single-slug request still returns a one-item
+    list, so callers have one shape to handle either way)."""
 
     async def test_returns_ok_shape(self, client: AsyncClient, tenant: dict):
         r = await client.get("/admin/api/status")
         assert r.status_code == 200
         body = r.json()
         assert body["service"] == "samaya"
-        assert body["tenant"] == tenant["slug"]
-        assert "scheduler" in body
-        assert "regenerate_occurrences" in body["scheduler"]
-        assert "pre_event_notifier" in body["scheduler"]
+        assert len(body["alliances"]) == 1
+        row = body["alliances"][0]
+        assert row["tenant_slug"] == tenant["slug"]
+        assert "scheduler" in row
+        assert "regenerate_occurrences" in row["scheduler"]
+        assert "pre_event_notifier" in row["scheduler"]
 
     async def test_requires_login(self, client_no_session: AsyncClient, tenant: dict):
         r = await client_no_session.get("/admin/api/status", headers={"X-Tenant-Slug": tenant["slug"]})
@@ -33,8 +38,15 @@ class TestStatus:
     ):
         r1 = await client.get("/admin/api/status", headers={"X-Tenant-Slug": tenant["slug"]})
         r2 = await client.get("/admin/api/status", headers={"X-Tenant-Slug": second_tenant["slug"]})
-        assert r1.json()["tenant"] == tenant["slug"]
-        assert r2.json()["tenant"] == second_tenant["slug"]
+        assert [a["tenant_slug"] for a in r1.json()["alliances"]] == [tenant["slug"]]
+        assert [a["tenant_slug"] for a in r2.json()["alliances"]] == [second_tenant["slug"]]
+
+    async def test_combined_mode_returns_every_accessible_alliance(
+        self, client: AsyncClient, tenant: dict, second_tenant: dict
+    ):
+        r = await client.get("/admin/api/status", headers={"X-Tenant-Slug": "*"})
+        slugs = {a["tenant_slug"] for a in r.json()["alliances"]}
+        assert {tenant["slug"], second_tenant["slug"]} <= slugs
 
 
 class TestDeliveryHealth:
@@ -46,8 +58,11 @@ class TestDeliveryHealth:
         assert r.status_code == 200
         body = r.json()
         assert body["window_days"] == 7
-        assert body["announcements"] == {"posted": 0, "error": 0}
-        assert body["event_posts"] == {"posted": 0, "error": 0, "cancelled": 0}
+        assert len(body["alliances"]) == 1
+        row = body["alliances"][0]
+        assert row["tenant_slug"] == tenant["slug"]
+        assert row["announcements"] == {"posted": 0, "error": 0}
+        assert row["event_posts"] == {"posted": 0, "error": 0, "cancelled": 0}
 
     async def test_counts_announcement_targets_within_window(
         self, client: AsyncClient, db_session: AsyncSession, tenant: dict
@@ -73,7 +88,7 @@ class TestDeliveryHealth:
         await db_session.commit()
 
         r = await client.get("/admin/api/delivery-health")
-        assert r.json()["announcements"] == {"posted": 1, "error": 1}
+        assert r.json()["alliances"][0]["announcements"] == {"posted": 1, "error": 1}
 
     async def test_excludes_announcement_targets_outside_window(
         self, client: AsyncClient, db_session: AsyncSession, tenant: dict
@@ -91,7 +106,7 @@ class TestDeliveryHealth:
         await db_session.commit()
 
         r = await client.get("/admin/api/delivery-health")
-        assert r.json()["announcements"] == {"posted": 0, "error": 0}
+        assert r.json()["alliances"][0]["announcements"] == {"posted": 0, "error": 0}
 
     async def test_counts_post_log_within_window(
         self, client: AsyncClient, db_session: AsyncSession, tenant: dict
@@ -110,8 +125,9 @@ class TestDeliveryHealth:
         await db_session.commit()
 
         r = await client.get("/admin/api/delivery-health")
-        assert r.json()["event_posts"]["posted"] == 1
-        assert r.json()["event_posts"]["error"] == 1
+        row = r.json()["alliances"][0]
+        assert row["event_posts"]["posted"] == 1
+        assert row["event_posts"]["error"] == 1
 
     async def test_scoped_to_current_tenant(
         self, client: AsyncClient, db_session: AsyncSession, tenant: dict, second_tenant: dict
@@ -124,7 +140,7 @@ class TestDeliveryHealth:
         await db_session.commit()
 
         r = await client.get("/admin/api/delivery-health", headers={"X-Tenant-Slug": tenant["slug"]})
-        assert r.json()["event_posts"] == {"posted": 0, "error": 0, "cancelled": 0}
+        assert r.json()["alliances"][0]["event_posts"] == {"posted": 0, "error": 0, "cancelled": 0}
 
 
 class TestDiscordConfig:

@@ -14,14 +14,14 @@ from models import get_db
 from models.db import Announcement, AnnouncementTarget, Tenant, User
 from services.audit import log_change
 
-from .deps import get_current_tenant, require_not_viewer, get_current_user, resolve_target_tenants
+from .deps import get_current_tenant, get_current_tenants, require_not_viewer, get_current_user, resolve_target_tenants
 from .schemas import AnnouncementIn
 
 router = APIRouter()
 
 
-def _announcement_dict(a: Announcement) -> dict:
-    return {
+def _announcement_dict(a: Announcement, owning_tenant: Tenant | None = None) -> dict:
+    d = {
         "id":               a.id,
         "owning_tenant_id": a.owning_tenant_id,
         "title":            a.title,
@@ -44,24 +44,51 @@ def _announcement_dict(a: Announcement) -> dict:
             for t in a.targets
         ],
     }
+    # Spec §38.3 — the owning alliance's name/slug, for the "All" filter's
+    # badge; only populated when the caller (list_announcements below)
+    # actually looked it up, since every other caller of this dict-builder
+    # is already scoped to one known tenant and has no need for it.
+    if owning_tenant is not None:
+        d["owning_tenant_slug"] = owning_tenant.slug
+        d["owning_tenant_name"] = owning_tenant.name
+        d["owning_tenant_color"] = owning_tenant.color
+    return d
 
 
 @router.get("/api/announcements")
 async def list_announcements(
-    tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
+    tenants: list[Tenant] = Depends(get_current_tenants), db: AsyncSession = Depends(get_db)
 ):
-    """This tenant's own announcements, whether it's the owner or just
-    one of the targets — a coordinator should see an announcement
-    they're on the receiving end of, not only ones they authored."""
+    """Spec §38.3: moved from get_current_tenant to get_current_tenants —
+    every announcement targeting *any* accessible alliance, whether it's
+    the owner or just one of the targets (a coordinator should see an
+    announcement they're on the receiving end of, not only ones they
+    authored). "X-Tenant-Slug: *" (the consolidated Announcements page's
+    default) returns the union across every accessible alliance; a real
+    slug narrows to that one alliance's targets, same as before this
+    section."""
+    tenant_ids = [t.id for t in tenants]
+    tenants_by_id = {t.id: t for t in tenants}
+
     result = await db.execute(
         select(Announcement)
         .join(AnnouncementTarget, AnnouncementTarget.announcement_id == Announcement.id)
-        .where(AnnouncementTarget.tenant_id == tenant.id)
+        .where(AnnouncementTarget.tenant_id.in_(tenant_ids))
         .options(selectinload(Announcement.targets))
         .order_by(Announcement.scheduled_for.desc())
     )
     announcements = result.unique().scalars().all()
-    return [_announcement_dict(a) for a in announcements]
+
+    # owning_tenant_id may point at an alliance outside the accessible set
+    # (e.g. a superadmin viewing combined mode sees an announcement they
+    # were only cc'd on) — look those up too rather than leaving the badge
+    # blank for that case.
+    missing_owner_ids = {a.owning_tenant_id for a in announcements} - set(tenants_by_id)
+    if missing_owner_ids:
+        extra = await db.execute(select(Tenant).where(Tenant.id.in_(missing_owner_ids)))
+        tenants_by_id.update({t.id: t for t in extra.scalars().all()})
+
+    return [_announcement_dict(a, tenants_by_id.get(a.owning_tenant_id)) for a in announcements]
 
 
 @router.post("/api/announcements", status_code=201)

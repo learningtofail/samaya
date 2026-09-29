@@ -232,7 +232,7 @@ class TestAllianceRoster:
         r = await client.get("/api/alliances")
         body = r.json()
         assert body
-        assert set(body[0].keys()) == {"name", "slug", "color"}
+        assert set(body[0].keys()) == {"name", "slug", "color", "icon_image_data"}
 
     async def test_requires_no_auth(self, client: AsyncClient, tenant: dict):
         """Unlike admin's GET /admin/api/tenants, this route needs no

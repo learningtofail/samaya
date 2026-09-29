@@ -25,7 +25,11 @@ router = APIRouter()
 
 
 def _kingdom_dict(k: Kingdom) -> dict:
-    return {"id": k.id, "name": k.name, "slug": k.slug}
+    return {
+        "id": k.id, "name": k.name, "slug": k.slug,
+        "public_site_title":   k.public_site_title,
+        "admin_console_title": k.admin_console_title,
+    }
 
 
 def _server_dict(s: DiscordServer, tenant_names: list[str] | None = None) -> dict:
@@ -53,6 +57,7 @@ def _tenant_dict(t: Tenant) -> dict:
         "server_name": t.server.name,
         "guild_id":    t.server.guild_id,
         "color":       t.color,
+        "icon_image_data": t.icon_image_data or None,
     }
 
 
@@ -89,6 +94,10 @@ async def update_kingdom(
     before = {"name": kingdom.name, "slug": kingdom.slug}
     if payload.name is not None: kingdom.name = payload.name
     if payload.slug is not None: kingdom.slug = payload.slug
+    if payload.public_site_title is not None:
+        kingdom.public_site_title = payload.public_site_title or None
+    if payload.admin_console_title is not None:
+        kingdom.admin_console_title = payload.admin_console_title or None
 
     try:
         await log_change(
@@ -131,6 +140,7 @@ async def create_tenant(
         slug       = payload.slug,
         server_id  = payload.server_id,
         color      = payload.color,
+        icon_image_data = payload.icon_image_data or None,
     )
     db.add(tenant)
     try:
@@ -171,6 +181,8 @@ async def update_tenant(
     if payload.slug is not None:      tenant.slug      = payload.slug
     if payload.server_id is not None: tenant.server_id = payload.server_id
     if payload.color is not None:     tenant.color     = payload.color
+    if payload.icon_image_data is not None:
+        tenant.icon_image_data = payload.icon_image_data or None
 
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id,

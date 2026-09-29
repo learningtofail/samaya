@@ -1,30 +1,42 @@
-// Dashboard view (#v-dashboard). Depends on common.js (api, toast) and
-// services/discord_api indirectly via GET /api/status.
+// Dashboard view (#v-dashboard). Depends on common.js (api, toast).
+// Spec §38.2: no more single "current tenant" — this view has its own
+// "Alliance: [All ▾]" filter (dashboardFilter), defaulting to every
+// accessible alliance. GET /api/status and GET /api/delivery-health now
+// return one row per alliance ("alliances": [...]) instead of one
+// tenant's numbers, so narrowing to "All" still works the same way as
+// narrowing to one real slug — just more rows.
 
 function pfLabel(text, color) {
   return `<span class="pf-v6-c-label ${color} pf-m-filled"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${text}</span></span></span>`;
 }
 
+function tenantNameFor(tenantId) {
+  const t = TENANTS.find(t => t.id === tenantId);
+  return t ? t.name : null;
+}
+
 async function loadDashboard() {
+  renderAllianceFilterSelect('dashboardFilter', 'dashboard', loadDashboard);
+  const filter = getTabFilter('dashboard');
+
   try {
-    const s = await api('GET', '/api/status');
-    document.getElementById('st-service').innerHTML = pfLabel('ok', 'pf-m-green');
-    document.getElementById('st-discord').innerHTML = s.discord_connected
-      ? pfLabel(escapeHtml(s.discord_bot), 'pf-m-green')
-      : pfLabel('disconnected', 'pf-m-red');
-    const regen = s.scheduler.regenerate_occurrences;
-    document.getElementById('st-regen').textContent =
-      regen.last_run ? new Date(regen.last_run).toUTCString().slice(0,25) : 'Never';
-    document.getElementById('st-result').innerHTML = regen.last_result
-      ? pfLabel(escapeHtml(regen.last_result), regen.last_result === 'success' ? 'pf-m-green' : 'pf-m-red')
-      : '—';
+    const s = await api('GET', '/api/status', null, false, filter);
+    const el = document.getElementById('st-alliances');
+    if (el) {
+      el.innerHTML = s.alliances.map(a => `
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px">
+          <strong style="min-width:90px">${escapeHtml(a.tenant_name)}</strong>
+          ${a.discord_connected ? pfLabel(escapeHtml(a.discord_bot || 'connected'), 'pf-m-green') : pfLabel('disconnected', 'pf-m-red')}
+          <span style="color:var(--muted);font-size:0.85em">last regen: ${a.scheduler.regenerate_occurrences.last_run ? new Date(a.scheduler.regenerate_occurrences.last_run).toUTCString().slice(0,25) : 'never'}</span>
+        </div>`).join('') || '<p style="color:var(--muted)">No accessible alliances.</p>';
+    }
   } catch(e) { toast(e.message, true); }
 
   // Today's events, plus an Upcoming (next 48h) window (spec §29) — "Today"
   // goes blank by evening even when something's happening early tomorrow,
   // so a coordinator checking in the night before had nothing to look at.
   try {
-    const occs = await api('GET', '/api/occurrences');
+    const occs = await api('GET', '/api/occurrences', null, false, filter);
     const today = new Date().toISOString().slice(0,10);
     const now = new Date();
     const todayOccs = occs.filter(o => o.occurrence_date === today);
@@ -38,11 +50,13 @@ async function loadDashboard() {
 
     const statusColor = { posted: 'pf-m-green', active: 'pf-m-blue', completed: 'pf-m-grey', cancelled: 'pf-m-red', pending: 'pf-m-grey' };
     function occurrenceCard(o) {
+      const allianceName = tenantNameFor(o.owning_tenant_id);
       return `
       <div class="pf-v6-c-card pf-v6-u-mb-sm">
         <div class="pf-v6-c-card__body" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           ${o.scope === 'kingdom-wide' ? '<span title="Kingdom-wide">🌐</span> ' : ''}
           <strong>${escapeHtml(o.event_name)}</strong>${o.leadership_only ? ' <span title="Leadership only">👑</span>' : ' <span title="Alliance">🛡️</span>'}
+          ${allianceName && filter === COMBINED_SLUG ? pfLabel(escapeHtml(allianceName), 'pf-m-purple') : ''}
           <span style="color:var(--muted)">${fmtTime(o.start_datetime_utc)}</span>
           <span style="color:var(--muted);font-size:0.85em">${formatRelativeTime(new Date(o.start_datetime_utc))}</span>
           <span style="color:var(--muted)">${escapeHtml(o.discord_channel)}</span>
@@ -64,11 +78,12 @@ async function loadDashboard() {
     }
   } catch(e) {}
 
-  // Delivery Health (spec §31) — trailing-7-day rollup of both delivery
-  // channels this app posts through, so a coordinator can spot a pattern
-  // of failures without digging through Announcements or Post Log.
+  // Delivery Health (spec §31/§38.2) — trailing-7-day rollup of both
+  // delivery channels this app posts through, per alliance, so a
+  // kingdom-wide "All" view doesn't collapse everyone's health into one
+  // misleading sum and a problem alliance is visible at a glance.
   try {
-    const h = await api('GET', '/api/delivery-health');
+    const h = await api('GET', '/api/delivery-health', null, false, filter);
     const el = document.getElementById('deliveryHealth');
     if (el) {
       function healthRow(label, posted, error) {
@@ -76,22 +91,36 @@ async function loadDashboard() {
         const rate = total ? Math.round((posted / total) * 100) : null;
         return `
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px">
-          <strong style="min-width:120px">${label}</strong>
+          <strong style="min-width:120px">${escapeHtml(label)}</strong>
           ${pfLabel(posted + ' posted', 'pf-m-green')}
           ${error ? pfLabel(error + ' failed', 'pf-m-red') : ''}
           ${rate !== null ? `<span style="color:var(--muted);font-size:0.85em">${rate}% success</span>` : '<span style="color:var(--muted);font-size:0.85em">No activity in the last 7 days</span>'}
         </div>`;
       }
-      el.innerHTML = healthRow('Announcements', h.announcements.posted, h.announcements.error)
-        + healthRow('Event Posts', h.event_posts.posted, h.event_posts.error);
+      el.innerHTML = h.alliances.map(a => `
+        <div style="margin-bottom:10px">
+          <div style="font-weight:600;margin-bottom:2px">${escapeHtml(a.tenant_name)}</div>
+          ${healthRow('Announcements', a.announcements.posted, a.announcements.error)}
+          ${healthRow('Event Posts', a.event_posts.posted, a.event_posts.error)}
+        </div>`).join('') || '<p style="color:var(--muted)">No accessible alliances.</p>';
     }
   } catch(e) {}
 }
 
+// Spec §38.1: regeneration is inherently per-alliance (regenerate_occurrences
+// runs against one tenant_id) — when the Dashboard's filter is "All", this
+// fires it once per accessible alliance rather than guessing at a single
+// target, and reports how many succeeded.
 async function triggerRegen() {
-  try {
-    await api('POST', '/api/scheduler/regenerate');
-    toast('Regeneration complete');
-    loadDashboard();
-  } catch(e) { toast(e.message, true); }
+  const filter = getTabFilter('dashboard');
+  const targets = filter === COMBINED_SLUG ? TENANTS.map(t => t.slug) : [filter];
+  let okCount = 0;
+  for (const slug of targets) {
+    try {
+      await api('POST', '/api/scheduler/regenerate', null, false, slug);
+      okCount++;
+    } catch (e) { toast(`${slug}: ${e.message}`, true); }
+  }
+  if (okCount) toast(`Regeneration complete for ${okCount} alliance${okCount === 1 ? '' : 's'}`);
+  loadDashboard();
 }

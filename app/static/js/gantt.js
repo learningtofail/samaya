@@ -4,7 +4,10 @@
 
 async function loadGantt() {
   try {
-    const occs = await api('GET', '/api/occurrences');
+    // Gantt is a sub-view of Schedule (same window, same rows, different
+    // layout) — it shares Schedule's own alliance filter rather than
+    // keeping a second independent one.
+    const occs = await api('GET', '/api/occurrences', null, false, getTabFilter('schedule'));
     renderGantt(occs);
   } catch(e) { toast(e.message, true); }
 }

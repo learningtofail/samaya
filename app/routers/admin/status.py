@@ -1,13 +1,18 @@
 """GET /admin/api/status — scheduler + Discord connectivity summary shown
-on the admin dashboard's top bar, scoped to the current tenant
-(services/discord_api.verify_token, models.db.SchedulerState).
+on the admin dashboard's top bar.
 
 GET /admin/api/delivery-health (spec §31) — a trailing-7-day rollup of
 delivery success/failure across both channels this app posts through:
-AnnouncementTarget (spec §13) and PostLog (event Discord posts). One
-tenant's numbers only, same scoping as everything else here — a
-coordinator cares about whether *their* messages are landing, not the
-whole deployment's.
+AnnouncementTarget (spec §13) and PostLog (event Discord posts).
+
+Spec §38.2: both moved from get_current_tenant to get_current_tenants —
+"X-Tenant-Slug: *" (the default in the new consolidated Dashboard) returns
+one row per accessible alliance instead of one tenant's numbers, so a
+kingdom-wide view doesn't collapse everyone's health into a single
+misleading sum. Narrowing the Dashboard's filter to one alliance still
+sends its real slug, in which case each list below simply has one entry —
+same response shape either way, no separate "single" vs "combined" branch
+for callers to handle.
 """
 from datetime import datetime, timedelta, timezone
 
@@ -19,15 +24,12 @@ from models import get_db
 from models.db import Announcement, AnnouncementTarget, PostLog, SchedulerState, Tenant
 from services.discord_api import verify_token
 
-from .deps import PLATFORM_BOT_TOKEN, get_current_tenant
+from .deps import PLATFORM_BOT_TOKEN, get_current_tenants
 
 router = APIRouter()
 
 
-@router.get("/api/status")
-async def status(
-    tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
-):
+async def _status_for_tenant(tenant: Tenant, db: AsyncSession) -> dict:
     result = await db.execute(select(SchedulerState).where(SchedulerState.tenant_id == tenant.id))
     states = {s.job_name: s for s in result.scalars().all()}
 
@@ -40,9 +42,9 @@ async def status(
     notif = states.get("pre_event_notifier")
 
     return {
-        "service":          "samaya",
-        "tenant":            tenant.slug,
-        "database":         "ok",
+        "tenant_slug":       tenant.slug,
+        "tenant_name":       tenant.name,
+        "tenant_color":      tenant.color,
         "discord_connected": discord_ok,
         "discord_bot":       discord_bot,
         "scheduler": {
@@ -56,16 +58,23 @@ async def status(
                 "last_result": notif.last_result if notif else None,
             },
         },
+    }
+
+
+@router.get("/api/status")
+async def status(
+    tenants: list[Tenant] = Depends(get_current_tenants), db: AsyncSession = Depends(get_db)
+):
+    alliances = [await _status_for_tenant(t, db) for t in tenants]
+    return {
+        "service":   "samaya",
+        "database":  "ok",
+        "alliances": alliances,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
-@router.get("/api/delivery-health")
-async def delivery_health(
-    tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
-):
-    since = datetime.now(timezone.utc) - timedelta(days=7)
-
+async def _delivery_health_for_tenant(tenant: Tenant, db: AsyncSession, since: datetime) -> dict:
     # Announcement deliveries to this tenant — post_status lives on the
     # per-target row, but the only timestamp available is the parent
     # Announcement's posted_at (set once the whole announcement goes
@@ -88,7 +97,9 @@ async def delivery_health(
     log_counts = dict(log_result.all())
 
     return {
-        "window_days": 7,
+        "tenant_slug":  tenant.slug,
+        "tenant_name":  tenant.name,
+        "tenant_color": tenant.color,
         "announcements": {
             "posted": ann_counts.get("posted", 0),
             "error":  ann_counts.get("error", 0),
@@ -98,4 +109,16 @@ async def delivery_health(
             "error":     log_counts.get("error", 0),
             "cancelled": log_counts.get("cancelled", 0),
         },
+    }
+
+
+@router.get("/api/delivery-health")
+async def delivery_health(
+    tenants: list[Tenant] = Depends(get_current_tenants), db: AsyncSession = Depends(get_db)
+):
+    since = datetime.now(timezone.utc) - timedelta(days=7)
+    alliances = [await _delivery_health_for_tenant(t, db, since) for t in tenants]
+    return {
+        "window_days": 7,
+        "alliances":   alliances,
     }

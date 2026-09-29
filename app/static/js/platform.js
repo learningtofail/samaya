@@ -91,17 +91,33 @@ async function loadPlatformKingdoms() {
   } catch(e) { toast(e.message, true); }
 }
 
-// Same prompt-based editing convention as editTenant() below — Cancel on
-// any one field leaves it unchanged rather than aborting the whole edit.
+// Same prompt-based editing convention platform.js uses elsewhere — Cancel
+// on any one field leaves it unchanged rather than aborting the whole edit.
+// Spec §38.7: also prompts for the two branding title overrides
+// (public_site_title/admin_console_title) — leaving either blank clears it
+// back to the built-in default, matching KingdomPatch's own "empty string
+// or falsy -> None" semantics in routers/admin/tenants.py.
 async function editKingdom(k) {
   const name = prompt('Kingdom name:', k.name);
   if (name === null) return;
   const slug = prompt('URL slug:', k.slug);
   if (slug === null) return;
+  const publicTitle = prompt(
+    'Public events page title (leave blank to use the default "Kingshot Event Schedule"):',
+    k.public_site_title || ''
+  );
+  if (publicTitle === null) return;
+  const adminTitle = prompt(
+    'Admin console title (leave blank to use the default "Samaya"):',
+    k.admin_console_title || ''
+  );
+  if (adminTitle === null) return;
 
   const payload = {};
   if (name !== k.name) payload.name = name;
   if (slug !== k.slug) payload.slug = slug;
+  if (publicTitle !== (k.public_site_title || '')) payload.public_site_title = publicTitle;
+  if (adminTitle !== (k.admin_console_title || '')) payload.admin_console_title = adminTitle;
   if (!Object.keys(payload).length) {
     toast('No changes made');
     return;
@@ -195,7 +211,9 @@ async function loadPlatformTenants() {
     document.getElementById('tenantsBody').innerHTML = tenants.length
       ? tenants.map(t =>
           '<tr class="pf-v6-c-table__tr">'
-          + '<td class="pf-v6-c-table__td"><span class="cat-dot" style="background:' + escapeHtml(t.color) + '"></span>' + escapeHtml(t.name) + '</td>'
+          + '<td class="pf-v6-c-table__td">' + (t.icon_image_data
+              ? '<img src="' + escapeHtml(t.icon_image_data) + '" style="width:20px;height:20px;border-radius:4px;object-fit:cover;vertical-align:middle;margin-right:6px">'
+              : '<span class="cat-dot" style="background:' + escapeHtml(t.color) + '"></span>') + escapeHtml(t.name) + '</td>'
           + '<td class="pf-v6-c-table__td">' + escapeHtml(t.slug) + '</td>'
           + '<td class="pf-v6-c-table__td">' + t.kingdom_id + '</td>'
           + '<td class="pf-v6-c-table__td">' + escapeHtml(t.server_name) + '<div style="font-size:var(--fs-sm);color:var(--muted)">' + escapeHtml(t.guild_id) + '</div></td>'
@@ -221,6 +239,13 @@ async function createKingdom() {
   } catch(e) { toast(e.message, true); }
 }
 
+// Spec §38: Tenant create/edit moved from a prompt() chain to a real modal
+// (#tenantModal) — a file picker for the alliance's 1:1 icon can't be done
+// through prompt(). Bot credentials still aren't edited here at all (spec
+// §25) — that's the Discord Server's own concern (editDiscordServer above);
+// this modal only picks which server the alliance belongs to.
+const TENANT_ICON_MAX_BYTES = 8 * 1024 * 1024;
+
 async function createTenant() {
   const kingdoms = await api('GET', '/api/kingdoms', null, /*skipTenantHeader=*/true);
   if (!kingdoms.length) {
@@ -231,55 +256,94 @@ async function createTenant() {
     toast('Create a Discord Server first (above)', true);
     return;
   }
-  const kingdomList = kingdoms.map(k => k.id + '=' + k.name).join(', ');
-  const kingdomIdStr = prompt('Kingdom ID for this alliance (' + kingdomList + '):', String(kingdoms[0].id));
-  if (!kingdomIdStr) return;
-  const name = prompt('Alliance name (e.g. "MOD"):');
-  if (!name) return;
-  const slug = prompt('URL slug (lowercase — e.g. "mod"):', name.toLowerCase().replace(/[^a-z0-9]+/g, ''));
-  if (!slug) return;
-  const serverList = DISCORD_SERVERS.map(s => s.id + '=' + s.name + ' (' + s.guild_id + ')').join(', ');
-  const serverIdStr = prompt('Discord Server ID for this alliance (' + serverList + '):', String(DISCORD_SERVERS[0].id));
-  if (!serverIdStr) return;
-
-  try {
-    await api('POST', '/api/tenants', {
-      kingdom_id: parseInt(kingdomIdStr, 10), name, slug, server_id: parseInt(serverIdStr, 10),
-    }, /*skipTenantHeader=*/true);
-    toast('Tenant created — ' + name + ' can now be invited (see the Access tab once you switch into it)');
-    loadPlatformTenants();
-    loadTenants();  // refresh the picker too
-  } catch(e) { toast(e.message, true); }
+  openTenantModal(null, kingdoms);
 }
 
-// Edits an existing Tenant via PATCH /api/tenants/{id}. Each field prompts
-// pre-filled with its current value; pressing Cancel on any one of them
-// leaves that field unchanged rather than aborting the whole edit, since
-// re-typing every other field just to fix one is tedious. Bot credentials
-// are no longer edited here at all (spec §25) — that's the Discord
-// Server's own concern now (editDiscordServer above); this only picks
-// which server the alliance belongs to.
 async function editTenant(t) {
-  const name = prompt('Alliance name:', t.name);
-  const slug = (name !== null) ? prompt('URL slug:', t.slug) : null;
-  const serverList = DISCORD_SERVERS.map(s => s.id + '=' + s.name + ' (' + s.guild_id + ')').join(', ');
-  const serverIdStr = (slug !== null) ? prompt('Discord Server ID (' + serverList + '):', String(t.server_id)) : null;
+  const kingdoms = await api('GET', '/api/kingdoms', null, /*skipTenantHeader=*/true);
+  openTenantModal(t, kingdoms);
+}
 
-  const payload = {};
-  if (name !== null && name !== t.name) payload.name = name;
-  if (slug !== null && slug !== t.slug) payload.slug = slug;
-  if (serverIdStr !== null && parseInt(serverIdStr, 10) !== t.server_id) payload.server_id = parseInt(serverIdStr, 10);
+function openTenantModal(t, kingdoms) {
+  document.getElementById('tenantModalTitle').querySelector('.pf-v6-c-modal-box__title-text').textContent = t ? 'Edit Tenant' : 'New Tenant';
+  document.getElementById('tnId').value = t ? t.id : '';
+  document.getElementById('tnName').value = t ? t.name : '';
+  document.getElementById('tnSlug').value = t ? t.slug : '';
+  document.getElementById('tnKingdom').innerHTML = kingdoms.map(k =>
+    `<option value="${k.id}" ${t && t.kingdom_id === k.id ? 'selected' : ''}>${escapeHtml(k.name)}</option>`).join('');
+  document.getElementById('tnServer').innerHTML = DISCORD_SERVERS.map(s =>
+    `<option value="${s.id}" ${t && t.server_id === s.id ? 'selected' : ''}>${escapeHtml(s.name)} (${escapeHtml(s.guild_id)})</option>`).join('');
+  setTenantIconPreview(t ? (t.icon_image_data || '') : '');
+  document.getElementById('tnIconFile').value = '';
+  document.getElementById('tenantModal').classList.add('open');
+}
 
-  if (!Object.keys(payload).length) {
-    toast('No changes made');
+function closeTenantModal() {
+  document.getElementById('tenantModal').classList.remove('open');
+}
+
+function setTenantIconPreview(dataUri) {
+  document.getElementById('tnIconData').value = dataUri || '';
+  const img = document.getElementById('tnIconPreview');
+  const removeBtn = document.getElementById('tnIconRemove');
+  if (dataUri) {
+    img.src = dataUri;
+    img.style.display = '';
+    removeBtn.style.display = '';
+  } else {
+    img.style.display = 'none';
+    img.src = '';
+    removeBtn.style.display = 'none';
+  }
+}
+
+function handleTenantIconFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (file.size > TENANT_ICON_MAX_BYTES) {
+    toast('Icon image is too large (max 8MB) — pick a smaller file', true);
+    input.value = '';
     return;
   }
+  const reader = new FileReader();
+  reader.onload = () => setTenantIconPreview(reader.result);
+  reader.onerror = () => toast('Could not read that image file', true);
+  reader.readAsDataURL(file);
+}
+
+function removeTenantIcon() {
+  setTenantIconPreview('');
+  document.getElementById('tnIconFile').value = '';
+}
+
+async function saveTenantModal() {
+  const id = document.getElementById('tnId').value;
+  const name = document.getElementById('tnName').value.trim();
+  const slug = document.getElementById('tnSlug').value.trim();
+  const kingdomId = parseInt(document.getElementById('tnKingdom').value, 10);
+  const serverId = parseInt(document.getElementById('tnServer').value, 10);
+  const iconData = document.getElementById('tnIconData').value;
+  if (!name || !slug) { toast('Name and slug are required', true); return; }
 
   try {
-    await api('PATCH', `/api/tenants/${t.id}`, payload, /*skipTenantHeader=*/true);
-    toast('Alliance updated');
+    if (id) {
+      // icon_image_data: '' explicitly clears it (same PATCH null-vs-empty
+      // convention as EventDefinition.cover_image_data) — omitting the key
+      // entirely isn't an option here since the modal always has a value
+      // (possibly '') for it once opened.
+      await api('PATCH', `/api/tenants/${id}`, {
+        name, slug, server_id: serverId, icon_image_data: iconData || '',
+      }, /*skipTenantHeader=*/true);
+      toast('Alliance updated');
+    } else {
+      await api('POST', '/api/tenants', {
+        kingdom_id: kingdomId, name, slug, server_id: serverId, icon_image_data: iconData || null,
+      }, /*skipTenantHeader=*/true);
+      toast('Tenant created — ' + name + ' can now be invited from the Access tab');
+    }
+    closeTenantModal();
     loadPlatformTenants();
-    loadTenants();  // refresh the picker too, in case name/slug changed
+    loadTenants();  // refresh TENANTS/TENANT_ICONS everywhere
   } catch(e) { toast(e.message, true); }
 }
 

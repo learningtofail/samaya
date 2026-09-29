@@ -33,6 +33,15 @@ class Kingdom(Base):
     name = Column(Text, nullable=False)
     slug = Column(Text, nullable=False, unique=True)
 
+    # Spec §38.7 — kingdom-wide branding, edited from the admin console's
+    # merged Access & Platform page (superadmin-only, since this instance
+    # is one Kingdom deployment and branding isn't an individual alliance's
+    # call to make). NULL means "use the hardcoded default" everywhere
+    # these are read, so a deployment predating this field renders exactly
+    # as it always has.
+    public_site_title   = Column(Text, nullable=True)
+    admin_console_title = Column(Text, nullable=True)
+
     tenants = relationship("Tenant", back_populates="kingdom")
 
 
@@ -78,6 +87,18 @@ class Tenant(Base):
     slug       = Column(Text, nullable=False, unique=True)
     color      = Column(Text, nullable=False, default="#475569")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Spec §38 (new feature request alongside the admin consolidation) — an
+    # optional 1:1 icon/logo, stored as the full data URI exactly like
+    # EventDefinition.cover_image_data (spec §35): whatever a browser's
+    # FileReader.readAsDataURL() produces, validated by the same
+    # parse_cover_image_data() (the function is about "an image data URI,"
+    # not specifically events). NULL/empty means no icon — every place
+    # that renders one (public masthead, tenant badges, the admin filter
+    # dropdowns, the alliance switcher) falls back to the existing plain
+    # color-pill/text treatment, so a tenant predating this field is
+    # unaffected.
+    icon_image_data = Column(Text, nullable=True)
 
     # Eager by default (lazy="joined") on both: a single cheap FK join
     # each, needed wherever a Tenant's Discord credentials (server) or

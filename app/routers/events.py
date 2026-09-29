@@ -6,9 +6,11 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
-from models.db import Announcement, AnnouncementTarget, EventDefinition, Occurrence, Tenant
+from models.db import Announcement, AnnouncementTarget, EventDefinition, Kingdom, Occurrence, PostLog, Tenant
 
 router = APIRouter()
+
+_DEFAULT_PUBLIC_SITE_TITLE = "Kingshot Event Schedule"
 
 WINDOW_DAYS = 28
 
@@ -163,9 +165,29 @@ async def list_alliances(db: AsyncSession = Depends(get_db)):
     exposure, just a way to list them without already knowing one."""
     result = await db.execute(select(Tenant).order_by(Tenant.name))
     return JSONResponse([
-        {"name": t.name, "slug": t.slug, "color": t.color}
+        {
+            "name": t.name, "slug": t.slug, "color": t.color,
+            "icon_image_data": t.icon_image_data or None,
+        }
         for t in result.scalars().all()
     ])
+
+
+@router.get("/api/kingdom-branding")
+async def get_kingdom_branding(db: AsyncSession = Depends(get_db)):
+    """Public, unauthenticated (spec §38.7) — the same trust level as
+    GET /api/alliances above: a display title is not sensitive, and both
+    the public events pages and the admin console masthead need this
+    before a user has necessarily logged in. This deployment is a single
+    Kingdom (ks138.taraka.dev), so "the Kingdom" is just the first row;
+    a deployment with none yet (or neither title ever set) gets the
+    hardcoded defaults, unchanged from before this field existed."""
+    result = await db.execute(select(Kingdom).order_by(Kingdom.id).limit(1))
+    kingdom = result.scalar_one_or_none()
+    return JSONResponse({
+        "public_site_title":   (kingdom.public_site_title if kingdom else None) or _DEFAULT_PUBLIC_SITE_TITLE,
+        "admin_console_title": (kingdom.admin_console_title if kingdom else None) or "Samaya",
+    })
 
 
 @router.get("/api/events")
@@ -231,6 +253,77 @@ async def list_events_all(db: AsyncSession = Depends(get_db)):
 
     rows.sort(key=_sort_key)
     return JSONResponse(rows)
+
+
+async def _last_activity_for_tenants(db: AsyncSession, tenant_ids: list[int]) -> dict | None:
+    """Spec §38.9 — whichever is more recent between a `posted` PostLog
+    row (an event's Discord post) and a `posted` AnnouncementTarget (an
+    announcement's delivery to one specific alliance — deliberately the
+    per-target status, not the parent Announcement's aggregate status:
+    a multi-target announcement can succeed for one alliance and fail for
+    another, and this must never claim a message landed somewhere it
+    didn't)."""
+    if not tenant_ids:
+        return None
+
+    candidates = []
+
+    log_result = await db.execute(
+        select(PostLog)
+        .where(PostLog.tenant_id.in_(tenant_ids), PostLog.status == "posted")
+        .order_by(PostLog.posted_at_utc.desc())
+        .limit(1)
+    )
+    log = log_result.scalars().first()
+    if log and log.posted_at_utc:
+        candidates.append(("event", log.event_name, log.posted_at_utc, log.tenant_id))
+
+    ann_result = await db.execute(
+        select(Announcement, AnnouncementTarget.tenant_id)
+        .join(AnnouncementTarget, AnnouncementTarget.announcement_id == Announcement.id)
+        .where(AnnouncementTarget.tenant_id.in_(tenant_ids), AnnouncementTarget.post_status == "posted")
+        .order_by(Announcement.posted_at.desc())
+        .limit(1)
+    )
+    ann_row = ann_result.first()
+    if ann_row and ann_row[0].posted_at:
+        ann, ann_tenant_id = ann_row
+        candidates.append(("announcement", ann.title, ann.posted_at, ann_tenant_id))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda c: c[2], reverse=True)
+    kind, name, at, tenant_id = candidates[0]
+    return {
+        "kind": kind, "name": name,
+        "at": at.astimezone(timezone.utc).isoformat(),
+        "tenant_id": tenant_id,
+    }
+
+
+@router.get("/t/{tenant_slug}/api/last-activity")
+async def last_activity(tenant_slug: str, db: AsyncSession = Depends(get_db)):
+    tenant = await _get_tenant_by_slug(tenant_slug, db)
+    activity = await _last_activity_for_tenants(db, [tenant.id])
+    if not activity:
+        return JSONResponse(None)
+    activity.pop("tenant_id", None)
+    return JSONResponse(activity)
+
+
+@router.get("/api/last-activity")
+async def last_activity_all(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Tenant))
+    tenants = result.scalars().all()
+    activity = await _last_activity_for_tenants(db, [t.id for t in tenants])
+    if not activity:
+        return JSONResponse(None)
+    t = next((t for t in tenants if t.id == activity["tenant_id"]), None)
+    activity["tenant_name"] = t.name if t else None
+    activity["tenant_slug"] = t.slug if t else None
+    activity.pop("tenant_id", None)
+    return JSONResponse(activity)
 
 
 @router.get("/events", response_class=HTMLResponse)

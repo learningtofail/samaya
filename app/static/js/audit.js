@@ -2,9 +2,23 @@
 // common.js): a read-only feed over /api/audit-log (spec §31). Depends on
 // common.js.
 
+// require_tenant_owner-gated per-alliance (audit_log.py) — no combined
+// form, same reasoning as Access's invites/members. Reuses whichever
+// alliance Access's own selector is set to, since both live in the same
+// superadmin-only console area (spec §38.6) and audit/access naturally
+// refer to the same alliance at a time.
+function auditTenantSlug() {
+  return typeof accessTenantSlug === 'function' ? accessTenantSlug() : (TENANTS[0] ? TENANTS[0].slug : '');
+}
+
 async function loadAuditLog() {
+  const label = document.getElementById('auditAllianceLabel');
+  if (label) {
+    const t = TENANTS.find(t => t.slug === auditTenantSlug());
+    label.textContent = t ? `Alliance: ${t.name}` : '';
+  }
   try {
-    const entries = await api('GET', '/api/audit-log?limit=100');
+    const entries = await api('GET', '/api/audit-log?limit=100', null, false, auditTenantSlug());
     const tbody = document.getElementById('auditLogBody');
     tbody.innerHTML = entries.length
       ? entries.map(buildAuditRow).join('')

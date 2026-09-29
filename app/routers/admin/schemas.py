@@ -111,6 +111,9 @@ class TenantIn(BaseModel):
     slug:       str
     server_id:  int
     color:      str = "#475569"
+    icon_image_data: Optional[str] = None
+
+    _validate_icon = field_validator("icon_image_data", mode="before")(parse_cover_image_data)
 
 
 class TenantPatch(BaseModel):
@@ -118,6 +121,12 @@ class TenantPatch(BaseModel):
     slug:       Optional[str] = None
     server_id:  Optional[int] = None
     color:      Optional[str] = None
+    icon_image_data: Optional[str] = None
+
+    # Same nullable-field PATCH semantics as EventPatch.cover_image_data
+    # (spec §35): omitted/null leaves the icon unchanged, "" clears it.
+    _validate_icon = field_validator("icon_image_data", mode="before")(
+        lambda cls, v: parse_cover_image_data(v, allow_none=True))
 
 
 class DiscordServerIn(BaseModel):
@@ -146,6 +155,15 @@ class KingdomIn(BaseModel):
 class KingdomPatch(BaseModel):
     name: Optional[str] = None
     slug: Optional[str] = None
+    # Spec §38.7 — kingdom-wide branding. Optional[str] with no validator
+    # beyond "it's a string": these are plain display titles, not
+    # structured data, so free text (including emoji) is fine. An empty
+    # string explicitly resets to the hardcoded default (same
+    # omitted/null-vs-"" convention as every other nullable PATCH field
+    # in this app), since NULL is what every reader already treats as
+    # "no override set."
+    public_site_title:   Optional[str] = None
+    admin_console_title: Optional[str] = None
 
 
 class TenantInviteIn(BaseModel):
