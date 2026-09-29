@@ -55,6 +55,18 @@
   #allianceModal.open { display: block; }
   #timezoneModal { display: none; }
   #timezoneModal.open { display: block; }
+  /* Same PatternFly page-layout fix admin.html already carries: .pf-v6-c-page
+     is CSS grid with header/sidebar/main template areas, and with no
+     sidebar element on this page, .pf-v6-c-page__main-container's default
+     "page chrome inset" margin (identical on both inline-start/inline-end)
+     renders asymmetric — a visible gap on the start side, while the same
+     margin on the end side pushes the container past the viewport edge
+     where the element's own overflow-x:hidden silently clips it. That's
+     what read as the whole page being off-center. Force a plain stacked
+     flex layout and zero the margin instead of fighting the token. */
+  .pf-v6-c-page { display: flex !important; flex-direction: column !important; min-height: 100vh; }
+  .pf-v6-c-page__main-container { flex: 1 1 auto !important; display: flex !important; flex-direction: column !important; align-self: stretch !important; width: 100% !important; margin: 0 !important; overflow: visible !important; height: auto !important; }
+  .pf-v6-c-page__main { flex: 1 1 auto !important; width: 100% !important; overflow: visible !important; height: auto !important; }
 </style>
 </head>
 <body>
