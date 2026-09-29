@@ -71,6 +71,22 @@ async def events_page(tenant_slug: str, db: AsyncSession = Depends(get_db)):
         return HTMLResponse(f.read())
 
 
+@router.get("/api/alliances")
+async def list_alliances(db: AsyncSession = Depends(get_db)):
+    """Public, unauthenticated roster of every alliance's public-page
+    identity (name/slug/color) — powers the alliance switcher on the
+    public events pages (spec §26). Not gated the way admin's
+    GET /admin/api/tenants is: a Tenant's name/slug/color are already
+    exposed via the combined /api/events payload (for the tenant badge)
+    and via the /t/{slug}/events URL itself, so this adds no new
+    exposure, just a way to list them without already knowing one."""
+    result = await db.execute(select(Tenant).order_by(Tenant.name))
+    return JSONResponse([
+        {"name": t.name, "slug": t.slug, "color": t.color}
+        for t in result.scalars().all()
+    ])
+
+
 @router.get("/api/events")
 async def list_events_all(db: AsyncSession = Depends(get_db)):
     """The bare, combined calendar — every tenant's events on one page,

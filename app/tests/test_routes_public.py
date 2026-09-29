@@ -209,3 +209,34 @@ class TestCombinedPublicViews:
         expected_base = f"{tenant['slug']}-weekly-raid-{today}"
         expected_uid = hashlib.md5(expected_base.encode()).hexdigest() + "@ks138.taraka.dev"
         assert expected_uid in r.text
+
+
+class TestAllianceRoster:
+    """GET /api/alliances — the public, unauthenticated roster powering the
+    alliance switcher on the public events pages (spec §26)."""
+
+    async def test_lists_every_tenant_sorted_by_name(
+        self, client: AsyncClient, tenant: dict, second_tenant: dict
+    ):
+        r = await client.get("/api/alliances")
+        assert r.status_code == 200
+        body = r.json()
+        names = [a["name"] for a in body]
+        assert names == sorted(names)
+        assert {"name": "MOD", "slug": "mod"}.items() <= body[names.index("MOD")].items()
+        assert {"name": "NSR", "slug": "nsr"}.items() <= body[names.index("NSR")].items()
+
+    async def test_each_entry_has_name_slug_color_only(
+        self, client: AsyncClient, tenant: dict
+    ):
+        r = await client.get("/api/alliances")
+        body = r.json()
+        assert body
+        assert set(body[0].keys()) == {"name", "slug", "color"}
+
+    async def test_requires_no_auth(self, client: AsyncClient, tenant: dict):
+        """Unlike admin's GET /admin/api/tenants, this route needs no
+        session cookie — the fixture `client` here is unauthenticated by
+        default (auth is added explicitly via test_user/login elsewhere)."""
+        r = await client.get("/api/alliances")
+        assert r.status_code == 200

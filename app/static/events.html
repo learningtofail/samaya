@@ -46,6 +46,15 @@
     .samaya-date-col { min-width: 3rem; }
     .samaya-date-day { font-size: var(--pf-t--global--font--size--heading--md); }
   }
+  /* Header's alliance/time-zone controls (spec §26, mirroring admin's
+     §24) — plain text links rather than a <select>, each opening a modal
+     with the actual option list. */
+  .header-link { color: var(--pf-t--global--text--color--inverse); font-size: var(--pf-t--global--font--size--body--sm); text-decoration: none; white-space: nowrap; padding: 4px 8px; border-radius: 4px; }
+  .header-link:hover { background: rgba(255,255,255,.1); text-decoration: underline; }
+  #allianceModal { display: none; }
+  #allianceModal.open { display: block; }
+  #timezoneModal { display: none; }
+  #timezoneModal.open { display: block; }
 </style>
 </head>
 <body>
@@ -59,11 +68,46 @@
       </span>
     </div>
     <div class="pf-v6-c-masthead__content" style="display:flex;align-items:center;gap:var(--pf-t--global--spacer--sm)">
-      <label for="displayTzPicker" style="color:var(--pf-t--global--text--color--inverse);font-size:var(--pf-t--global--font--size--body--sm);white-space:nowrap">🕐 Time zone:</label>
-      <select class="pf-v6-c-form-control" id="displayTzPicker" onchange="onDisplayTzChange(this.value)" title="Local time zone used for the second time shown next to each UTC time" style="width:auto;margin-right:var(--pf-t--global--spacer--sm)"></select>
+      <a href="#" id="allianceLink" class="header-link" onclick="openAllianceModal();return false;" title="Switch to another alliance's events, or the combined all-alliances view">Loading…</a>
+      <a href="#" id="headerClock" class="header-link" onclick="openTimezoneModal();return false;" title="Current UTC time and your local time — click to change your time zone">Loading…</a>
       <a class="pf-v6-c-button pf-m-primary" id="icsLink" href="#">📅 Subscribe to Calendar</a>
     </div>
   </header>
+
+  <!-- ALLIANCE MODAL (spec §26) -->
+  <div class="pf-v6-c-backdrop" id="allianceModal">
+    <div class="pf-v6-l-bullseye">
+      <div class="pf-v6-c-modal-box pf-m-sm" role="dialog" aria-modal="true" aria-labelledby="allianceModalTitle">
+        <header class="pf-v6-c-modal-box__header">
+          <h2 class="pf-v6-c-modal-box__title" id="allianceModalTitle"><span class="pf-v6-c-modal-box__title-text">Switch Alliance</span></h2>
+        </header>
+        <div class="pf-v6-c-modal-box__body">
+          <div id="allianceModalList" style="display:flex;flex-direction:column;gap:4px"></div>
+        </div>
+        <footer class="pf-v6-c-modal-box__footer">
+          <button class="pf-v6-c-button pf-m-link" onclick="closeAllianceModal()">Cancel</button>
+        </footer>
+      </div>
+    </div>
+  </div>
+
+  <!-- TIME ZONE MODAL (spec §26, mirrors admin's §24) -->
+  <div class="pf-v6-c-backdrop" id="timezoneModal">
+    <div class="pf-v6-l-bullseye">
+      <div class="pf-v6-c-modal-box pf-m-sm" role="dialog" aria-modal="true" aria-labelledby="timezoneModalTitle">
+        <header class="pf-v6-c-modal-box__header">
+          <h2 class="pf-v6-c-modal-box__title" id="timezoneModalTitle"><span class="pf-v6-c-modal-box__title-text">Time Zone</span></h2>
+        </header>
+        <div class="pf-v6-c-modal-box__body">
+          <p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle);margin:0 0 12px">Controls the local half of every time shown alongside UTC on this page.</p>
+          <div id="timezoneModalList" style="display:flex;flex-direction:column;gap:4px"></div>
+        </div>
+        <footer class="pf-v6-c-modal-box__footer">
+          <button class="pf-v6-c-button pf-m-link" onclick="closeTimezoneModal()">Cancel</button>
+        </footer>
+      </div>
+    </div>
+  </div>
 
   <div class="pf-v6-c-page__main-container">
   <main class="pf-v6-c-page__main" tabindex="-1" id="main-content">
@@ -149,20 +193,96 @@ function setDisplayTz(tz) {
   localStorage.setItem('samaya_display_tz', tz);
 }
 
-function initDisplayTzPicker() {
-  const picker = document.getElementById('displayTzPicker');
-  if (!picker) return;
-  const current = getDisplayTz();
-  const options = DISPLAY_TZ_OPTIONS.includes(current) ? DISPLAY_TZ_OPTIONS : [current, ...DISPLAY_TZ_OPTIONS];
-  picker.innerHTML = options.map(tz => `<option value="${tz}" ${tz === current ? 'selected' : ''}>${tz}</option>`).join('');
+// Live "HH:MM UTC · HH:MM <zone>" clock in the header, mirroring admin's
+// §24 header control exactly (this page has no shared JS with admin.html,
+// so it's duplicated here rather than imported — same reasoning as the
+// zone list/localStorage key above).
+let _headerClockTimer = null;
+
+function formatHeaderClock() {
+  const now = new Date();
+  const utcStr = now.toLocaleTimeString('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' });
+  const tz = getDisplayTz();
+  if (tz === 'UTC') return `🕐 ${utcStr} UTC`;
+  let localStr;
+  try {
+    localStr = now.toLocaleTimeString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return `🕐 ${utcStr} UTC`;
+  }
+  return `🕐 ${utcStr} UTC · ${localStr} (${tz})`;
 }
 
-function onDisplayTzChange(tz) {
+function startHeaderClock() {
+  const el = document.getElementById('headerClock');
+  if (!el) return;
+  const tick = () => { el.textContent = formatHeaderClock(); };
+  tick();
+  if (_headerClockTimer) clearInterval(_headerClockTimer);
+  _headerClockTimer = setInterval(tick, 30000);
+}
+
+function openTimezoneModal() {
+  const list = document.getElementById('timezoneModalList');
+  const current = getDisplayTz();
+  const options = DISPLAY_TZ_OPTIONS.includes(current) ? DISPLAY_TZ_OPTIONS : [current, ...DISPLAY_TZ_OPTIONS];
+  list.innerHTML = options.map(tz =>
+    `<button type="button" class="pf-v6-c-button ${tz === current ? 'pf-m-primary' : 'pf-m-secondary'}" style="justify-content:flex-start" onclick="selectTimezone('${tz}')">${tz}</button>`
+  ).join('');
+  document.getElementById('timezoneModal').classList.add('open');
+}
+
+function closeTimezoneModal() {
+  document.getElementById('timezoneModal').classList.remove('open');
+}
+
+function selectTimezone(tz) {
   setDisplayTz(tz);
+  closeTimezoneModal();
+  startHeaderClock();
   loadEvents();
 }
 
-initDisplayTzPicker();
+startHeaderClock();
+
+// ── Alliance switcher (spec §26) ────────────────────────────────
+// Lets a visitor jump between the combined /events page and any single
+// alliance's /t/{slug}/events page — a real navigation (different URL),
+// not an AJAX swap, so selecting an option in the modal is a plain link.
+let ALLIANCES = [];
+
+async function loadAlliances() {
+  try {
+    const res = await fetch('/api/alliances');
+    ALLIANCES = await res.json();
+  } catch (e) {
+    ALLIANCES = [];
+  }
+  renderAllianceLink();
+}
+
+function renderAllianceLink() {
+  const link = document.getElementById('allianceLink');
+  if (!link) return;
+  const current = ALLIANCES.find(a => a.slug === TENANT_SLUG);
+  const label = COMBINED_MODE ? '— All Alliances —' : (current ? current.name : TENANT_SLUG.toUpperCase());
+  link.textContent = label + ' ▾';
+}
+
+function openAllianceModal() {
+  const list = document.getElementById('allianceModalList');
+  const options = [{ slug: '', name: '— All Alliances —' }, ...ALLIANCES];
+  list.innerHTML = options.map(o => {
+    const isCurrent = (COMBINED_MODE && o.slug === '') || (!COMBINED_MODE && o.slug === TENANT_SLUG);
+    const href = o.slug ? `/t/${o.slug}/events` : '/events';
+    return `<a href="${href}" class="pf-v6-c-button ${isCurrent ? 'pf-m-primary' : 'pf-m-secondary'}" style="justify-content:flex-start;text-decoration:none">${escapeHtml(o.name)}</a>`;
+  }).join('');
+  document.getElementById('allianceModal').classList.add('open');
+}
+
+function closeAllianceModal() {
+  document.getElementById('allianceModal').classList.remove('open');
+}
 
 // This page is public and unauthenticated — every field below comes from
 // the database (admin-editable event names/descriptions/channels), so it
@@ -328,6 +448,7 @@ async function loadEvents() {
 }
 
 loadEvents();
+loadAlliances();
 setInterval(loadEvents, 600000);
 </script>
 </body>

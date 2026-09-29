@@ -19,6 +19,19 @@
   #headerTitle { color: var(--pf-t--global--text--color--inverse); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--pf-t--global--font--size--heading--md); }
   #headerStatus { color: var(--pf-t--global--text--color--inverse); opacity: .7; font-size: var(--pf-t--global--font--size--body--sm); white-space: nowrap; }
   @media (max-width: 900px) { #headerStatus { display: none; } }
+  /* pf-m-secondary's default Color/BorderColor tokens are tuned for a
+     light background — on the masthead's dark background (#151515) they
+     render as low-contrast dark-blue-on-near-black. Override the same
+     CSS custom properties the button already reads (PatternFly's own
+     token-override mechanism, same trick events.html's tenantBadge()
+     uses for pf-m-custom) rather than fighting specificity with a
+     one-off color rule. */
+  .pf-v6-c-masthead .pf-v6-c-button.pf-m-secondary {
+    --pf-v6-c-button--m-secondary--Color: var(--pf-t--global--text--color--inverse);
+    --pf-v6-c-button--m-secondary--BorderColor: var(--pf-t--global--text--color--inverse);
+    --pf-v6-c-button--m-secondary--hover--Color: var(--pf-t--global--text--color--inverse);
+    --pf-v6-c-button--m-secondary--hover--BorderColor: var(--pf-t--global--text--color--inverse);
+  }
   @media (max-width: 700px) {
     .pf-v6-c-masthead { flex-wrap: wrap !important; row-gap: var(--pf-t--global--spacer--sm); }
     .pf-v6-c-masthead__content { flex: 1 1 100% !important; }

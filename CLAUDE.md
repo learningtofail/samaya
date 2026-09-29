@@ -30,7 +30,7 @@ route logic itself.
 
 ## `app/routers/` — HTTP layer
 
-- `events.py` — public, unauthenticated, tenant-scoped by URL path (not header — calendar apps subscribing to an ICS feed can't send custom headers): `GET /t/{tenant_slug}/api/events`, `GET /t/{tenant_slug}/events` (renders `static/events.html`)
+- `events.py` — public, unauthenticated, tenant-scoped by URL path (not header — calendar apps subscribing to an ICS feed can't send custom headers): `GET /t/{tenant_slug}/api/events`, `GET /t/{tenant_slug}/events` (renders `static/events.html`), plus the combined `GET /api/events`/`GET /events`, and `GET /api/alliances` (name/slug/color roster of every tenant, powering `events.html`'s alliance switcher — spec §26.3)
 - `ics.py` — `GET /t/{tenant_slug}/ics/events.ics`, the public calendar feed, same path-scoping reasoning as `events.py`
 - `webhooks.py` — `POST /webhooks/discord`, inbound Discord interaction webhook, signature-verified against `PLATFORM_PUBLIC_KEY` (a tenant with its own custom bot and its own Discord "Interactions Endpoint URL" isn't supported here — see the file's own docstring for the narrow gap this leaves)
 - `auth.py` — Discord OAuth login, invite-claim (`GET /invite/{token}`), the OAuth callback, logout. The only way to reach Discord OAuth at all, and the only way OAuth ever grants real access (via consuming a pending `Invite` — see `models/db.py`)
@@ -98,6 +98,7 @@ in the same page; load order in `admin.html` is the dependency order.
 - `js/common.js` — `api()` (cookie-based auth now, no header key), `toast()`, `showView()`, `loadMe()`/`ME`/`applyRoleVisibility()` (drives which tabs show), `loadTenants()`/`TENANT_COLORS` — load-bearing for every other `js/*.js` file below. Also owns the header's two controls (spec §24): `renderTenantLink()`/`openTenantModal()`/`selectTenant()` (alliance) and `startHeaderClock()`/`openTimezoneModal()`/`selectTimezone()` (time zone) — both text-link-plus-modal now, not `<select>`s
 - `js/dashboard.js`, `events.js`, `schedule.js`, `gantt.js`, `postlog.js`, `config.js`, `sync.js`, `access.js`, `platform.js` — one per admin view, matching `admin.html`'s `<!-- DASHBOARD -->` / `<!-- EVENTS -->` / etc. section comments. `access.js` (owner-only: invite management) and `platform.js` (superadmin-only: Kingdom/Tenant creation) are shown/hidden per `applyRoleVisibility()`
 - `js/init.js` — `loadMe()` then `loadTenants()` then paints the dashboard; handles the "logged in but no tenant access yet" empty state
+- `events.html` — standalone, no shared JS with `admin.html` (own inline `<script>` block). Mirrors `admin.html`'s header pattern (spec §26.2/§26.3): `formatHeaderClock()`/`startHeaderClock()`/`openTimezoneModal()`/`selectTimezone()` (same `samaya_display_tz` `localStorage` key as admin) and `loadAlliances()`/`renderAllianceLink()`/`openAllianceModal()` (alliance switcher, backed by `GET /api/alliances`) — duplicated logic, not imported, since this page has no shared JS files by design (§22)
 
 ## `app/tests/`
 
