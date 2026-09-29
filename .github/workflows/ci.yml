@@ -1,0 +1,39 @@
+name: CI
+
+# Runs the pytest suite and JS lint on every push and pull request against
+# master — spec §30. Before this, `pytest` only ran when a patch happened
+# to get tested locally before being handed off; nothing caught a
+# regression automatically between that and the manual production deploy.
+# No Postgres service needed: tests/conftest.py uses an in-memory SQLite
+# database (see its own module docstring), so this workflow is just
+# "install deps, run pytest" — the same commands used locally.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install --no-cache-dir -r requirements-dev.txt
+      - run: pytest -q
+
+  eslint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npm run lint

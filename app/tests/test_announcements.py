@@ -380,6 +380,103 @@ class TestCancelAnnouncement:
         assert calls == []
 
 
+class TestRetryFailedTargets:
+    """Spec §30 — requeueing an errored AnnouncementTarget for the next
+    delivery tick, since nothing else ever revisits a one-time
+    announcement once it's gone terminal (posted/failed)."""
+
+    async def test_retry_requeues_failed_target_and_it_delivers_next_tick(
+        self, client: AsyncClient, db_session, db_engine, tenant: dict, monkeypatch
+    ):
+        created = await client.post("/admin/api/announcements", json={
+            "title": "Flaky", "body_markdown": "hi",
+            "scheduled_for": _future_iso(),
+            "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
+        })
+        announcement_id = created.json()["id"]
+        await _backdate_to_due(db_session, announcement_id)
+
+        calls = []
+        async def failing_send(token, channel_id, message):
+            calls.append(message)
+            return False, "502 Discord unavailable"
+        monkeypatch.setattr("scheduler.announcements.send_channel_message", failing_send)
+        await _run_delivery_job(db_engine)
+
+        # select(), not db_session.get() — .get() short-circuits to the
+        # identity map with no SQL if the row's already loaded there, so
+        # it wouldn't see the delivery job's changes made via a different
+        # session (same staleness class as spec §25.5's Tenant.server bug).
+        announcement = (await db_session.execute(
+            select(Announcement).where(Announcement.id == announcement_id)
+        )).scalars().one()
+        assert announcement.status == "failed"
+        target = (await db_session.execute(
+            select(AnnouncementTarget).where(AnnouncementTarget.announcement_id == announcement_id)
+        )).scalars().one()
+        assert target.post_status == "error"
+
+        r = await client.post(f"/admin/api/announcements/{announcement_id}/retry-failed-targets")
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "scheduled"
+        assert r.json()["targets"][0]["post_status"] == "pending"
+        assert r.json()["targets"][0]["status_detail"] is None
+
+        # Now let it succeed on the "next tick" — no re-backdating needed,
+        # scheduled_for was never advanced past `now`.
+        async def succeeding_send(token, channel_id, message):
+            calls.append(message)
+            return True, ""
+        monkeypatch.setattr("scheduler.announcements.send_channel_message", succeeding_send)
+        await _run_delivery_job(db_engine)
+
+        # db_session already has this row identity-mapped from the check
+        # above, and expire_on_commit=False means a plain select() leaves
+        # an already-loaded object's attributes exactly as they were
+        # rather than overwriting them from the fresh query result —
+        # expire_all() forces the next read to actually hit the DB again
+        # (same staleness class as spec §25.5's Tenant.server bug, but for
+        # a whole row rather than one relationship).
+        db_session.expire_all()
+        announcement = (await db_session.execute(
+            select(Announcement).where(Announcement.id == announcement_id)
+        )).scalars().one()
+        assert announcement.status == "posted"
+        assert len(calls) == 2  # the original failed attempt, then the retry
+
+    async def test_retry_with_no_failed_targets_400s(self, client: AsyncClient, tenant: dict):
+        created = await client.post("/admin/api/announcements", json={
+            "title": "Never sent", "body_markdown": "hi",
+            "scheduled_for": _future_iso(),
+            "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
+        })
+        announcement_id = created.json()["id"]
+        r = await client.post(f"/admin/api/announcements/{announcement_id}/retry-failed-targets")
+        assert r.status_code == 400
+
+    async def test_retry_nonexistent_announcement_404s(self, client: AsyncClient, tenant: dict):
+        r = await client.post("/admin/api/announcements/999999/retry-failed-targets")
+        assert r.status_code == 404
+
+    async def test_cannot_retry_another_tenants_announcement(
+        self, client: AsyncClient, tenant: dict, second_tenant: dict
+    ):
+        created = await client.post(
+            "/admin/api/announcements",
+            json={
+                "title": "MOD's", "body_markdown": "hi", "scheduled_for": _future_iso(),
+                "targets": [{"tenant_slug": tenant["slug"], "discord_channel_id": "chan-1"}],
+            },
+            headers={"X-Tenant-Slug": tenant["slug"]},
+        )
+        announcement_id = created.json()["id"]
+        r = await client.post(
+            f"/admin/api/announcements/{announcement_id}/retry-failed-targets",
+            headers={"X-Tenant-Slug": second_tenant["slug"]},
+        )
+        assert r.status_code == 404
+
+
 class TestDeleteAnnouncement:
 
     async def test_cannot_delete_scheduled_announcement(self, client: AsyncClient, tenant: dict):

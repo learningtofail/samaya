@@ -140,6 +140,63 @@ async def cancel_announcement(
     return {"status": "cancelled"}
 
 
+@router.post("/api/announcements/{announcement_id}/retry-failed-targets")
+async def retry_failed_targets(
+    announcement_id: int,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Requeues every errored AnnouncementTarget on this announcement so
+    the next per-minute delivery tick (scheduler/announcements.py) picks
+    it back up — nothing currently does this on its own for a one-time
+    announcement (spec §30). A *recurring* announcement already
+    self-heals on its next re-arm (every target, including errored ones,
+    gets reset to pending), so this mainly matters for a one-time
+    announcement that ended in 'failed' or 'posted' with some targets
+    still in error.
+    """
+    result = await db.execute(
+        select(Announcement)
+        .where(Announcement.id == announcement_id, Announcement.owning_tenant_id == tenant.id)
+        .options(selectinload(Announcement.targets))
+    )
+    announcement = result.scalar_one_or_none()
+    if not announcement:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+
+    failed = [t for t in announcement.targets if t.post_status == "error"]
+    if not failed:
+        raise HTTPException(status_code=400, detail="No failed targets to retry")
+
+    for t in failed:
+        t.post_status = "pending"
+        t.status_detail = None
+        t.discord_message_id = None
+
+    before_status = announcement.status
+    # 'scheduled' is the only status the delivery tick's due-announcement
+    # query looks at — a 'failed'/'posted' announcement with newly-pending
+    # targets needs to go back to 'scheduled' or the next tick will never
+    # look at it again. scheduled_for is already <= now (it already fired
+    # once), so this picks the retried targets up on the very next tick.
+    announcement.status = "scheduled"
+
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id,
+        table_name="announcements", row_id=announcement.id, action="update",
+        before={"status": before_status, "retried_targets": [t.tenant_id for t in failed]},
+        after={"status": "scheduled"},
+    )
+    await db.commit()
+    result = await db.execute(
+        select(Announcement)
+        .where(Announcement.id == announcement.id)
+        .options(selectinload(Announcement.targets))
+    )
+    return _announcement_dict(result.scalar_one())
+
+
 @router.delete("/api/announcements/{announcement_id}", status_code=200)
 async def delete_announcement(
     announcement_id: int,

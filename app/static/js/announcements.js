@@ -441,6 +441,13 @@ async function loadAnnouncements() {
         ? '<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="deleteAnnouncement(' + a.id + ')" title="Remove this finished announcement from the list">Delete</button>'
         : '';
       const duplicateBtn = '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="duplicateAnnouncement(' + a.id + ')" title="Open a new announcement pre-filled with this one\'s title, body, and targets">Duplicate</button>';
+      // Requeues errored targets for the next delivery tick (spec §30) —
+      // only shown when there's actually a failed target to retry, and
+      // never for a cancelled announcement (retrying would un-cancel it).
+      const hasFailedTargets = a.status !== 'cancelled' && a.targets.some(t => t.post_status === 'error');
+      const retryBtn = hasFailedTargets
+        ? '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="retryFailedTargets(' + a.id + ')" title="Requeue only the failed target(s) for delivery on the next scheduler tick">Retry Failed</button>'
+        : '';
       const leadershipBadge = a.leadership_only
         ? ' <span title="Leadership only">👑</span>'
         : ' <span title="General">🛡️</span>';
@@ -453,7 +460,7 @@ async function loadAnnouncements() {
         + '<td class="pf-v6-c-table__td">' + recurringBadge + '</td>'
         + '<td class="pf-v6-c-table__td">' + pfLabel(escapeHtml(a.status), announcementStatusColor[a.status] || 'pf-m-grey') + '</td>'
         + '<td class="pf-v6-c-table__td">' + targetsHtml + '</td>'
-        + '<td class="pf-v6-c-table__td" style="display:flex;gap:6px;flex-wrap:wrap">' + [cancelBtn, deleteBtn, duplicateBtn].filter(Boolean).join('') + '</td>'
+        + '<td class="pf-v6-c-table__td" style="display:flex;gap:6px;flex-wrap:wrap">' + [cancelBtn, retryBtn, deleteBtn, duplicateBtn].filter(Boolean).join('') + '</td>'
         + '</tr>';
     }).join('');
   } catch (e) { toast(e.message, true); }
@@ -651,6 +658,14 @@ async function cancelAnnouncement(id) {
   try {
     await api('POST', `/api/announcements/${id}/cancel`);
     toast('Announcement cancelled');
+    loadAnnouncements();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function retryFailedTargets(id) {
+  try {
+    await api('POST', `/api/announcements/${id}/retry-failed-targets`);
+    toast('Failed target(s) requeued — will retry on the next delivery tick');
     loadAnnouncements();
   } catch (e) { toast(e.message, true); }
 }
