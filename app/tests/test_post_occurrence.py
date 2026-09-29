@@ -16,7 +16,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.db import EventDefinition, Occurrence, PostLog
+from models.db import EventDefinition, Occurrence, PostLog, Tenant
 
 
 async def _make_postable_occurrence(db_session: AsyncSession, tenant: dict) -> tuple[EventDefinition, Occurrence]:
@@ -281,3 +281,70 @@ class TestKingdomWidePost:
         logs = {l.tenant_id: l for l in (await db_session.execute(select(PostLog))).scalars().all()}
         assert logs[second_tenant["id"]].status == "cancelled"
         assert logs[tenant["id"]].status == "posted"  # MOD's own copy untouched
+
+
+class TestSharedDiscordServerDedup:
+    """Spec §52 — two tenants can share one DiscordServer (Tenant.server_id
+    has no unique constraint). Kingdom-wide fan-out resolves targets by
+    Tenant, so without dedup this would call create_discord_event once per
+    tenant and leave duplicate Scheduled Events sitting in the one shared
+    guild. _post_to_one_tenant now reuses the first tenant's discord_event_id
+    for every other tenant sharing that guild instead of posting again."""
+
+    async def test_kingdom_wide_post_reuses_event_for_tenants_sharing_a_server(
+        self, client: AsyncClient, db_session: AsyncSession, db_engine, tenant: dict, second_tenant: dict, monkeypatch
+    ):
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+        TestSessionLocal = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+        async with TestSessionLocal() as session:
+            result = await session.execute(select(Tenant).where(Tenant.id == tenant["id"]))
+            shared_server_id = result.scalar_one().server_id
+            sibling = Tenant(kingdom_id=tenant["kingdom_id"], server_id=shared_server_id, name="Sibling", slug="sibling")
+            session.add(sibling)
+            await session.commit()
+            sibling_id = sibling.id
+
+        today = date.today()
+        event = EventDefinition(
+            owning_tenant_id=tenant["id"], scope="kingdom-wide",
+            name="Kingdom vs Kingdom", interval_days=14, start_time_utc=time(18, 0),
+            duration_hours=3.0, anchor_date=today,
+            notification_channel_id="", notification_role_id="",
+        )
+        db_session.add(event)
+        await db_session.commit()
+        await db_session.refresh(event)
+
+        start_dt = datetime.now(timezone.utc) + timedelta(hours=2)
+        occ = Occurrence(
+            event_id=event.id, tenant_id=tenant["id"],
+            occurrence_date=start_dt.date(), start_datetime_utc=start_dt,
+            end_datetime_utc=start_dt + timedelta(hours=3), post_status="pending",
+        )
+        db_session.add(occ)
+        await db_session.commit()
+        await db_session.refresh(occ)
+
+        calls = []
+        async def fake_create(**kwargs):
+            calls.append(kwargs["guild_id"])
+            return f"discord-event-{kwargs['guild_id']}", ""
+        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
+
+        r = await client.post(f"/admin/api/occurrences/{occ.id}/post")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["status"] == "posted"
+        assert {t["tenant_slug"] for t in body["targets"]} == {"mod", "nsr", "sibling"}
+
+        # Exactly one real Discord API call per distinct guild — MOD and
+        # Sibling share a guild, so that guild is only ever created once.
+        assert sorted(calls) == sorted(["test-guild-mod", "test-guild-nsr"])
+
+        logs = {l.tenant_id: l for l in (await db_session.execute(select(PostLog))).scalars().all()}
+        assert len(logs) == 3
+        assert all(l.status == "posted" for l in logs.values())
+        # MOD and Sibling share the same discord_event_id (one real event);
+        # NSR, on its own server, gets its own.
+        assert logs[tenant["id"]].discord_event_id == logs[sibling_id].discord_event_id
+        assert logs[second_tenant["id"]].discord_event_id != logs[tenant["id"]].discord_event_id

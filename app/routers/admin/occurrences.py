@@ -8,9 +8,12 @@ API call rather than after.
 Kingdom-wide fan-out: an 'alliance'-scope event posts to exactly one
 tenant (the owning one) same as always. A 'kingdom-wide' event's single
 Occurrence fans out to every Tenant sharing its Kingdom — one independent
-Discord Scheduled Event and one independent PostLog row per tenant, so one
-alliance's Discord API hiccup doesn't block or corrupt the others (see
-models.db.PostLog).
+PostLog row per tenant (so one alliance's Discord API hiccup doesn't
+block or corrupt the others, see models.db.PostLog), but only one real
+Discord Scheduled Event per distinct DiscordServer: two tenants sharing
+one server (Tenant.server_id has no unique constraint) reuse the same
+discord_event_id rather than each creating their own copy in that one
+guild — see _post_to_one_tenant's own docstring (spec §52).
 """
 from datetime import datetime, timezone
 
@@ -133,7 +136,20 @@ async def _post_to_one_tenant(db: AsyncSession, occ: Occurrence, event, target_t
     the given occurrence — and records one PostLog row for it. Used both
     for the single-tenant alliance case and once per tenant in the
     kingdom-wide fan-out. Never raises for a single target's failure; the
-    caller decides how to aggregate results across targets."""
+    caller decides how to aggregate results across targets.
+
+    Spec §52 — two tenants can share one DiscordServer (Tenant.server_id
+    has no unique constraint), and kingdom-wide's automatic fan-out
+    resolves targets by Tenant, not by DiscordServer. Without the check
+    below, fanning out to two tenants on the same guild would call
+    create_discord_event twice and leave two duplicate Scheduled Events
+    sitting in that one guild. Instead, once any tenant has successfully
+    posted an occurrence to a given guild, every other tenant sharing that
+    same guild reuses the existing discord_event_id — no second Discord
+    API call — while still getting its own PostLog row (so its own
+    Dashboard/PostLog view shows it as posted) and its own notification
+    ping if it has one configured (a shared server can still have distinct
+    per-alliance channels worth pinging separately)."""
     if await find_post_log(db, target_tenant.id, event.name, occ.occurrence_date):
         return {"tenant_slug": target_tenant.slug, "status": "skipped", "detail": "Already posted"}
 
@@ -141,6 +157,18 @@ async def _post_to_one_tenant(db: AsyncSession, occ: Occurrence, event, target_t
     if not token:
         return {"tenant_slug": target_tenant.slug, "status": "error",
                 "detail": "No Discord bot token configured for this tenant"}
+
+    shared_result = await db.execute(
+        select(PostLog).where(
+            PostLog.event_id == event.id,
+            PostLog.occurrence_date == occ.occurrence_date,
+            PostLog.discord_guild_id == target_tenant.server.guild_id,
+            PostLog.status == "posted",
+        )
+    )
+    shared_log = shared_result.scalars().first()
+    if shared_log is not None:
+        return await _record_shared_guild_post(db, occ, event, target_tenant, shared_log, token)
 
     # Reserve the PostLog row now, before calling Discord, instead of after.
     # Two concurrent POSTs for the same occurrence could otherwise both pass
@@ -163,6 +191,21 @@ async def _post_to_one_tenant(db: AsyncSession, occ: Occurrence, event, target_t
         await db.flush()
     except IntegrityError:
         await db.rollback()
+        # Someone else (another tenant sharing this guild, or a concurrent
+        # request for this same tenant) may have just posted — re-check
+        # for a shared-guild row rather than assuming "already posted" was
+        # necessarily this exact tenant's own.
+        shared_result = await db.execute(
+            select(PostLog).where(
+                PostLog.event_id == event.id,
+                PostLog.occurrence_date == occ.occurrence_date,
+                PostLog.discord_guild_id == target_tenant.server.guild_id,
+                PostLog.status == "posted",
+            )
+        )
+        shared_log = shared_result.scalars().first()
+        if shared_log is not None:
+            return await _record_shared_guild_post(db, occ, event, target_tenant, shared_log, token)
         return {"tenant_slug": target_tenant.slug, "status": "skipped", "detail": "Already posted"}
     await db.commit()
 
@@ -209,22 +252,77 @@ async def _post_to_one_tenant(db: AsyncSession, occ: Occurrence, event, target_t
     log.status           = "posted"
     await db.commit()
 
-    notify_channel, notify_role = await _resolve_notification(db, event, target_tenant)
-    if notify_channel and notify_role:
-        role_mention = f"<@&{notify_role}> "
-        time_str     = occ.start_datetime_utc.strftime("%H:%M UTC")
-        date_str     = occ.occurrence_date.strftime("%A %d %b")
-        announce_msg = (
-            f"{role_mention}📅 **{event.name}** has been scheduled\n"
-            f"{date_str} · {time_str}"
-            + (f" · {event.discord_channel}" if event.discord_channel else "")
-            + (f"\n{resolved_description}" if resolved_description else "")
-            + (f"\nhttps://discord.com/events/{target_tenant.server.guild_id}/{discord_id}" if discord_id else "")
-            + "\n\nClick **Interested** to get a reminder 30 minutes before."
-        )
-        await send_channel_message(token, notify_channel, announce_msg)
+    await _send_pre_event_ping(db, event, occ, target_tenant, resolved_description, token, discord_id)
 
     return {"tenant_slug": target_tenant.slug, "status": "posted", "discord_event_id": discord_id}
+
+
+async def _send_pre_event_ping(db, event, occ: Occurrence, target_tenant: Tenant, resolved_description: str, token: str, discord_id: str):
+    """The pre-event channel ping, factored out of _post_to_one_tenant so
+    the shared-guild reuse path (spec §52 — a tenant that reused another
+    tenant's already-created Scheduled Event still wants its own
+    notification pinged, since two tenants sharing one Discord server can
+    still have distinct per-alliance channels) doesn't duplicate it."""
+    notify_channel, notify_role = await _resolve_notification(db, event, target_tenant)
+    if not (notify_channel and notify_role):
+        return
+    role_mention = f"<@&{notify_role}> "
+    time_str     = occ.start_datetime_utc.strftime("%H:%M UTC")
+    date_str     = occ.occurrence_date.strftime("%A %d %b")
+    announce_msg = (
+        f"{role_mention}📅 **{event.name}** has been scheduled\n"
+        f"{date_str} · {time_str}"
+        + (f" · {event.discord_channel}" if event.discord_channel else "")
+        + (f"\n{resolved_description}" if resolved_description else "")
+        + (f"\nhttps://discord.com/events/{target_tenant.server.guild_id}/{discord_id}" if discord_id else "")
+        + "\n\nClick **Interested** to get a reminder 30 minutes before."
+    )
+    await send_channel_message(token, notify_channel, announce_msg)
+
+
+async def _record_shared_guild_post(db, occ: Occurrence, event, target_tenant: Tenant, shared_log: PostLog, token: str) -> dict:
+    """Records target_tenant's own PostLog row for an occurrence whose
+    Discord Scheduled Event was already created for a different tenant
+    sharing the same DiscordServer (spec §52) — no second
+    create_discord_event call, since Discord would show that as two
+    separate events in the one guild. target_tenant still gets its own
+    PostLog row (so its own Dashboard/PostLog view shows this as posted)
+    and its own pre-event ping if it has a notification channel/role
+    configured."""
+    log = PostLog(
+        tenant_id         = target_tenant.id,
+        event_id          = event.id,
+        event_name        = event.name,
+        occurrence_date   = occ.occurrence_date,
+        discord_event_id  = shared_log.discord_event_id,
+        discord_guild_id  = target_tenant.server.guild_id,
+        posted_by         = "system (shared Discord server)",
+        posted_at_utc     = datetime.now(timezone.utc),
+        status            = "posted",
+        status_detail     = "Shares a Discord server with another alliance already posting this occurrence — reused that Scheduled Event instead of creating a duplicate.",
+    )
+    db.add(log)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        return {"tenant_slug": target_tenant.slug, "status": "skipped", "detail": "Already posted"}
+    await db.commit()
+
+    now = datetime.now(timezone.utc)
+    occ_start = ensure_utc(occ.start_datetime_utc)
+    offset_minutes = round((occ_start - now).total_seconds() / 60)
+    resolved_description = render_placeholders(
+        event.description,
+        tenant_name=target_tenant.name,
+        kingdom_name=target_tenant.kingdom.name,
+        scheduled_for=now,
+        event_offset_minutes=offset_minutes,
+    ) if event.description else event.description
+
+    await _send_pre_event_ping(db, event, occ, target_tenant, resolved_description, token, shared_log.discord_event_id)
+
+    return {"tenant_slug": target_tenant.slug, "status": "posted", "discord_event_id": shared_log.discord_event_id}
 
 
 async def _resolve_post_targets(db: AsyncSession, event, owning: Tenant) -> list[Tenant]:

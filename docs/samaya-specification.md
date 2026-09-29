@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.26.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.27.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -1167,3 +1167,20 @@ Deliberately **not** gated on the `post_to_discord` checkbox — that flag defau
 ### Addendum — Corrected "Kingdom-wide" Wording
 
 Follow-up feedback: the combined owning-alliance/scope selector's kingdom-wide options (§49) read "🌐 Kingdom-wide (posted via `<name>`)", and the Events/Announcements/Schedule table badges read "🌐 Kingdom-wide (via `<name>`)". Both wordings imply that alliance's Discord server is what actually posts a kingdom-wide item — it isn't: an Event still fans out to every alliance's own server independently (`_resolve_post_targets`), and an Announcement's `scope` is a display/ownership label only, with delivery entirely governed by its explicit `AnnouncementTarget` list regardless of scope. The named alliance is only ever used to look up which Kingdom to scope to. Reworded everywhere to "🌐 Kingdom-wide (via `<name>`'s Kingdom)", which says what's actually true without implying anything about where the posting happens.
+
+## 52. Deduplicated Discord Posting for Alliances Sharing One Server
+
+**Status:** Implemented.
+
+**Problem.** Two alliances can share one `DiscordServer` (`Tenant.server_id` has no unique constraint — see spec §25). Kingdom-wide's automatic fan-out (`_resolve_post_targets`) resolves its target list by *Tenant*, not by *DiscordServer*, so posting a kingdom-wide occurrence to two tenants sharing one guild called `create_discord_event` twice — leaving two duplicate Scheduled Events sitting side by side in that one guild, and (if both tenants happened to have the same notification channel configured) two identical pre-event pings in the same channel. This affected both the manual Post button (`post_occurrence`) and the daily auto-post job (§51), since both go through `_post_to_one_tenant`.
+
+**Fix.** `_post_to_one_tenant` now checks, before creating a new Discord Scheduled Event, whether any other tenant has already posted this same occurrence to the same `discord_guild_id` (a plain `PostLog` query — `event_id` + `occurrence_date` + `discord_guild_id` + `status='posted'`, not scoped to the current tenant). If one is found, `_record_shared_guild_post` records this tenant's own `PostLog` row referencing the *same* `discord_event_id` — no second `create_discord_event` call — while still resolving and sending this tenant's own pre-event ping if it has a notification channel/role configured (two tenants sharing a guild can still have genuinely distinct per-alliance channels worth pinging separately; only the underlying Scheduled Event itself is deduplicated, not per-tenant notifications). The pre-event ping message-building logic was factored out into `_send_pre_event_ping` so both the normal create path and this reuse path build the identical message.
+
+Each tenant sharing the guild still gets its own `PostLog` row (so its own Dashboard/PostLog view shows the occurrence as posted, and its own Cancel action still works independently — cancelling one tenant's copy doesn't affect the shared Discord Scheduled Event itself if another tenant is still relying on it existing, though this app doesn't currently guard against that gap, see Out of Scope below).
+
+**Announcements are unaffected by this change** — they were never at risk of this kind of duplication in the first place, since an Announcement has no automatic fan-out at all: delivery is entirely governed by its explicit `AnnouncementTarget` list (spec §13.3), so a coordinator already has full control simply by not adding two target rows that would point at the same channel. No code change was needed there.
+
+### Out of Scope
+
+- Guarding against a tenant's Cancel action deleting the shared Discord Scheduled Event out from under another tenant still relying on it existing — `cancel_occurrence_discord` cancels via whichever tenant's own `PostLog.discord_event_id` it's given, and since sharing tenants now share that same ID, cancelling from either tenant deletes the one real Discord object both were pointing at. A coordinator on a shared server should coordinate who cancels, same as they'd need to coordinate on any other shared-server action today.
+- Deduplicating identical notification channels across tenants sharing a guild — each tenant's configured `notification_channel_id`/`notification_role_id` still gets its own independent ping; if two tenants happen to share the exact same channel, that channel still gets pinged twice. Leaving one of the two tenants' notification fields blank remains the way to avoid that, same as before this fix.
