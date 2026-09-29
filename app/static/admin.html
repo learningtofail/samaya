@@ -48,6 +48,55 @@
   #announcementModal.open { display: block; }
   #templateModal { display: none; }
   #templateModal.open { display: block; }
+
+  /* Composer: markdown toolbar, Discord-style preview, emoji picker (spec §28) */
+  .md-toolbar { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+  .md-toolbar button {
+    background: var(--pf-t--global--background--color--secondary--default, #f0f0f0);
+    border: 1px solid var(--pf-t--global--border--color--default, #ccc);
+    border-radius: 4px; padding: 3px 9px; font-size: 0.85em; cursor: pointer; line-height: 1.4;
+  }
+  .md-toolbar button:hover { background: var(--pf-t--global--background--color--secondary--hover, #e2e2e2); }
+
+  .discord-preview-pane { min-height: 40px; }
+  .discord-preview-msg {
+    display: flex; gap: 12px; align-items: flex-start;
+    background: #313338; color: #dbdee1; border-radius: 8px; padding: 12px 14px;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .discord-preview-avatar {
+    flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
+    background: #5865f2; color: #fff; display: flex; align-items: center; justify-content: center;
+    font-weight: 600;
+  }
+  .discord-preview-body { min-width: 0; flex: 1; }
+  .discord-preview-header { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
+  .discord-preview-name { color: #fff; font-weight: 600; font-size: 0.95em; }
+  .discord-preview-bot-tag {
+    background: #5865f2; color: #fff; font-size: 0.62em; font-weight: 700;
+    border-radius: 3px; padding: 1px 4px; letter-spacing: 0.02em;
+  }
+  .discord-preview-text { font-size: 0.92em; line-height: 1.45; word-wrap: break-word; white-space: normal; }
+  .discord-preview-text .preview-mention { background: rgba(88,101,242,0.3); color: #c9cdfb; border-radius: 3px; padding: 0 2px; }
+  .discord-preview-text .preview-spoiler { background: #1e1f22; color: transparent; border-radius: 3px; padding: 0 2px; cursor: pointer; }
+  .discord-preview-text .preview-spoiler.revealed { background: #4a4c53; color: inherit; }
+  .discord-preview-text .preview-quote { border-left: 4px solid #4e5058; padding-left: 8px; margin: 4px 0; color: #b5bac1; }
+  .discord-preview-text .preview-inline-code { background: #2b2d31; border-radius: 3px; padding: 1px 4px; font-family: monospace; }
+  .discord-preview-text .preview-codeblock { background: #2b2d31; border-radius: 4px; padding: 8px; font-family: monospace; overflow-x: auto; margin: 4px 0; }
+  .discord-preview-text .preview-h { margin: 4px 0; color: #fff; }
+  .discord-preview-note { color: var(--muted); font-size: 0.8em; margin-top: 4px; }
+
+  .emoji-picker {
+    display: none; position: absolute; z-index: 1200; background: var(--surface, #fff);
+    border: 1px solid var(--pf-t--global--border--color--default, #ccc); border-radius: 6px;
+    padding: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.25); max-width: 260px; max-height: 260px; overflow-y: auto;
+  }
+  .emoji-picker.open { display: block; }
+  .emoji-picker-heading { font-size: 0.75em; color: var(--muted); margin: 6px 0 2px; }
+  .emoji-picker-heading:first-child { margin-top: 0; }
+  .emoji-picker-grid { display: flex; flex-wrap: wrap; gap: 2px; }
+  .emoji-picker-item { background: none; border: none; font-size: 1.2em; cursor: pointer; padding: 3px; border-radius: 4px; }
+  .emoji-picker-item:hover { background: rgba(0,0,0,0.08); }
   #tenantModal { display: none; }
   #tenantModal.open { display: block; }
   #timezoneModal { display: none; }
@@ -570,6 +619,17 @@
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aBody"><span class="pf-v6-c-form__label-text">Body (Markdown)</span></label></div>
               <div class="pf-v6-c-form__group-control">
+                <div class="md-toolbar">
+                  <button type="button" title="Bold" onclick="wrapSelection('aBody','**','**','bold')"><strong>B</strong></button>
+                  <button type="button" title="Italic" onclick="wrapSelection('aBody','*','*','italic')"><em>I</em></button>
+                  <button type="button" title="Underline" onclick="wrapSelection('aBody','__','__','underline')"><u>U</u></button>
+                  <button type="button" title="Strikethrough" onclick="wrapSelection('aBody','~~','~~','strike')"><s>S</s></button>
+                  <button type="button" title="Spoiler" onclick="wrapSelection('aBody','||','||','spoiler')">||•||</button>
+                  <button type="button" title="Quote" onclick="prefixSelectedLines('aBody','&gt; ')">&gt; Quote</button>
+                  <button type="button" title="Inline code" onclick="wrapSelection('aBody','`','`','code')">&lt;/&gt;</button>
+                  <button type="button" title="Code block" onclick="insertCodeBlock('aBody')">{ }</button>
+                  <button type="button" class="emoji-picker-btn" title="Insert emoji" onclick="toggleEmojiPicker(this,'aBody')">🙂</button>
+                </div>
                 <textarea class="pf-v6-c-form-control" id="aBody" rows="5" maxlength="2000" placeholder="Announcement text sent to Discord" oninput="updateAnnouncementCharCount()"></textarea>
                 <div class="pf-v6-c-form__helper-text">
                   <span id="aBodyCount">0</span> / 2000 characters (Discord's message limit) — Discord markdown works as usual (**bold**, *italic*, __underline__, ~~strikethrough~~, ||spoiler||, &gt; quote, ```code```).
@@ -577,23 +637,33 @@
                 </div>
               </div>
             </div>
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Preview</span></span></div>
+              <div class="pf-v6-c-form__group-control">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                  <label for="aPreviewTenant" style="color:var(--muted);font-size:0.85em">Preview as:</label>
+                  <select class="pf-v6-c-form-control pf-m-small" id="aPreviewTenant" style="max-width:220px" onchange="renderAnnouncementPreview()"></select>
+                </div>
+                <div id="aPreviewPane" class="discord-preview-pane"></div>
+              </div>
+            </div>
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aScheduledDate"><span class="pf-v6-c-form__label-text">Send Date (UTC)</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <input class="pf-v6-c-form-control" type="date" id="aScheduledDate">
+                <input class="pf-v6-c-form-control" type="date" id="aScheduledDate" onchange="renderAnnouncementPreview()">
               </div>
             </div>
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aScheduledTime"><span class="pf-v6-c-form__label-text">Send Time (UTC) HH:MM</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <input class="pf-v6-c-form-control" type="text" id="aScheduledTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric">
+                <input class="pf-v6-c-form-control" type="text" id="aScheduledTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric" oninput="renderAnnouncementPreview()">
                 <div class="pf-v6-c-form__helper-text">24-hour clock, same as event start times.</div>
               </div>
             </div>
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aEventOffsetMinutes"><span class="pf-v6-c-form__label-text">Event Offset (minutes)</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <input class="pf-v6-c-form-control" type="number" id="aEventOffsetMinutes" value="0" placeholder="0">
+                <input class="pf-v6-c-form-control" type="number" id="aEventOffsetMinutes" value="0" placeholder="0" oninput="renderAnnouncementPreview()">
                 <div class="pf-v6-c-form__helper-text">Only matters if the body uses {event_time}/{event_time_relative} — how many minutes after Send Time the event itself happens. E.g. a reset warning sent 15 minutes early uses 15.</div>
               </div>
             </div>
@@ -665,16 +735,37 @@
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="tBody"><span class="pf-v6-c-form__label-text">Body (Markdown)</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <textarea class="pf-v6-c-form-control" id="tBody" rows="5" placeholder="⚠️ Daily reset in {event_time_relative} ({event_time})"></textarea>
+                <div class="md-toolbar">
+                  <button type="button" title="Bold" onclick="wrapSelection('tBody','**','**','bold')"><strong>B</strong></button>
+                  <button type="button" title="Italic" onclick="wrapSelection('tBody','*','*','italic')"><em>I</em></button>
+                  <button type="button" title="Underline" onclick="wrapSelection('tBody','__','__','underline')"><u>U</u></button>
+                  <button type="button" title="Strikethrough" onclick="wrapSelection('tBody','~~','~~','strike')"><s>S</s></button>
+                  <button type="button" title="Spoiler" onclick="wrapSelection('tBody','||','||','spoiler')">||•||</button>
+                  <button type="button" title="Quote" onclick="prefixSelectedLines('tBody','&gt; ')">&gt; Quote</button>
+                  <button type="button" title="Inline code" onclick="wrapSelection('tBody','`','`','code')">&lt;/&gt;</button>
+                  <button type="button" title="Code block" onclick="insertCodeBlock('tBody')">{ }</button>
+                  <button type="button" class="emoji-picker-btn" title="Insert emoji" onclick="toggleEmojiPicker(this,'tBody')">🙂</button>
+                </div>
+                <textarea class="pf-v6-c-form-control" id="tBody" rows="5" placeholder="⚠️ Daily reset in {event_time_relative} ({event_time})" oninput="renderTemplatePreview()"></textarea>
                 <div class="pf-v6-c-form__helper-text">
                   Same Discord markdown and placeholders as the announcement Body field — <code>{alliance_name}</code> <code>{kingdom_name}</code> <code>{send_time}</code> <code>{send_time_relative}</code> <code>{event_time}</code> <code>{event_time_relative}</code>. No 2000-character limit here since placeholders expand at send time.
                 </div>
               </div>
             </div>
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Preview</span></span></div>
+              <div class="pf-v6-c-form__group-control">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                  <label for="tPreviewTenant" style="color:var(--muted);font-size:0.85em">Preview as:</label>
+                  <select class="pf-v6-c-form-control pf-m-small" id="tPreviewTenant" style="max-width:220px" onchange="renderTemplatePreview()"></select>
+                </div>
+                <div id="tPreviewPane" class="discord-preview-pane"></div>
+              </div>
+            </div>
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="tEventOffsetMinutes"><span class="pf-v6-c-form__label-text">Event Offset (minutes)</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <input class="pf-v6-c-form-control" type="number" id="tEventOffsetMinutes" value="0" placeholder="0">
+                <input class="pf-v6-c-form-control" type="number" id="tEventOffsetMinutes" value="0" placeholder="0" oninput="renderTemplatePreview()">
                 <div class="pf-v6-c-form__helper-text">E.g. 15 for a warning sent 15 minutes before the event.</div>
               </div>
             </div>

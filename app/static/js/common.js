@@ -308,3 +308,65 @@ function toast(msg, err) {
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 3500);
 }
+
+// ── Emoji picker (spec §28) ──────────────────────────────────
+// Discord's *default* (standard Unicode) emoji set only — never a
+// server's custom/uploaded emoji, which would need a per-guild fetch and
+// image assets this app has no other use for. Browsers render these
+// glyphs natively, the same glyphs Discord's own client shows for
+// non-custom emoji, so a curated static list is all this needs.
+const EMOJI_PICKER_LIST = {
+  'Faces': ['😀','😁','😂','🤣','😊','😇','🙂','😉','😍','🤩','😎','🤔','😐','😴','😭','😡','🤯','🥳','😅','🤗'],
+  'Gestures': ['👍','👎','👏','🙌','🤝','🙏','💪','✌️','🤞','👋','🫡','🤙','👀','🖐️','☝️'],
+  'Symbols': ['🔥','⭐','✨','💯','⚔️','🛡️','🏆','⚠️','✅','❌','❗','❓','⏰','📅','📢','🔔','💀','👑','🎉','🚨'],
+};
+
+// Inserts `text` at the current cursor position of the textarea with the
+// given id (replacing any selection), fires `input` so char counts and
+// the live preview update, and restores focus with the cursor placed
+// right after the inserted text.
+function insertAtCursor(textareaId, text) {
+  const ta = document.getElementById(textareaId);
+  if (!ta) return;
+  const start = ta.selectionStart;
+  const end = ta.selectionEnd;
+  ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
+  const cursor = start + text.length;
+  ta.focus();
+  ta.setSelectionRange(cursor, cursor);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// One shared popover, repositioned/retargeted per call rather than one
+// per textarea — matches the "one modal, refilled" convention used
+// elsewhere in this app rather than duplicating markup.
+function toggleEmojiPicker(buttonEl, textareaId) {
+  let picker = document.getElementById('emojiPicker');
+  const alreadyOpenForThis = picker && picker.classList.contains('open') && picker.dataset.targetTextarea === textareaId;
+  if (!picker) {
+    picker = document.createElement('div');
+    picker.id = 'emojiPicker';
+    picker.className = 'emoji-picker';
+    document.body.appendChild(picker);
+    document.addEventListener('click', (e) => {
+      if (!picker.contains(e.target) && !e.target.classList.contains('emoji-picker-btn')) {
+        picker.classList.remove('open');
+      }
+    });
+  }
+  if (alreadyOpenForThis) {
+    picker.classList.remove('open');
+    return;
+  }
+  picker.dataset.targetTextarea = textareaId;
+  picker.innerHTML = Object.entries(EMOJI_PICKER_LIST).map(([heading, emojis]) =>
+    '<div class="emoji-picker-heading">' + heading + '</div>'
+    + '<div class="emoji-picker-grid">'
+    + emojis.map(e => '<button type="button" class="emoji-picker-item" onclick="insertAtCursor(\'' + textareaId + '\',\'' + e + '\')">' + e + '</button>').join('')
+    + '</div>'
+  ).join('');
+  const rect = buttonEl.getBoundingClientRect();
+  picker.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+  picker.style.left = (rect.left + window.scrollX) + 'px';
+  picker.classList.add('open');
+}

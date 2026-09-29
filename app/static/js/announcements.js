@@ -4,6 +4,285 @@
 // toast, escapeHtml, TENANTS, dualTimeString/fmtDateTime) and events.js's
 // tenantName()/tenantSlugFor() helpers.
 
+// ── Composer: markdown toolbar, live preview, emoji picker (spec §28) ──
+
+// role/channel lookups the preview needs, cached per tenant slug for the
+// life of the page — re-fetching on every keystroke would be wasteful,
+// and neither list changes while a modal is open.
+const PREVIEW_ROLES_CACHE = {};
+const PREVIEW_CHANNELS_CACHE = {};
+// kingdom_id -> name, lazy-loaded once (GET /api/kingdoms is available to
+// any authenticated user, not just superadmins) since TENANTS only
+// carries kingdom_id, not the resolved name §28's {kingdom_name} needs.
+let KINGDOM_NAMES_CACHE = null;
+
+async function ensureKingdomNamesLoaded() {
+  if (KINGDOM_NAMES_CACHE) return KINGDOM_NAMES_CACHE;
+  KINGDOM_NAMES_CACHE = {};
+  try {
+    const kingdoms = await api('GET', '/api/kingdoms', null, /*skipTenantHeader=*/true);
+    kingdoms.forEach(k => { KINGDOM_NAMES_CACHE[k.id] = k.name; });
+  } catch (e) { /* preview degrades to blank kingdom name; not fatal */ }
+  return KINGDOM_NAMES_CACHE;
+}
+
+async function ensurePreviewRolesLoaded(tenantSlug) {
+  if (PREVIEW_ROLES_CACHE[tenantSlug]) return PREVIEW_ROLES_CACHE[tenantSlug];
+  try {
+    const roles = await api('GET', '/api/discord/roles', null, false, tenantSlug);
+    PREVIEW_ROLES_CACHE[tenantSlug] = roles;
+    return roles;
+  } catch (e) { return []; }
+}
+
+async function ensurePreviewChannelsLoaded(tenantSlug) {
+  if (PREVIEW_CHANNELS_CACHE[tenantSlug]) return PREVIEW_CHANNELS_CACHE[tenantSlug];
+  try {
+    const channels = await api('GET', '/api/discord/channels', null, false, tenantSlug);
+    PREVIEW_CHANNELS_CACHE[tenantSlug] = channels;
+    return channels;
+  } catch (e) { return []; }
+}
+
+// Wraps the current selection in `before`/`after`. With nothing selected,
+// inserts both markers around `placeholder` and selects it, so typing
+// immediately overwrites it — same "type over the placeholder" pattern
+// as a native form field's placeholder text.
+function wrapSelection(textareaId, before, after, placeholder) {
+  const ta = document.getElementById(textareaId);
+  if (!ta) return;
+  const start = ta.selectionStart;
+  const end = ta.selectionEnd;
+  const selected = ta.value.slice(start, end);
+  const text = selected || placeholder || '';
+  ta.value = ta.value.slice(0, start) + before + text + after + ta.value.slice(end);
+  ta.focus();
+  ta.setSelectionRange(start + before.length, start + before.length + text.length);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// Quote (`> `) is a line-level prefix, not a wrap — applied to every
+// line touched by the current selection (or just the current line, with
+// nothing selected).
+function prefixSelectedLines(textareaId, prefix) {
+  const ta = document.getElementById(textareaId);
+  if (!ta) return;
+  const start = ta.selectionStart;
+  const end = ta.selectionEnd;
+  const lineStart = ta.value.lastIndexOf('\n', start - 1) + 1;
+  let lineEnd = ta.value.indexOf('\n', end);
+  if (lineEnd === -1) lineEnd = ta.value.length;
+  const block = ta.value.slice(lineStart, lineEnd);
+  const prefixed = block.split('\n').map(l => prefix + l).join('\n');
+  ta.value = ta.value.slice(0, lineStart) + prefixed + ta.value.slice(lineEnd);
+  ta.focus();
+  ta.setSelectionRange(lineStart, lineStart + prefixed.length);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function insertCodeBlock(textareaId) {
+  const ta = document.getElementById(textareaId);
+  if (!ta) return;
+  const start = ta.selectionStart;
+  const end = ta.selectionEnd;
+  const selected = ta.value.slice(start, end) || 'code';
+  const block = '```\n' + selected + '\n```';
+  ta.value = ta.value.slice(0, start) + block + ta.value.slice(end);
+  ta.focus();
+  ta.setSelectionRange(start + 4, start + 4 + selected.length);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// Small client-side port of services/templates.py's render_placeholders()
+// — kept as a second implementation (one runs in the browser, one on the
+// server; this app has no shared-code mechanism between them, §22) and
+// deliberately produces a human-*readable* approximation rather than
+// literal `<t:UNIX:F>` tags, since the preview can't reproduce what every
+// future Discord viewer's own client will render in their own locale —
+// it shows one representative rendering, in the admin's own browser
+// time zone, labeled "(preview)" so that's clear.
+function formatDiscordAbsolutePreview(date) {
+  return date.toLocaleString(undefined, {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  }) + ' (preview)';
+}
+
+function formatDiscordRelativePreview(date) {
+  const diffSeconds = Math.round((date.getTime() - Date.now()) / 1000);
+  const abs = Math.abs(diffSeconds);
+  const units = [
+    ['day', 86400], ['hour', 3600], ['minute', 60], ['second', 1],
+  ];
+  for (const [name, secs] of units) {
+    if (abs >= secs || name === 'second') {
+      const count = Math.max(1, Math.round(abs / secs));
+      const plural = count === 1 ? name : name + 's';
+      return (diffSeconds >= 0 ? `in ${count} ${plural}` : `${count} ${plural} ago`) + ' (preview)';
+    }
+  }
+}
+
+function clientRenderPlaceholders(text, { allianceName, kingdomName, scheduledFor, eventOffsetMinutes }) {
+  const eventTime = new Date(scheduledFor.getTime() + (eventOffsetMinutes || 0) * 60000);
+  const values = {
+    alliance_name: allianceName || '',
+    kingdom_name: kingdomName || '',
+    send_time: formatDiscordAbsolutePreview(scheduledFor),
+    send_time_relative: formatDiscordRelativePreview(scheduledFor),
+    event_time: formatDiscordAbsolutePreview(eventTime),
+    event_time_relative: formatDiscordRelativePreview(eventTime),
+  };
+  return text.replace(/\{(alliance_name|kingdom_name|send_time|send_time_relative|event_time|event_time_relative)\}/g,
+    (m, name) => (values[name] !== undefined ? values[name] : m));
+}
+
+// Small markdown-to-HTML renderer covering exactly the Discord markdown
+// syntax spec §27 documents as supported, plus role/channel mention
+// resolution for the preview's benefit only (§28) — never sent anywhere,
+// the stored/sent text is always the literal markdown. HTML-escapes the
+// raw input first so nothing the coordinator types can inject markup.
+function renderDiscordMarkdownPreview(text, { roles, channels }) {
+  let html = escapeHtml(text);
+
+  // Code blocks and inline code first, and protected from every later
+  // transform via placeholder tokens, so markdown characters inside code
+  // are shown literally rather than re-processed.
+  const codeStash = [];
+  html = html.replace(/```([\s\S]*?)```/g, (m, code) => {
+    codeStash.push('<pre class="preview-codeblock"><code>' + code.replace(/^\n/, '') + '</code></pre>');
+    return `\u0000CODEBLOCK${codeStash.length - 1}\u0000`;
+  });
+  html = html.replace(/`([^`\n]+)`/g, (m, code) => {
+    codeStash.push('<code class="preview-inline-code">' + code + '</code>');
+    return `\u0000CODEBLOCK${codeStash.length - 1}\u0000`;
+  });
+
+  // Block quotes — one or more consecutive "&gt; " lines (already
+  // HTML-escaped) become a single <blockquote>.
+  html = html.replace(/^(?:&gt; ?.*(?:\n|$))+/gm, (m) =>
+    '<blockquote class="preview-quote">' + m.replace(/^&gt; ?/gm, '').trim() + '</blockquote>'
+  );
+
+  // Headers
+  html = html.replace(/^### (.*)$/gm, '<h3 class="preview-h">$1</h3>');
+  html = html.replace(/^## (.*)$/gm, '<h2 class="preview-h">$1</h2>');
+  html = html.replace(/^# (.*)$/gm, '<h1 class="preview-h">$1</h1>');
+
+  // Inline emphasis — bold before italic so **x** isn't first read as
+  // italic-inside-italic; underline/strike/spoiler are unambiguous.
+  html = html.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__([^_]+)__/g, '<u>$1</u>');
+  html = html.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
+  html = html.replace(/~~([^~]+)~~/g, '<s>$1</s>');
+  html = html.replace(/\|\|([^|]+)\|\|/g, '<span class="preview-spoiler" onclick="this.classList.add(\'revealed\')">$1</span>');
+
+  // Role/channel mentions — HTML-escaping turned <@&123> into
+  // &lt;@&amp;123&gt; and <#123> into &lt;#123&gt;, so match those escaped forms.
+  html = html.replace(/&lt;@&amp;(\d+)&gt;/g, (m, id) => {
+    const role = (roles || []).find(r => String(r.id) === id);
+    return '<span class="preview-mention">@' + (role ? escapeHtml(role.name) : 'role') + '</span>';
+  });
+  html = html.replace(/&lt;#(\d+)&gt;/g, (m, id) => {
+    const channel = (channels || []).find(c => String(c.id) === id);
+    return '<span class="preview-mention">#' + (channel ? escapeHtml(channel.name) : 'channel') + '</span>';
+  });
+
+  // Bare list markers get a little visual indent; not full list rendering.
+  html = html.replace(/^- (.*)$/gm, '&nbsp;&nbsp;• $1');
+
+  // Remaining single newlines are line breaks, matching Discord's own
+  // (non-paragraph) line-break behavior.
+  html = html.replace(/\n/g, '<br>');
+
+  // Restore protected code spans.
+  html = html.replace(/\u0000CODEBLOCK(\d+)\u0000/g, (m, i) => codeStash[Number(i)]);
+
+  return html || '<span style="color:var(--muted)">(nothing to preview yet)</span>';
+}
+
+// Rebuilds the "Preview As" dropdown from the modal's own live target
+// rows (announcement modal) or the current tenant (template modal, which
+// has no targets) — deliberately never a fabricated tenant, since that
+// was §27.3's original objection to a preview at all.
+function refreshPreviewTenantOptions(selectId, targetsListId) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  const previousValue = select.value;
+  let slugs;
+  if (targetsListId) {
+    slugs = Array.from(document.querySelectorAll('#' + targetsListId + ' .target-tenant'))
+      .map(s => s.value)
+      .filter((v, i, arr) => v && arr.indexOf(v) === i);
+  } else {
+    slugs = [getCurrentTenantSlug()].filter(Boolean);
+  }
+  select.innerHTML = slugs.map(slug => {
+    const t = TENANTS.find(x => x.slug === slug);
+    return '<option value="' + escapeHtml(slug) + '">' + escapeHtml(t ? t.name : slug) + '</option>';
+  }).join('');
+  if (slugs.includes(previousValue)) select.value = previousValue;
+}
+
+async function renderAnnouncementPreview() {
+  await renderComposerPreview({
+    bodyId: 'aBody', paneId: 'aPreviewPane', previewTenantSelectId: 'aPreviewTenant',
+    dateId: 'aScheduledDate', timeId: 'aScheduledTime', offsetId: 'aEventOffsetMinutes',
+  });
+}
+
+async function renderTemplatePreview() {
+  await renderComposerPreview({
+    bodyId: 'tBody', paneId: 'tPreviewPane', previewTenantSelectId: 'tPreviewTenant',
+    dateId: null, timeId: null, offsetId: 'tEventOffsetMinutes',
+  });
+}
+
+async function renderComposerPreview({ bodyId, paneId, previewTenantSelectId, dateId, timeId, offsetId }) {
+  const pane = document.getElementById(paneId);
+  if (!pane) return;
+  const body = document.getElementById(bodyId).value;
+  const tenantSlug = document.getElementById(previewTenantSelectId).value || getCurrentTenantSlug();
+  const tenant = TENANTS.find(t => t.slug === tenantSlug);
+
+  let scheduledFor = null;
+  if (dateId && timeId) {
+    const dateVal = document.getElementById(dateId).value;
+    const timeVal = document.getElementById(timeId).value.trim();
+    if (dateVal && /^([01]\d|2[0-3]):[0-5]\d$/.test(timeVal)) {
+      scheduledFor = new Date(dateVal + 'T' + timeVal + ':00Z');
+    }
+  }
+  const usingFallbackTime = !scheduledFor;
+  if (!scheduledFor) scheduledFor = new Date();
+
+  const kingdomNames = await ensureKingdomNamesLoaded();
+  const [roles, channels] = await Promise.all([
+    ensurePreviewRolesLoaded(tenantSlug),
+    ensurePreviewChannelsLoaded(tenantSlug),
+  ]);
+
+  const resolved = clientRenderPlaceholders(body, {
+    allianceName: tenant ? tenant.name : tenantSlug,
+    kingdomName: tenant ? kingdomNames[tenant.kingdom_id] : '',
+    scheduledFor,
+    eventOffsetMinutes: parseInt(document.getElementById(offsetId).value, 10) || 0,
+  });
+  const html = renderDiscordMarkdownPreview(resolved, { roles, channels });
+
+  pane.innerHTML = `
+    <div class="discord-preview-msg">
+      <div class="discord-preview-avatar">S</div>
+      <div class="discord-preview-body">
+        <div class="discord-preview-header"><span class="discord-preview-name">Samaya</span><span class="discord-preview-bot-tag">BOT</span></div>
+        <div class="discord-preview-text">${html}</div>
+      </div>
+    </div>
+    ${usingFallbackTime ? '<div class="discord-preview-note">Using the current time — no send time set yet.</div>' : ''}
+  `;
+}
+
 // The last list loaded by loadAnnouncements() — duplicateAnnouncement()
 // reads from this instead of a second GET, since the row it's duplicating
 // is already sitting in front of the user.
@@ -44,6 +323,8 @@ function openTemplateModal(source) {
   document.querySelector('#templateModalTitle .pf-v6-c-modal-box__title-text').textContent =
     source ? 'Edit Template' : 'New Template';
   document.getElementById('templateModal').classList.add('open');
+  refreshPreviewTenantOptions('tPreviewTenant', null);
+  renderTemplatePreview();
 }
 
 function closeTemplateModal() {
@@ -189,6 +470,7 @@ async function loadAnnouncements() {
 
 function updateAnnouncementCharCount() {
   document.getElementById('aBodyCount').textContent = document.getElementById('aBody').value.length;
+  renderAnnouncementPreview();
 }
 
 function toggleAnnouncementRecurringNote() {
@@ -219,8 +501,13 @@ function addAnnouncementTargetRow(tenantSlug, channelId) {
   `;
   list.appendChild(row);
   const select = row.querySelector('.target-tenant');
-  select.addEventListener('change', () => populateAnnouncementTargetChannels(row, select.value));
+  select.addEventListener('change', () => {
+    populateAnnouncementTargetChannels(row, select.value);
+    refreshPreviewTenantOptions('aPreviewTenant', 'aTargetsList');
+    renderAnnouncementPreview();
+  });
   populateAnnouncementTargetChannels(row, tenantSlug || select.value, channelId);
+  refreshPreviewTenantOptions('aPreviewTenant', 'aTargetsList');
 }
 
 async function populateAnnouncementTargetChannels(row, tenantSlug, channelId) {
@@ -275,6 +562,7 @@ function openAnnouncementModal(source) {
   document.querySelector('#announcementModalTitle .pf-v6-c-modal-box__title-text').textContent =
     source ? 'Duplicate Announcement' : 'New Announcement';
   document.getElementById('announcementModal').classList.add('open');
+  renderAnnouncementPreview();
 }
 
 function closeAnnouncementModal() {
