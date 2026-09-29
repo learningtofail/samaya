@@ -200,6 +200,27 @@
     color: var(--pf-t--global--text--color--subtle); font-size: var(--pf-t--global--font--size--body--sm);
   }
   .report-issue-btn:hover { color: var(--pf-t--global--text--color--regular); background: var(--pf-t--global--background--color--secondary--default); text-decoration: underline; }
+  /* "Add to Calendar" dropdown — replaces a plain link to the raw .ics
+     file (which just downloads a one-time snapshot and leaves the person
+     to figure out how to import it themselves) with direct one-click
+     subscribe links for the calendar apps people actually use. */
+  .calendar-dropdown { position: relative; display: inline-block; }
+  .calendar-dropdown-menu {
+    display: none; position: absolute; top: 100%; left: 0; margin-top: 4px;
+    background: var(--pf-t--global--background--color--primary--default);
+    border: 1px solid var(--pf-t--global--border--color--default);
+    border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.2);
+    min-width: 240px; z-index: 60; overflow: hidden;
+  }
+  .calendar-dropdown-menu.open { display: block; }
+  .calendar-dropdown-menu a {
+    display: flex; flex-direction: column; gap: 1px; padding: 10px 14px;
+    color: var(--pf-t--global--text--color--regular); text-decoration: none;
+    font-size: var(--pf-t--global--font--size--body--sm);
+  }
+  .calendar-dropdown-menu a:hover, .calendar-dropdown-menu a:focus-visible { background: var(--pf-t--global--background--color--secondary--default); }
+  .calendar-dropdown-menu a small { color: var(--pf-t--global--text--color--subtle); }
+  .calendar-dropdown-menu hr { border: none; border-top: 1px solid var(--pf-t--global--border--color--default); margin: 4px 0; }
   /* Same PatternFly page-layout fix admin.html already carries: .pf-v6-c-page
      is CSS grid with header/sidebar/main template areas, and with no
      sidebar element on this page, .pf-v6-c-page__main-container's default
@@ -228,7 +249,10 @@
       <a href="#" id="allianceLink" class="header-link" onclick="openAllianceModal();return false;" title="Switch to another alliance's events, or the combined all-alliances view">Loading…</a>
       <a href="#" id="headerClock" class="header-link" onclick="openTimezoneModal();return false;" title="Current UTC time and your local time — click to change your time zone">Loading…</a>
       <a href="/feedback" class="header-link" title="Submit feedback, request an event/announcement, or see what others have asked for">💬 Feedback</a>
-      <a class="pf-v6-c-button pf-m-primary" id="icsLink" href="#">📅 Subscribe to Calendar</a>
+      <div class="calendar-dropdown">
+        <button type="button" class="pf-v6-c-button pf-m-primary" id="calendarMenuBtn" aria-haspopup="true" aria-expanded="false" onclick="toggleCalendarMenu(event,'calendarMenuList')">📅 Add to Calendar ▾</button>
+        <div class="calendar-dropdown-menu" id="calendarMenuList" role="menu"></div>
+      </div>
     </div>
   </header>
 
@@ -348,7 +372,10 @@
               </div>
             </div>
             <div class="pf-v6-l-flex__item">
-              <a class="pf-v6-c-button pf-m-secondary" id="icsLinkBottom" href="#">📅 Get ICS Feed</a>
+              <div class="calendar-dropdown">
+                <button type="button" class="pf-v6-c-button pf-m-secondary" id="calendarMenuBtnBottom" aria-haspopup="true" aria-expanded="false" onclick="toggleCalendarMenu(event,'calendarMenuListBottom')">📅 Add to Calendar ▾</button>
+                <div class="calendar-dropdown-menu" id="calendarMenuListBottom" role="menu" style="right:0;left:auto"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -413,10 +440,46 @@ const ICS_URL = COMBINED_MODE ? '/ics/events.ics' : `/t/${TENANT_SLUG}/ics/event
 document.getElementById('pageTitle').textContent = COMBINED_MODE
   ? '⏱ Kingshot Event Schedule — All Alliances'
   : `⏱ ${TENANT_SLUG.toUpperCase()} — Kingshot Event Schedule`;
-document.getElementById('icsLink').href = ICS_URL;
-document.getElementById('icsLinkBottom').href = ICS_URL;
 document.getElementById('footerText').innerHTML =
   `Times shown in UTC and your local time · <a href="${ICS_URL}">ICS Calendar Feed</a> · Powered by Samaya`;
+
+// ── "Add to Calendar" (reduces the "I downloaded a file, now what?"
+// friction a bare link to the raw .ics feed left people with) ──────────
+// Google/Outlook's own "add by URL" flows need an absolute, fully-
+// qualified URL — a relative /ics/events.ics won't resolve on their end.
+const ICS_ABSOLUTE_URL = window.location.origin + ICS_URL;
+const ICS_WEBCAL_URL = ICS_ABSOLUTE_URL.replace(/^https?:\/\//, 'webcal://');
+const CALENDAR_TITLE = COMBINED_MODE ? 'Kingshot Event Schedule' : `${TENANT_SLUG.toUpperCase()} — Kingshot Event Schedule`;
+
+function calendarMenuHtml() {
+  const googleUrl = `https://calendar.google.com/calendar/render?cid=${encodeURIComponent(ICS_ABSOLUTE_URL)}`;
+  const outlookUrl = `https://outlook.live.com/calendar/0/addfromweb?url=${encodeURIComponent(ICS_ABSOLUTE_URL)}&name=${encodeURIComponent(CALENDAR_TITLE)}`;
+  return `
+    <a href="${googleUrl}" target="_blank" rel="noopener" role="menuitem">Google Calendar<small>Opens Google Calendar and subscribes automatically</small></a>
+    <a href="${ICS_WEBCAL_URL}" role="menuitem">Apple Calendar / Outlook (desktop)<small>Uses your device's default calendar app</small></a>
+    <a href="${outlookUrl}" target="_blank" rel="noopener" role="menuitem">Outlook.com<small>Opens Outlook on the web and subscribes automatically</small></a>
+    <hr>
+    <a href="${ICS_ABSOLUTE_URL}" role="menuitem">Download .ics file<small>For manually importing into any other app</small></a>
+  `;
+}
+document.getElementById('calendarMenuList').innerHTML = calendarMenuHtml();
+document.getElementById('calendarMenuListBottom').innerHTML = calendarMenuHtml();
+
+function toggleCalendarMenu(evt, menuId) {
+  evt.stopPropagation();
+  const menu = document.getElementById(menuId);
+  const isOpen = menu.classList.contains('open');
+  document.querySelectorAll('.calendar-dropdown-menu.open').forEach(m => m.classList.remove('open'));
+  document.querySelectorAll('.calendar-dropdown button[aria-expanded]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+  if (!isOpen) {
+    menu.classList.add('open');
+    evt.currentTarget.setAttribute('aria-expanded', 'true');
+  }
+}
+document.addEventListener('click', () => {
+  document.querySelectorAll('.calendar-dropdown-menu.open').forEach(m => m.classList.remove('open'));
+  document.querySelectorAll('.calendar-dropdown button[aria-expanded]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+});
 
 const DOW_FULL   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MONTH      = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -430,6 +493,8 @@ const MONTH_FULL = ['January','February','March','April','May','June','July','Au
 // keydown handler.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  document.querySelectorAll('.calendar-dropdown-menu.open').forEach(m => m.classList.remove('open'));
+  document.querySelectorAll('.calendar-dropdown button[aria-expanded]').forEach(b => b.setAttribute('aria-expanded', 'false'));
   const openModal = document.querySelector('.pf-v6-c-backdrop.open');
   if (!openModal) return;
   const fnName = openModal.dataset.closeFn;

@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.28.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.29.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -1220,3 +1220,23 @@ Both public endpoints now attach `notification_channel_name` to every row: `GET 
 **Problem.** The public events page's status/kind legend (§39, restyled into a 3-column grid by §47) was truncating badge text with an ellipsis — "Announcement" showed as "Announc…", "Failed" as "Fail…" — on narrower viewports. `.samaya-legend-kinds`/`.samaya-legend-statuses`'s `grid-template-columns: repeat(3, minmax(0, 1fr))` allows a column to shrink below its content's width, and PatternFly's `.pf-v6-c-label__text` truncates with an ellipsis once its flex parent (`.samaya-legend-item`, `display: flex`) is squeezed — exactly what happened once the row no longer had enough space for both the badge and its description at full width.
 
 **Fix.** `.samaya-legend-item > :first-child { flex-shrink: 0; }` (the badge is always the first child) stops the badge itself from ever being the thing that shrinks; the description text next to it (which already wraps onto multiple lines fine) absorbs the squeeze instead, along with `min-width: 0` on the row and the description span so the flex layout can actually give the description less width without it overflowing. No backend changes; `STATIC_ASSET_VERSION` bumped.
+
+## 55. Lower-Friction "Add to Calendar"
+
+**Status:** Implemented.
+
+**Problem.** The public events page's "Subscribe to Calendar" control was a plain link straight to the raw `.ics` feed URL. Clicking it just downloaded a file — most people, especially Google Calendar users, had no idea what to do with a downloaded `.ics` file next (Google Calendar's own "import a file" flow, buried in Settings, only does a one-time import anyway, not a live subscription the way opening the feed URL directly does).
+
+**Fix.** Replaced both "Subscribe to Calendar" buttons (`events.html`'s header and its banner card) with an "📅 Add to Calendar ▾" dropdown (`calendarMenuHtml()`, `toggleCalendarMenu()`) offering:
+
+- **Google Calendar** — `https://calendar.google.com/calendar/render?cid=<encoded absolute .ics URL>`, opens Google Calendar directly in the "add this calendar" flow with the feed URL already filled in, as a live subscription rather than a one-time import.
+- **Apple Calendar / Outlook (desktop)** — a `webcal://` link (the same URL with its scheme swapped), which the OS hands to whatever calendar app is registered as the default subscribe handler (Calendar.app on macOS/iOS, desktop Outlook on Windows) — no download step at all.
+- **Outlook.com** — `https://outlook.live.com/calendar/0/addfromweb?url=<encoded>&name=<title>`, same "opens pre-filled" pattern as the Google option.
+- **Download .ics file** — the original plain link, kept as the fallback for any other app.
+
+Both dropdowns are built from the same `calendarMenuHtml()` so the two locations never drift out of sync. `ICS_ABSOLUTE_URL` (`window.location.origin + ICS_URL`) is required here — Google's and Outlook's own URL schemes need a fully-qualified address, unlike the relative path the page used internally before this.
+
+### Out of Scope
+
+- Any server-side change — the underlying `/ics/events.ics` feed itself is unchanged; this is a client-side presentation fix only.
+- A native in-app "Add to Calendar" prompt (e.g. detecting the visitor's platform and only showing the one relevant option) — showing all four and letting the visitor pick was judged simpler and more robust than platform-sniffing, which is unreliable and would still need a fallback anyway.
