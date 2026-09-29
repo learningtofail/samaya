@@ -66,6 +66,13 @@
   /* Spec §38.9 — last-activity marquee: a single-line strip naming the
      most recent Discord message sent, sitting just under the info card. */
   .samaya-marquee { display: flex; align-items: center; gap: 8px; font-size: var(--pf-t--global--font--size--body--sm); color: var(--pf-t--global--text--color--subtle); padding: 6px 0 14px; }
+  /* Spec §39 — status/kind legend, rendered by renderLegend(). Wraps at
+     narrow widths rather than a fixed column count, since the number of
+     rows (three kind/scope + six status) doesn't divide evenly. */
+  .samaya-legend-kinds, .samaya-legend-statuses {
+    display: flex; flex-wrap: wrap; gap: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--lg);
+  }
+  .samaya-legend-item { display: flex; align-items: center; gap: var(--pf-t--global--spacer--sm); min-width: 240px; flex: 1 1 260px; }
   #allianceModal { display: none; }
   #allianceModal.open { display: block; }
   #timezoneModal { display: none; }
@@ -150,6 +157,12 @@
   <div class="pf-v6-c-page__main-container">
   <main class="pf-v6-c-page__main" tabindex="-1" id="main-content">
     <section class="pf-v6-c-page__main-section">
+      <!-- Spec §39 — legend, first thing on the page so the badges/pills
+           below are self-explanatory before anyone scrolls. Content is
+           rendered by renderLegend() from the same STATUS_META/badge
+           functions the event rows themselves use. -->
+      <div class="pf-v6-c-card pf-v6-u-mb-lg" id="statusLegend"></div>
+
       <div class="pf-v6-c-card pf-v6-u-mb-lg">
         <div class="pf-v6-c-card__body">
           <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center">
@@ -434,13 +447,35 @@ function pfLabel(cls, text) {
 // Discord's own Scheduled Event lifecycle (routers/webhooks.py's inbound
 // status sync), which an announcement has no equivalent of.
 const STATUS_META = {
-  scheduled: { text: 'Scheduled', color: 'pf-m-gray'  },
-  announced: { text: 'Announced', color: 'pf-m-green' },
-  live:      { text: 'Live Now',  color: 'pf-m-blue'  },
-  completed: { text: 'Completed', color: 'pf-m-gray'  },
-  failed:    { text: 'Failed',    color: 'pf-m-red'   },
-  cancelled: { text: 'Cancelled', color: 'pf-m-red'   },
+  scheduled: { text: 'Scheduled', color: 'pf-m-gray',  desc: 'Set to go out, but hasn’t been sent to Discord yet.' },
+  announced: { text: 'Announced', color: 'pf-m-green', desc: 'Posted to Discord. For events, this is the normal steady state until it starts.' },
+  live:      { text: 'Live Now',  color: 'pf-m-blue',  desc: 'The event is happening right now.' },
+  completed: { text: 'Completed', color: 'pf-m-gray',  desc: 'The event has ended.' },
+  failed:    { text: 'Failed',    color: 'pf-m-red',   desc: 'Something went wrong sending this to Discord — it did not go out as planned.' },
+  cancelled: { text: 'Cancelled', color: 'pf-m-red',   desc: 'Called off. It will not be posted (or was pulled after posting).' },
 };
+
+// Spec §39 — the legend card at the top of the page renders straight from
+// STATUS_META/the kind- and scope-badge functions rather than a second,
+// hand-written copy of the same six statuses, so it can never drift out of
+// sync with what the event/announcement rows below it actually show.
+function renderLegend() {
+  const el = document.getElementById('statusLegend');
+  if (!el) return;
+  const statusRows = Object.values(STATUS_META).map(m =>
+    `<div class="samaya-legend-item">${pfLabel(m.color, m.text)}<span class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle)">${m.desc}</span></div>`
+  ).join('');
+  el.innerHTML = `
+    <div class="pf-v6-c-card__body">
+      <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-sm">Legend</h2>
+      <div class="samaya-legend-kinds pf-v6-u-mb-sm">
+        <div class="samaya-legend-item">${eventKindBadge()}<span class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle)">A scheduled game event, with a start time and duration.</span></div>
+        <div class="samaya-legend-item">${announcementKindBadge()}<span class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle)">A one-off Discord message with no duration — not on the calendar feed.</span></div>
+        <div class="samaya-legend-item">${scopeBadge('kingdom-wide')}<span class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle)">Every alliance in the Kingdom takes part together.</span></div>
+      </div>
+      <div class="samaya-legend-statuses">${statusRows}</div>
+    </div>`;
+}
 
 function statusBadge(status) {
   const key = {
@@ -658,6 +693,7 @@ fetch('/api/kingdom-branding').then(r => r.json()).then(b => {
   }
 }).catch(() => {});
 
+renderLegend();
 loadEvents();
 loadAlliances();
 loadLastActivity();
