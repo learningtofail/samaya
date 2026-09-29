@@ -46,6 +46,8 @@
   #eventModal.open { display: block; }
   #announcementModal { display: none; }
   #announcementModal.open { display: block; }
+  #templateModal { display: none; }
+  #templateModal.open { display: block; }
   #tenantModal { display: none; }
   #tenantModal.open { display: block; }
   #timezoneModal { display: none; }
@@ -395,6 +397,18 @@
 
 <!-- ANNOUNCEMENTS (spec §13) -->
 <div id="v-announcements" class="view">
+  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
+    <h3 class="pf-v6-c-title pf-m-md" style="margin:0">Templates</h3>
+    <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="openTemplateModal()" title="Save a reusable starting point for new announcements — supports placeholders like {alliance_name} and Discord's own dynamic timestamps.">+ New Template</button>
+  </div>
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">Reusable, named starting points for new announcements — pick one below to pre-fill the New Announcement form, then edit and schedule as usual (spec §27).</p>
+  <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg" id="templatesTable">
+    <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
+      <th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Title</th><th class="pf-v6-c-table__th">Event Offset</th><th class="pf-v6-c-table__th">Actions</th>
+    </tr></thead>
+    <tbody id="templatesBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="4" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+  </table>
+
   <div class="pf-v6-l-flex pf-m-align-items-center pf-v6-u-mb-sm" style="gap:12px">
     <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Announcements</h2>
     <button class="pf-v6-c-button pf-m-primary" onclick="openAnnouncementModal()" title="Schedule a one-off channel message — no event or recurrence involved.">+ New Announcement</button>
@@ -557,7 +571,10 @@
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aBody"><span class="pf-v6-c-form__label-text">Body (Markdown)</span></label></div>
               <div class="pf-v6-c-form__group-control">
                 <textarea class="pf-v6-c-form-control" id="aBody" rows="5" maxlength="2000" placeholder="Announcement text sent to Discord" oninput="updateAnnouncementCharCount()"></textarea>
-                <div class="pf-v6-c-form__helper-text"><span id="aBodyCount">0</span> / 2000 characters (Discord's message limit)</div>
+                <div class="pf-v6-c-form__helper-text">
+                  <span id="aBodyCount">0</span> / 2000 characters (Discord's message limit) — Discord markdown works as usual (**bold**, *italic*, __underline__, ~~strikethrough~~, ||spoiler||, &gt; quote, ```code```).
+                  Placeholders, resolved when each message is sent: <code>{alliance_name}</code> <code>{kingdom_name}</code> <code>{send_time}</code> <code>{send_time_relative}</code> <code>{event_time}</code> <code>{event_time_relative}</code> — the two <code>event_*</code> ones use the Event Offset field below.
+                </div>
               </div>
             </div>
             <div class="pf-v6-c-form__group">
@@ -571,6 +588,13 @@
               <div class="pf-v6-c-form__group-control">
                 <input class="pf-v6-c-form-control" type="text" id="aScheduledTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric">
                 <div class="pf-v6-c-form__helper-text">24-hour clock, same as event start times.</div>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aEventOffsetMinutes"><span class="pf-v6-c-form__label-text">Event Offset (minutes)</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="number" id="aEventOffsetMinutes" value="0" placeholder="0">
+                <div class="pf-v6-c-form__helper-text">Only matters if the body uses {event_time}/{event_time_relative} — how many minutes after Send Time the event itself happens. E.g. a reset warning sent 15 minutes early uses 15.</div>
               </div>
             </div>
             <div class="pf-v6-c-form__group">
@@ -608,7 +632,66 @@
       </div>
       <footer class="pf-v6-c-modal-box__footer">
         <button class="pf-v6-c-button pf-m-primary" onclick="saveAnnouncement()">Save</button>
+        <button class="pf-v6-c-button pf-m-secondary" onclick="saveCurrentAsTemplate()" title="Save this title/body/leadership/event-offset as a reusable template — doesn't schedule anything.">Save as Template</button>
         <button class="pf-v6-c-button pf-m-link" onclick="closeAnnouncementModal()">Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<!-- ANNOUNCEMENT TEMPLATE MODAL (spec §27) -->
+<div class="pf-v6-c-backdrop" id="templateModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="templateModalTitle" style="max-height:90vh;overflow-y:auto">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="templateModalTitle"><span class="pf-v6-c-modal-box__title-text">New Template</span></h2>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <input type="hidden" id="tTemplateId">
+        <form class="pf-v6-c-form">
+          <div class="form-grid">
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="tName"><span class="pf-v6-c-form__label-text">Template Name</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="text" id="tName" placeholder="Daily Reset Warning">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="tTitle"><span class="pf-v6-c-form__label-text">Title</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="text" id="tTitle" placeholder="Daily Reset Warning">
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group full">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="tBody"><span class="pf-v6-c-form__label-text">Body (Markdown)</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <textarea class="pf-v6-c-form-control" id="tBody" rows="5" placeholder="⚠️ Daily reset in {event_time_relative} ({event_time})"></textarea>
+                <div class="pf-v6-c-form__helper-text">
+                  Same Discord markdown and placeholders as the announcement Body field — <code>{alliance_name}</code> <code>{kingdom_name}</code> <code>{send_time}</code> <code>{send_time_relative}</code> <code>{event_time}</code> <code>{event_time_relative}</code>. No 2000-character limit here since placeholders expand at send time.
+                </div>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="tEventOffsetMinutes"><span class="pf-v6-c-form__label-text">Event Offset (minutes)</span></label></div>
+              <div class="pf-v6-c-form__group-control">
+                <input class="pf-v6-c-form-control" type="number" id="tEventOffsetMinutes" value="0" placeholder="0">
+                <div class="pf-v6-c-form__helper-text">E.g. 15 for a warning sent 15 minutes before the event.</div>
+              </div>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group-control">
+                <span class="pf-v6-c-check">
+                  <input class="pf-v6-c-check__input" type="checkbox" id="tLeadershipOnly">
+                  <label class="pf-v6-c-check__label" for="tLeadershipOnly">Leadership Only (👑 — prefills the same flag on announcements made from this template)</label>
+                </span>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button class="pf-v6-c-button pf-m-primary" onclick="saveTemplate()">Save</button>
+        <button class="pf-v6-c-button pf-m-link" onclick="closeTemplateModal()">Cancel</button>
       </footer>
     </div>
   </div>

@@ -9,6 +9,133 @@
 // is already sitting in front of the user.
 let ANNOUNCEMENTS = [];
 
+// Same pattern for Announcement Templates (spec §27) — useTemplate() and
+// editTemplate() read from this instead of a second GET.
+let ANNOUNCEMENT_TEMPLATES = [];
+
+async function loadAnnouncementTemplates() {
+  try {
+    ANNOUNCEMENT_TEMPLATES = await api('GET', '/api/announcement-templates');
+    const tbody = document.getElementById('templatesBody');
+    tbody.innerHTML = ANNOUNCEMENT_TEMPLATES.length
+      ? ANNOUNCEMENT_TEMPLATES.map(t =>
+          '<tr class="pf-v6-c-table__tr">'
+          + '<td class="pf-v6-c-table__td">' + escapeHtml(t.name) + (t.leadership_only ? ' <span title="Leadership only">👑</span>' : '') + '</td>'
+          + '<td class="pf-v6-c-table__td">' + escapeHtml(t.title_template) + '</td>'
+          + '<td class="pf-v6-c-table__td" style="color:var(--muted)">' + (t.event_offset_minutes ? t.event_offset_minutes + ' min' : '—') + '</td>'
+          + '<td class="pf-v6-c-table__td" style="display:flex;gap:6px;flex-wrap:wrap">'
+          + '<button class="pf-v6-c-button pf-m-primary pf-m-small" onclick="useTemplate(' + t.id + ')" title="Open a new announcement pre-filled from this template">Use</button>'
+          + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="editTemplate(' + t.id + ')">Edit</button>'
+          + '<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="deleteTemplate(' + t.id + ')">Delete</button>'
+          + '</td>'
+          + '</tr>'
+        ).join('')
+      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="4" style="color:var(--muted);padding:20px">No templates yet.</td></tr>';
+  } catch (e) { toast(e.message, true); }
+}
+
+function openTemplateModal(source) {
+  document.getElementById('tTemplateId').value = source ? source.id : '';
+  document.getElementById('tName').value = source ? source.name : '';
+  document.getElementById('tTitle').value = source ? source.title_template : '';
+  document.getElementById('tBody').value = source ? source.body_template : '';
+  document.getElementById('tEventOffsetMinutes').value = source ? source.event_offset_minutes : 0;
+  document.getElementById('tLeadershipOnly').checked = !!(source && source.leadership_only);
+  document.querySelector('#templateModalTitle .pf-v6-c-modal-box__title-text').textContent =
+    source ? 'Edit Template' : 'New Template';
+  document.getElementById('templateModal').classList.add('open');
+}
+
+function closeTemplateModal() {
+  document.getElementById('templateModal').classList.remove('open');
+}
+
+function editTemplate(id) {
+  const source = ANNOUNCEMENT_TEMPLATES.find(t => t.id === id);
+  if (!source) return;
+  openTemplateModal(source);
+}
+
+async function saveTemplate() {
+  const id = document.getElementById('tTemplateId').value;
+  const name = document.getElementById('tName').value.trim();
+  const title_template = document.getElementById('tTitle').value.trim();
+  const body_template = document.getElementById('tBody').value;
+  if (!name || !title_template || !body_template) {
+    toast('Name, title, and body are all required', true);
+    return;
+  }
+  const payload = {
+    name, title_template, body_template,
+    leadership_only: document.getElementById('tLeadershipOnly').checked,
+    event_offset_minutes: parseInt(document.getElementById('tEventOffsetMinutes').value, 10) || 0,
+  };
+  try {
+    if (id) {
+      await api('PATCH', `/api/announcement-templates/${id}`, payload);
+      toast('Template updated');
+    } else {
+      await api('POST', '/api/announcement-templates', payload);
+      toast('Template created');
+    }
+    closeTemplateModal();
+    loadAnnouncementTemplates();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deleteTemplate(id) {
+  const t = ANNOUNCEMENT_TEMPLATES.find(x => x.id === id);
+  if (!confirm(`Delete the template "${t ? t.name : ''}"? This cannot be undone.`)) return;
+  try {
+    await api('DELETE', `/api/announcement-templates/${id}`);
+    toast('Template deleted');
+    loadAnnouncementTemplates();
+  } catch (e) { toast(e.message, true); }
+}
+
+// Opens the New Announcement modal pre-filled from a template — a
+// one-time copy, same relationship duplicateAnnouncement() has to the
+// announcement it copies from (see openAnnouncementModal's own comment).
+// Deliberately built as a source object shaped like (a subset of) an
+// Announcement, so openAnnouncementModal needs no template-specific branch.
+function useTemplate(id) {
+  const t = ANNOUNCEMENT_TEMPLATES.find(x => x.id === id);
+  if (!t) return;
+  openAnnouncementModal({
+    title: t.title_template,
+    body_markdown: t.body_template,
+    leadership_only: t.leadership_only,
+    event_offset_minutes: t.event_offset_minutes,
+  });
+}
+
+// The reverse direction — captures whatever's currently in the open
+// announcement modal (title/body/leadership/event offset only, never the
+// schedule or targets) as a new named template. Prompt-based, matching
+// this app's established convention for a single-field quick-create
+// (Kingdom/Tenant/Discord Server all do the same) rather than opening a
+// second modal on top of the first.
+async function saveCurrentAsTemplate() {
+  const name = prompt('Save this title/body as a template named:');
+  if (!name) return;
+  const payload = {
+    name,
+    title_template: document.getElementById('aTitle').value.trim(),
+    body_template: document.getElementById('aBody').value,
+    leadership_only: document.getElementById('aLeadershipOnly').checked,
+    event_offset_minutes: parseInt(document.getElementById('aEventOffsetMinutes').value, 10) || 0,
+  };
+  if (!payload.title_template || !payload.body_template) {
+    toast('Title and body are both required to save as a template', true);
+    return;
+  }
+  try {
+    await api('POST', '/api/announcement-templates', payload);
+    toast(`Template "${name}" saved`);
+    loadAnnouncementTemplates();
+  } catch (e) { toast(e.message, true); }
+}
+
 async function loadAnnouncements() {
   try {
     const items = await api('GET', '/api/announcements');
@@ -135,6 +262,7 @@ function openAnnouncementModal(source) {
   document.getElementById('aIntervalDays').value = (source && source.interval_days) ? source.interval_days : '';
   document.getElementById('aIntervalGroup').style.display = (source && source.recurring) ? '' : 'none';
   document.getElementById('aLeadershipOnly').checked = !!(source && source.leadership_only);
+  document.getElementById('aEventOffsetMinutes').value = (source && source.event_offset_minutes) ? source.event_offset_minutes : 0;
   document.getElementById('aTargetsList').innerHTML = '';
   if (source && source.targets.length) {
     source.targets.forEach(t => addAnnouncementTargetRow(tenantSlugFor(t.tenant_id), t.discord_channel_id));
@@ -206,6 +334,7 @@ async function saveAnnouncement() {
     leadership_only: document.getElementById('aLeadershipOnly').checked,
     recurring,
     interval_days: recurring ? parseInt(intervalRaw) : null,
+    event_offset_minutes: parseInt(document.getElementById('aEventOffsetMinutes').value, 10) || 0,
   };
 
   try {

@@ -191,6 +191,7 @@ class AnnouncementIn(BaseModel):
     leadership_only: bool = False
     recurring: bool = False
     interval_days: Optional[int] = None
+    event_offset_minutes: int = 0
 
     @field_validator("body_markdown")
     @classmethod
@@ -218,6 +219,29 @@ class AnnouncementIn(BaseModel):
         if not self.recurring:
             self.interval_days = None
         return self
+
+
+class AnnouncementTemplateIn(BaseModel):
+    """spec §27 — a reusable starting point for AnnouncementIn.title/
+    body_markdown/leadership_only/event_offset_minutes. title_template/
+    body_template may contain services/templates.py's placeholders; unlike
+    AnnouncementIn.body_markdown, there's no 2000-char Discord limit
+    enforced here, since a placeholder like {event_time} expands at
+    delivery time to something longer than it is in the template text —
+    the real limit is enforced on the announcement created from it."""
+    name:                  str
+    title_template:        str
+    body_template:         str
+    leadership_only:       bool = False
+    event_offset_minutes:  int = 0
+
+
+class AnnouncementTemplatePatch(BaseModel):
+    name:                  Optional[str] = None
+    title_template:        Optional[str] = None
+    body_template:         Optional[str] = None
+    leadership_only:       Optional[bool] = None
+    event_offset_minutes:  Optional[int] = None
 
 
 class OccurrencePatch(BaseModel):

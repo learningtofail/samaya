@@ -79,14 +79,16 @@ class Tenant(Base):
     color      = Column(Text, nullable=False, default="#475569")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    kingdom = relationship("Kingdom", back_populates="tenants")
-    # Eager by default (lazy="joined"): a single cheap FK join, always
-    # needed wherever a Tenant's Discord credentials matter (deps.py,
-    # discord_sync.py, occurrences.py, the announcement/reminder
-    # schedulers, ...) — eager-loading here avoids auditing every one of
-    # those call sites individually to eager-load it per query, and
-    # avoids the MissingGreenlet class of bug a missed spot would cause
-    # (see spec §25.2).
+    # Eager by default (lazy="joined") on both: a single cheap FK join
+    # each, needed wherever a Tenant's Discord credentials (server) or
+    # Kingdom name (kingdom, for the {kingdom_name} announcement-template
+    # placeholder — spec §27) matter, in places that fetch a Tenant via
+    # session.get() rather than a hand-written eager-loading query
+    # (deps.py, discord_sync.py, occurrences.py, the announcement/reminder
+    # schedulers, ...). Eager-loading here avoids auditing every one of
+    # those call sites individually, and avoids the MissingGreenlet class
+    # of bug a missed spot would cause (see spec §25.2).
+    kingdom    = relationship("Kingdom", back_populates="tenants", lazy="joined")
     server     = relationship("DiscordServer", back_populates="tenants", lazy="joined")
 
 
@@ -353,7 +355,18 @@ class Announcement(Base):
     announcement (the default, matching every row created before this
     field existed) still goes terminal (posted/failed) after one send.
     Cancelling a recurring announcement ends the whole series, not just
-    the next occurrence — see spec §13.5."""
+    the next occurrence — see spec §13.5.
+
+    event_offset_minutes (spec §27) supports the "warn ahead of an event"
+    pattern — e.g. a reminder sent 15 minutes before a daily reset at
+    00:00 UTC is itself scheduled for 23:45 UTC, but the *event* being
+    announced is 15 minutes later than the send time. It has no effect
+    unless body_markdown uses the {event_time}/{event_time_relative}
+    placeholders (services/templates.py); every other placeholder and
+    every announcement written without any placeholders at all ignores
+    it entirely. Defaults to 0 (event = the announcement's own send
+    time), matching every announcement written before this field
+    existed."""
     __tablename__ = "announcements"
 
     id               = Column(Integer, primary_key=True)
@@ -368,6 +381,7 @@ class Announcement(Base):
     created_by       = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at       = Column(DateTime(timezone=True), server_default=func.now())
     posted_at        = Column(DateTime(timezone=True))
+    event_offset_minutes = Column(Integer, nullable=False, default=0)
 
     targets = relationship("AnnouncementTarget", back_populates="announcement", cascade="all, delete-orphan")
 
@@ -403,6 +417,47 @@ class AnnouncementTarget(Base):
     __table_args__ = (
         UniqueConstraint("announcement_id", "tenant_id", name="uq_announcement_target"),
         CheckConstraint("post_status IN ('pending', 'posted', 'error')", name="ck_announcement_target_status"),
+    )
+
+
+class AnnouncementTemplate(Base):
+    """A reusable, named starting point for creating an Announcement (spec
+    §27) — picking one pre-fills the New Announcement modal's title/body/
+    leadership flag/event offset, which the coordinator can then edit
+    before scheduling, same one-time-copy relationship Duplicate already
+    has to the announcement it copied from (no live link back to this
+    row afterward).
+
+    Scoped to one Tenant, like Announcement itself — a template is
+    managed by whoever can create announcements for that alliance, not a
+    platform-wide or Kingdom-wide list, even though a template like
+    "Daily Reset Warning" is often reused verbatim across every alliance
+    in a Kingdom. Nothing stops two alliances each creating their own
+    identically-worded template; unifying that is an out-of-scope
+    convenience (see spec §27's Out of Scope), not a data-model gap.
+
+    title_template/body_template may contain the placeholders
+    services/templates.py knows how to resolve ({alliance_name},
+    {kingdom_name}, {send_time}, {send_time_relative}, {event_time},
+    {event_time_relative}) — resolution happens per-target, at delivery
+    time, not when the template is applied, so a recurring announcement's
+    later occurrences get a fresh Discord timestamp and the correct
+    alliance name for whichever target is being posted to right now, not
+    whichever tenant happened to be active when the announcement was
+    first created."""
+    __tablename__ = "announcement_templates"
+
+    id                    = Column(Integer, primary_key=True)
+    owning_tenant_id      = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    name                  = Column(Text, nullable=False)
+    title_template        = Column(Text, nullable=False)
+    body_template         = Column(Text, nullable=False)
+    leadership_only       = Column(Boolean, nullable=False, default=False)
+    event_offset_minutes  = Column(Integer, nullable=False, default=0)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("owning_tenant_id", "name", name="uq_announcement_template_name"),
     )
 
 

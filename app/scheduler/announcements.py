@@ -10,6 +10,7 @@ from sqlalchemy import select
 from models import AsyncSessionLocal
 from models.db import Announcement, AnnouncementTarget, Tenant
 from services.discord_api import send_channel_message
+from services.templates import render_placeholders
 from services.time_utils import ensure_utc
 
 logger = logging.getLogger(__name__)
@@ -60,9 +61,22 @@ async def send_scheduled_announcements(session_factory=None):
                         target.status_detail = "No Discord bot token configured for this tenant"
                         continue
 
+                    # Resolved per-target, at send time — not once for the
+                    # whole announcement — so {alliance_name} is this
+                    # target's own tenant (not whichever tenant authored
+                    # the announcement) and {send_time}/{event_time} are
+                    # fresh even on a recurring announcement's later
+                    # occurrences (spec §27).
+                    body = render_placeholders(
+                        announcement.body_markdown,
+                        tenant_name=tenant.name,
+                        kingdom_name=tenant.kingdom.name,
+                        scheduled_for=ensure_utc(announcement.scheduled_for),
+                        event_offset_minutes=announcement.event_offset_minutes,
+                    )
                     try:
                         success, error = await send_channel_message(
-                            token, target.discord_channel_id, announcement.body_markdown
+                            token, target.discord_channel_id, body
                         )
                     except Exception as e:
                         target.post_status = "error"

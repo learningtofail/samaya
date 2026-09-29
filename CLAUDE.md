@@ -48,7 +48,8 @@ route logic itself.
   - `tenants.py` — Kingdom/Tenant/Discord Server CRUD (including `PATCH /api/kingdoms/{id}` and `GET/POST/PATCH /api/discord-servers`, spec §25), the actual "onboard a new alliance" surface; every write here is superadmin-only, `list_tenants` is scoped to what the caller actually has access to. A Tenant's create/update takes `server_id` (an existing `DiscordServer` row), not `guild_id`/`bot_token`/`public_key` directly
   - `invites.py` — tenant invites (owner-issued) and kingdom-coordinator invites (superadmin-issued), both with revocation; also owns editing/removing grants that already exist (`/api/members` for UserTenant, `/api/kingdom-coordinators` for UserKingdom) — the standing-access counterpart to the invite lifecycle above
   - `users.py` — platform-wide user listing and superadmin-flag toggling, superadmin-only; separate from `invites.py` because it edits the `User` row itself, not a per-tenant/per-kingdom grant
-  - `announcements.py` — scheduled-announcement create/list/cancel/delete; delivery itself is in `scheduler/announcements.py`, not here. Delete is terminal-state-only (`posted`/`failed`/`cancelled`) — a `scheduled` one has to be cancelled first, matching the admin UI's Cancel-then-Delete two-step
+  - `announcements.py` — scheduled-announcement create/list/cancel/delete; delivery itself is in `scheduler/announcements.py`, not here. Delete is terminal-state-only (`posted`/`failed`/`cancelled`) — a `scheduled` one has to be cancelled first, matching the admin UI's Cancel-then-Delete two-step. `event_offset_minutes` (spec §27) rides along on create, unused here — it's only read at delivery
+  - `announcement_templates.py` — `AnnouncementTemplate` CRUD (spec §27), same tenant scoping/permission level as `announcements.py` (any tenant member, not owner-only) — a template is a prefill convenience for the same create-announcement action
   - `schemas.py` — shared Pydantic request models
   - `serializers.py` — shared `_event_dict`/`_occurrence_dict`/`_log_dict` response shaping
   - `deps.py` — shared FastAPI dependencies: `get_current_user`, `get_current_tenant` (checks real `UserTenant` access, not just "does this tenant exist"), `require_tenant_owner`, `require_superadmin`, `check_kingdom_coordinator` (a plain function, not a `Depends` — only some events need it), `get_discord_config`, `get_occurrence_with_event`, `find_post_log`, `resolve_target_tenants`/`check_target_access` (slug-resolution + access-check for an explicit multi-target list — shared by Announcements and Events' `targets` field, spec §13.3/§20). Check here before writing yet another inline lookup or permission check
@@ -64,6 +65,7 @@ route logic itself.
 - `recurrence.py` — interval-in-days + anchor-date occurrence math (no named recurrence types — see architectural decision in project memory if you need the "why")
 - `validators.py` — shared Pydantic field-validator bodies for `EventIn`/`EventPatch`
 - `notifications.py` — SMTP email sending (separate from Discord notifications, which live in `discord_api.py`)
+- `templates.py` — `render_placeholders()`/`discord_timestamp()` for Announcement bodies (spec §27): `{alliance_name}`/`{kingdom_name}`/`{send_time}`/`{send_time_relative}`/`{event_time}`/`{event_time_relative}`, the last two shifted by `event_offset_minutes`. A plain regex substitution over a fixed name set, not `str.format()` — an unrecognized `{whatever}` is left untouched rather than raising `KeyError`
 
 ## `app/scheduler/` — background jobs (APScheduler, registered in `main.py`)
 
@@ -77,7 +79,7 @@ to point them at a test database instead of the real one.
 
 - `regeneration.py` — `regenerate_occurrences` (daily at UTC 00:00, or on-demand per-tenant from the admin "regenerate" button), rebuilds the `Occurrence` table from `EventDefinition` + recurrence rules
 - `reminders.py` — `send_pre_event_reminders` (per-minute)
-- `announcements.py` — `send_scheduled_announcements` (per-minute); independent per-`AnnouncementTarget` delivery, same resilience principle as kingdom-wide `PostLog` fan-out
+- `announcements.py` — `send_scheduled_announcements` (per-minute); independent per-`AnnouncementTarget` delivery, same resilience principle as kingdom-wide `PostLog` fan-out. Resolves `services/templates.py`'s six `{placeholder}`s in `body_markdown` per-target, right before `send_channel_message` — never earlier, since `{alliance_name}` depends on which target is being posted to and a recurring announcement's `{send_time}`/`{event_time}` must reflect that occurrence's own `scheduled_for`, not whichever one existed at creation (spec §27)
 
 ## `app/models/`
 
@@ -120,6 +122,8 @@ Organized by what's tested, not by router file:
 - `test_announcements.py` — creation validation (2000-char Discord limit, empty targets, past `scheduled_for` rejected with 422), permission scoping to the creator's own tenant access, delivery (including one-target-failure not blocking another), cancellation, and deletion (`TestDeleteAnnouncement` — terminal-state-only, 400 on a still-`scheduled` one, 404 on a nonexistent id). Delivery tests use `_run_delivery_job` to inject a test session factory — see that helper's docstring if a delivery test needs to call the job function itself. `_future_iso(minutes=60)` builds a genuinely-future timestamp for creation payloads (the past-date guard rejects anything else); `_backdate_to_due()` creates via the API with a valid future time then mutates `scheduled_for` directly on the ORM row afterward, for tests that need a "due" announcement to feed to the delivery job
 - `test_access_management.py` — editing/removing an already-claimed UserTenant or UserKingdom grant, Kingdom editing, and platform-wide user/superadmin management, including the sole-owner and can't-self-demote guards
 - `test_discord_servers.py` — spec §25's `DiscordServer` entity: CRUD + superadmin gating on `/api/discord-servers`, Tenant create/update via `server_id` (including 404 on an unknown one), and the actual point of the redesign — two tenants sharing one server, and a bot-token update on that server reaching both with no per-tenant override to go stale
+- `test_templates.py` — pure unit tests for `services/templates.py`'s placeholder substitution, no HTTP
+- `test_announcement_templates.py` — spec §27's `AnnouncementTemplate` CRUD + tenant scoping, and the actual point of the feature: placeholders resolved per-target at delivery (not at creation), each target in a multi-target announcement seeing its own `{alliance_name}`, and a recurring announcement's later occurrences rendering a fresh `{send_time}`
 - `test_recurrence.py` — `services/recurrence.py` math, no HTTP
 - `test_validation.py` — `services/validators.py` / schema validation, including the `scope` field
 

@@ -272,7 +272,7 @@ function showView(id, btn) {
   if (id === 'config')    loadDiscordConfig();
   if (id === 'access')    loadAccess();
   if (id === 'platform')  loadPlatform();
-  if (id === 'announcements') loadAnnouncements();
+  if (id === 'announcements') { loadAnnouncements(); loadAnnouncementTemplates(); }
 }
 
 // tenantOverride sends one explicit tenant slug regardless of the

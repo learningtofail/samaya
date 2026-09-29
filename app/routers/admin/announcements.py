@@ -31,6 +31,7 @@ def _announcement_dict(a: Announcement) -> dict:
         "leadership_only":  a.leadership_only,
         "recurring":        a.recurring,
         "interval_days":    a.interval_days,
+        "event_offset_minutes": a.event_offset_minutes,
         "posted_at":        a.posted_at.isoformat() if a.posted_at else None,
         "targets": [
             {
@@ -83,7 +84,7 @@ async def create_announcement(
         owning_tenant_id=tenant.id, title=payload.title, body_markdown=payload.body_markdown,
         scheduled_for=scheduled_for, status="scheduled", created_by=user.id,
         leadership_only=payload.leadership_only, recurring=payload.recurring,
-        interval_days=payload.interval_days,
+        interval_days=payload.interval_days, event_offset_minutes=payload.event_offset_minutes,
     )
     db.add(announcement)
     await db.flush()
