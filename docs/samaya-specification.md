@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.24.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.25.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -1124,4 +1124,22 @@ Follow-up feedback on the same batch: the Alliance Events, Leadership Notificati
 - The Announcements page's stale "cannot be edited" copy was corrected to reflect §49's new in-place editing.
 
 Out of scope: resolving channel/role names server-side into the API response itself (kept as a client-side, cached lookup — consistent with how the Announcement composer's own preview already resolves mentions).
-- Any interactivity in the preview itself (actually clicking "Interested," reacting, replying) — it's a static visual approximation, not an embedded Discord widget.
+
+## 50. Scheduled Announcements in the Admin Schedule View
+
+**Status:** Implemented.
+
+**Problem.** The 28-Day Schedule tab (`#v-schedule`, both its Table and Timeline layouts) only ever showed `Occurrence` rows. A still-`scheduled` Announcement — something a coordinator is just as likely to be tracking against the same 28-day window — was invisible there; seeing it required switching to the separate Announcements tab, with no shared at-a-glance view of "everything going out in the next few weeks."
+
+**Fix.** Both Schedule layouts gained a third, independent section for scheduled announcements, alongside (not merged into) the existing Alliance Events/Leadership Notifications sections — an Announcement has no start/end time, duration, `post_to_discord` toggle, or per-target Post/Cancel-to-Discord action the way an `Occurrence` does, so it was never going to fit those tables' rows.
+
+- **Table layout (`schedAnnouncementsWrap`/`schedAnnouncementsTable`, `admin.html`; `renderScheduleAnnouncements`, `schedule.js`)** — a "📢 Announcements" table beneath the Leadership Notifications table, sharing §49's addendum column set (Name, Alliance, Interval, Schedule Start, Status, Notification Targets) but with an **Actions** column offering only **Edit** and **Cancel** — no post-to-Discord toggle or Post button (those are Events-only concepts), and no Delete either: this table only ever lists `status == 'scheduled'` announcements, and `delete_announcement` is terminal-state-only (§13.3/§27), so a Delete button here would always 400 — Delete/Retry Failed/Duplicate remain on the Announcements tab itself, where an announcement's full lifecycle (including terminal states) is visible. `editAnnouncement`/`cancelAnnouncement` (`announcements.js`) are reused as-is.
+- **Timeline layout (`ganttAnnouncementsWrap`, `admin.html`; `renderAnnouncementGantt`, `gantt.js`)** — a third Gantt-style grid, reusing `buildGanttGrid` by mapping each Announcement into the same `{event_name, occurrence_date, owning_tenant_id, start_datetime_utc}` shape an `Occurrence` already has. Unlike an Event's recurrence — expanded into real `Occurrence` rows up front by `regenerate_occurrences` — a recurring Announcement only ever has one live `scheduled_for` at a time (the next send, advanced in place after each delivery by `scheduler/announcements.py`), so this plots exactly one marker per announcement, never a projected range of future sends the way a recurring event's Gantt row does.
+- **Data loading (`loadSchedule`, `schedule.js`)** — fetches `GET /api/announcements` (scoped by the Schedule tab's own alliance filter, same as the existing occurrences fetch) into `announcements.js`'s own `ANNOUNCEMENTS` cache, rather than a Schedule-local one, so `editAnnouncement`/`cancelAnnouncement` work correctly from the Schedule tab even if the Announcements tab was never visited this session; the fetched list is then filtered to `status == 'scheduled'` for display in both new sections.
+
+No backend changes — this is a display-only combination of two already-existing endpoints on one tab; `STATIC_ASSET_VERSION` bumped (`routers/admin/ui.py`) since only static assets changed.
+
+### Out of Scope
+
+- A combined single table/timeline mixing Events and Announcements row-for-row — kept as separate sections given how different their underlying shapes are (range vs. point-in-time, different action sets).
+- Showing anything other than `status == 'scheduled'` announcements here — posted/failed/cancelled ones remain a concern for the Announcements tab, not a forward-looking 28-day schedule.

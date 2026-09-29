@@ -20,6 +20,34 @@ function renderGantt(occs) {
   }
 }
 
+// Spec §49 — Announcements' own timeline section, separate from the Events
+// timeline above (see admin.html's ganttAnnouncementsWrap comment for why).
+// Reuses buildGanttGrid by mapping each Announcement into the same
+// {event_name, occurrence_date, owning_tenant_id, start_datetime_utc} shape
+// an Occurrence already has. Unlike an Event's recurrence — expanded into
+// real Occurrence rows up front by regenerate_occurrences — a recurring
+// Announcement only ever has ONE live scheduled_for at a time (the next
+// send, advanced in place after each delivery per scheduler/announcements.py),
+// so this only ever plots a single marker per announcement, never a
+// projected range of future sends.
+function renderAnnouncementGantt(announcements) {
+  const wrap = document.getElementById('ganttAnnouncementsWrap');
+  if (!announcements.length) {
+    wrap.style.display = 'none';
+    document.getElementById('ganttWrapAnnouncements').innerHTML = '';
+    document.getElementById('ganttLegendAnnouncements').innerHTML = '';
+    return;
+  }
+  wrap.style.display = 'block';
+  const mapped = announcements.map(a => ({
+    event_name: a.title,
+    occurrence_date: a.scheduled_for.slice(0, 10),
+    owning_tenant_id: a.owning_tenant_id,
+    start_datetime_utc: a.scheduled_for,
+  }));
+  buildGanttGrid(mapped, 'ganttWrapAnnouncements', 'ganttLegendAnnouncements', 'No scheduled announcements in this window.');
+}
+
 function buildGanttGrid(occs, wrapId, legendId, emptyMsg) {
   const wrapEl = document.getElementById(wrapId);
   const legendEl = document.getElementById(legendId);

@@ -348,6 +348,23 @@
         <tbody id="schedBodyLeadership"></tbody>
       </table>
     </div>
+
+    <!-- Spec §49 — scheduled Announcements, shown alongside Events in the
+         same 28-day Schedule view instead of only living in their own tab.
+         A separate section/table (not merged into schedTable's rows above)
+         since an Announcement has no start/end time or post_to_discord
+         toggle the way an Occurrence does — Edit/Cancel/Delete/Duplicate
+         instead of Post/Cancel. -->
+    <div id="schedAnnouncementsWrap" style="display:none">
+      <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs" style="background:var(--bg2);padding:8px 10px;border-radius:4px">📢 Announcements</h2>
+      <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg" id="schedAnnouncementsTable">
+        <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
+          <th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Alliance</th><th class="pf-v6-c-table__th">Interval</th><th class="pf-v6-c-table__th">Schedule Start</th>
+          <th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Notification Targets</th><th class="pf-v6-c-table__th">Actions</th>
+        </tr></thead>
+        <tbody id="schedAnnouncementsBody"></tbody>
+      </table>
+    </div>
   </div>
 
   <div id="scheduleGanttView" style="display:none">
@@ -361,6 +378,18 @@
       <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">👑 Leadership Notifications Timeline</h2>
       <div class="pf-v6-c-card gantt-wrap" id="ganttWrapLeadership" style="background:var(--bg2)"></div>
       <div id="ganttLegendLeadership" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px"></div>
+    </div>
+    <!-- Spec §49 — a separate timeline for Announcements, same reasoning
+         as schedAnnouncementsWrap above (its own section, not merged into
+         the Events timeline). Only ever shows one marker per scheduled
+         announcement — see renderAnnouncementGantt's own comment for why
+         a recurring announcement isn't projected across the full window
+         the way a recurring Event's occurrences are. -->
+    <div id="ganttAnnouncementsWrap" style="display:none">
+      <div style="border-top:2px solid var(--border);margin-bottom:16px"></div>
+      <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">📢 Announcements Timeline</h2>
+      <div class="pf-v6-c-card gantt-wrap" id="ganttWrapAnnouncements" style="background:var(--bg2)"></div>
+      <div id="ganttLegendAnnouncements" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px"></div>
     </div>
   </div>
 

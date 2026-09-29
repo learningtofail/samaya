@@ -3,6 +3,16 @@
 // layout over the same data (merged in per user feedback on the original
 // spec §38 build — Table and Timeline are one tab, not two). Depends on
 // common.js and gantt.js's renderGantt().
+//
+// Spec §49 — scheduled Announcements are fetched and shown here too, in
+// their own table/timeline sections (schedAnnouncementsWrap/
+// ganttAnnouncementsWrap in admin.html), not merged into schedTable's rows:
+// an Announcement has no start/end time, duration, or post_to_discord
+// toggle the way an Occurrence does. This reuses announcements.js's own
+// ANNOUNCEMENTS cache (rather than a Schedule-local one) so editAnnouncement/
+// cancelAnnouncement/deleteAnnouncement work identically whether opened from
+// here or from the Announcements tab itself, even if that tab was never
+// visited this session.
 
 async function loadSchedule() {
   renderAllianceFilterSelect('scheduleFilter', 'schedule', loadSchedule);
@@ -10,7 +20,59 @@ async function loadSchedule() {
     occurrenceData = await api('GET', '/api/occurrences', null, false, getTabFilter('schedule'));
     renderSchedule();
     renderGantt(occurrenceData);
+    ANNOUNCEMENTS = await api('GET', '/api/announcements', null, false, getTabFilter('schedule'));
+    const scheduled = ANNOUNCEMENTS.filter(a => a.status === 'scheduled');
+    renderScheduleAnnouncements(scheduled);
+    renderAnnouncementGantt(scheduled);
   } catch(e) { toast(e.message, true); }
+}
+
+function renderScheduleAnnouncements(items) {
+  const wrap = document.getElementById('schedAnnouncementsWrap');
+  const tbody = document.getElementById('schedAnnouncementsBody');
+  if (!items.length) {
+    wrap.style.display = 'none';
+    tbody.innerHTML = '';
+    return;
+  }
+  wrap.style.display = 'block';
+
+  function targetsHtml(a) {
+    return a.targets.map(t => {
+      const targetTenant = TENANTS.find(x => x.id === t.tenant_id);
+      const slug = targetTenant ? targetTenant.slug : '';
+      const channelSpan = '<span data-notif-channel="' + escapeHtml(slug) + ':' + escapeHtml(t.discord_channel_id) + '">#' + escapeHtml(t.discord_channel_id) + '</span>';
+      return '<div>' + escapeHtml(tenantName(t.tenant_id)) + ': ' + channelSpan + ' ' + occurrenceStatusBadge(t.post_status) + '</div>';
+    }).join('');
+  }
+
+  tbody.innerHTML = items.map(a => {
+    const allianceLabel = a.scope === 'kingdom-wide'
+      ? '🌐 Kingdom-wide <span style="color:var(--muted);font-size:var(--fs-sm)">(via ' + escapeHtml(a.owning_tenant_name || tenantName(a.owning_tenant_id)) + ')</span>'
+      : '<span class="cat-dot" style="background:' + (TENANT_COLORS[a.owning_tenant_id] || '#475569') + '"></span>' + escapeHtml(a.owning_tenant_name || tenantName(a.owning_tenant_id));
+    const recurringBadge = a.recurring
+      ? pfLabel('Every ' + a.interval_days + 'd', 'pf-m-purple')
+      : pfLabel('One-time', 'pf-m-gray');
+    // Spec §49 — no post-to-discord toggle/Post/Cancel-occurrence controls
+    // here (those are Events-only concepts); Edit and Cancel cover a still-
+    // 'scheduled' announcement (this table only ever shows 'scheduled'
+    // ones, so there's nothing here yet in a terminal state a Delete button
+    // would actually work on — the full Delete/Retry/Duplicate action set
+    // remains on the Announcements tab itself).
+    return '<tr class="pf-v6-c-table__tr">'
+      + '<td class="pf-v6-c-table__td">' + escapeHtml(a.title) + (a.leadership_only ? ' 👑' : ' 🛡️') + '</td>'
+      + '<td class="pf-v6-c-table__td">' + allianceLabel + '</td>'
+      + '<td class="pf-v6-c-table__td">' + recurringBadge + '</td>'
+      + '<td class="pf-v6-c-table__td">' + fmtDateTime(a.scheduled_for) + '</td>'
+      + '<td class="pf-v6-c-table__td">' + announcementStatusBadgeAdmin(a.status) + '</td>'
+      + '<td class="pf-v6-c-table__td">' + targetsHtml(a) + '</td>'
+      + '<td class="pf-v6-c-table__td"><div style="display:flex;gap:6px;flex-wrap:wrap">'
+      + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="editAnnouncement(' + a.id + ')" title="Edit this announcement in place">Edit</button>'
+      + '<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="cancelAnnouncement(' + a.id + ')">Cancel</button>'
+      + '</div></td>'
+      + '</tr>';
+  }).join('');
+  enhanceNotificationTargetLabels();
 }
 
 // Persisted so returning to the tab keeps whichever layout was last picked.
