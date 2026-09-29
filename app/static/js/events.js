@@ -142,7 +142,7 @@ function renderEventsTable(allEvents) {
       // bug where it just echoed the literal word "Alliance" for every
       // non-kingdom-wide row.
       var scopeLabel = e.scope === 'kingdom-wide'
-        ? '🌐 Kingdom-wide <span style="color:var(--muted);font-size:var(--fs-sm)">(via ' + escapeHtml(tenantName(e.owning_tenant_id)) + ')</span>'
+        ? '🌐 Kingdom-wide <span style="color:var(--muted);font-size:var(--fs-sm)">(via ' + escapeHtml(tenantName(e.owning_tenant_id)) + '’s Kingdom)</span>'
         : '<span class="cat-dot" style="background:' + allyColor + '"></span>' + escapeHtml(tenantName(e.owning_tenant_id));
       var statusLabel = pfLabel(e.active ? 'Active' : 'Inactive', e.active ? 'pf-m-green' : 'pf-m-gray');
       var btnCls    = e.active ? 'pf-m-danger' : 'pf-m-secondary';

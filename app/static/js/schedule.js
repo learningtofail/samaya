@@ -48,7 +48,7 @@ function renderScheduleAnnouncements(items) {
 
   tbody.innerHTML = items.map(a => {
     const allianceLabel = a.scope === 'kingdom-wide'
-      ? '🌐 Kingdom-wide <span style="color:var(--muted);font-size:var(--fs-sm)">(via ' + escapeHtml(a.owning_tenant_name || tenantName(a.owning_tenant_id)) + ')</span>'
+      ? '🌐 Kingdom-wide <span style="color:var(--muted);font-size:var(--fs-sm)">(via ' + escapeHtml(a.owning_tenant_name || tenantName(a.owning_tenant_id)) + '’s Kingdom)</span>'
       : '<span class="cat-dot" style="background:' + (TENANT_COLORS[a.owning_tenant_id] || '#475569') + '"></span>' + escapeHtml(a.owning_tenant_name || tenantName(a.owning_tenant_id));
     const recurringBadge = a.recurring
       ? pfLabel('Every ' + a.interval_days + 'd', 'pf-m-purple')

@@ -119,8 +119,13 @@ function renderOwningTenantScopeSelect(selectId, selectedSlug, selectedScope) {
   const allianceOptions = TENANTS.map(t =>
     `<option value="alliance:${escapeHtml(t.slug)}">${escapeHtml(t.name)}</option>`
   ).join('');
+  // "via <name>'s Kingdom", not "posted via <name>" — a kingdom-wide row
+  // still fans out to every alliance's own Discord server independently
+  // (see _resolve_post_targets), so naming one alliance here is only
+  // saying which Kingdom to fan out to, never which server actually does
+  // the posting. The old "(posted via X)" wording implied the opposite.
   const kingdomOptions = TENANTS.map(t =>
-    `<option value="kingdomwide:${escapeHtml(t.slug)}">🌐 Kingdom-wide (posted via ${escapeHtml(t.name)})</option>`
+    `<option value="kingdomwide:${escapeHtml(t.slug)}">🌐 Kingdom-wide (via ${escapeHtml(t.name)}'s Kingdom)</option>`
   ).join('');
   select.innerHTML =
     `<optgroup label="Alliance">${allianceOptions}</optgroup>` +

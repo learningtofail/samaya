@@ -502,9 +502,13 @@ async function loadAnnouncements() {
     tbody.innerHTML = items.map(a => {
       // Spec §49 — Alliance column, matching events.js's own scopeLabel:
       // the owning tenant's name/color dot, or a Kingdom-wide badge naming
-      // which alliance actually does the posting.
+      // the owning alliance whose Kingdom this is labeled for — scope is a
+      // display/ownership label only for an announcement (delivery is
+      // entirely governed by its explicit AnnouncementTarget list either
+      // way), so this alliance neither posts nor fans out anything on its
+      // own.
       const allianceLabel = a.scope === 'kingdom-wide'
-        ? '🌐 Kingdom-wide <span style="color:var(--muted);font-size:var(--fs-sm)">(via ' + escapeHtml(a.owning_tenant_name || tenantName(a.owning_tenant_id)) + ')</span>'
+        ? '🌐 Kingdom-wide <span style="color:var(--muted);font-size:var(--fs-sm)">(via ' + escapeHtml(a.owning_tenant_name || tenantName(a.owning_tenant_id)) + '’s Kingdom)</span>'
         : '<span class="cat-dot" style="background:' + (TENANT_COLORS[a.owning_tenant_id] || '#475569') + '"></span>' + escapeHtml(a.owning_tenant_name || tenantName(a.owning_tenant_id));
       // A cancelled announcement's targets never got a real post attempt
       // past that point, so showing their pre-cancel post_status (usually
