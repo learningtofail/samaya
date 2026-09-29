@@ -195,6 +195,7 @@
       <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('postlog',this)"><span class="pf-v6-c-tabs__item-text">Post Log</span></button></li>
       <li class="pf-v6-c-tabs__item" id="syncTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('sync',this)"><span class="pf-v6-c-tabs__item-text">Sync <span id="syncBadge" class="pf-v6-c-label pf-m-red pf-m-filled pf-m-compact" style="display:none;margin-inline-start:4px"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text" id="syncBadgeText">0</span></span></span></span></button></li>
       <li class="pf-v6-c-tabs__item" id="configTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('config',this)"><span class="pf-v6-c-tabs__item-text">Config</span></button></li>
+      <li class="pf-v6-c-tabs__item" id="ticketsTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('tickets',this)" title="Community feedback, event/announcement requests, and error reports from the public /feedback board"><span class="pf-v6-c-tabs__item-text">Tickets</span></button></li>
       <li class="pf-v6-c-tabs__item" id="accessTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('access',this)" title="Superadmin: manage who has access, and the platform's kingdoms/alliances/servers/users"><span class="pf-v6-c-tabs__item-text">Access &amp; Platform</span></button></li>
       <li class="pf-v6-c-tabs__item" id="auditTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('audit',this)" title="Superadmin-only: who changed what, and when"><span class="pf-v6-c-tabs__item-text">Audit Log</span></button></li>
     </ul>
@@ -647,6 +648,42 @@
     <summary>About this page</summary>
     <div class="about-page-body">
       <p>A read-only feed of create/update/delete actions for one alliance at a time — whichever alliance is currently selected on the Access tab. There's no write or undo action here by design; it's a record, not a tool.</p>
+    </div>
+  </details>
+</div>
+
+<!-- TICKETS (spec §40-43) -->
+<div id="v-tickets" class="view">
+  <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
+    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Tickets</h2>
+    <a href="/feedback" target="_blank" class="pf-v6-c-button pf-m-secondary pf-m-small">View public board ↗</a>
+  </div>
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
+    Every feedback item, event/announcement request, and error report submitted from the public
+    <a href="/feedback" target="_blank">/feedback</a> board, kingdom-wide — not scoped to one alliance, since
+    cross-alliance visibility is the point. Changing status here only updates what the public board shows;
+    it never posts to Discord or emails anyone.
+  </p>
+  <table class="pf-v6-c-table pf-m-grid-md">
+    <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
+      <th class="pf-v6-c-table__th">Kind</th>
+      <th class="pf-v6-c-table__th">Title</th>
+      <th class="pf-v6-c-table__th">Alliance</th>
+      <th class="pf-v6-c-table__th">Votes</th>
+      <th class="pf-v6-c-table__th">Reported</th>
+      <th class="pf-v6-c-table__th">Contact</th>
+      <th class="pf-v6-c-table__th">Status</th>
+    </tr></thead>
+    <tbody class="pf-v6-c-table__tbody" id="ticketsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+  </table>
+
+  <details class="about-page">
+    <summary>About this page</summary>
+    <div class="about-page-body">
+      <p>A viewer can see this list the same as everyone else, but only an owner/coordinator (or superadmin) can
+      change a ticket's status — the read/write split matches every other mutating admin action in this console.
+      There's no merge or delete tool: a duplicate is handled by declining the weaker one and pointing to the
+      surviving ticket over Discord.</p>
     </div>
   </details>
 </div>
@@ -1172,6 +1209,7 @@
 <script src="/static/js/sync.js"></script>
 <script src="/static/js/access.js"></script>
 <script src="/static/js/audit.js"></script>
+<script src="/static/js/tickets.js"></script>
 <script src="/static/js/platform.js"></script>
 <script src="/static/js/init.js"></script>
 </body>

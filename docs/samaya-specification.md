@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.27.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.28.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -899,9 +899,9 @@ A thin strip on `events.html` (`#lastActivityMarquee`), under the masthead's inf
 - A dismiss/collapse control for returning visitors — the legend is short (nine rows, wraps to a few lines on mobile) and is not judged intrusive enough to warrant persisted collapsed state.
 - Per-alliance customization of the legend's wording — the status vocabulary is deliberately fixed and shared across every alliance (§"Standardize" work); a legend that could say different things for different alliances would undermine that.
 
-## 40. Feedback Form (Proposed)
+## 40. Feedback Form
 
-**Status:** Spec only — not yet implemented. Written at the same time as §41–43, which share its underlying storage and public listing page (§43); implement together.
+**Status:** Implemented. Shipped together with §41–43, which share its underlying storage and public listing page (§43) — see §43's Addendum for what actually landed vs. this section's original design.
 
 **Problem.** There is currently no channel for a community member browsing the public events page to tell the alliance/kingdom leadership "this is confusing," "it would help if X existed," or any other general feedback about Samaya itself — as opposed to a specific event or announcement being wrong (§42) or a new one being wanted (§41).
 
@@ -919,9 +919,9 @@ Submission posts to `POST /api/tickets` (§43.1) with `kind='feedback'`, no `ten
 - Any reply/notification mechanism back to the submitter (e.g. emailing them when status changes) — `Ticket.submitter_contact` is stored for a human to read and manually reach out if they choose, not wired to `services/notifications.py`.
 - Authenticated/attributed feedback (tying a ticket to a `User` row) — the public page has no login, and requiring one would defeat the point of a low-friction feedback channel.
 
-## 41. Event/Announcement Request Form (Proposed)
+## 41. Event/Announcement Request Form
 
-**Status:** Spec only — not yet implemented. Shares storage/listing with §40/§43; implement together.
+**Status:** Implemented. Shares storage/listing with §40/§43.
 
 **Problem.** A community member (or an alliance leader without admin access) currently has no structured way to propose a new recurring event or a one-off announcement — it happens ad hoc, over Discord DMs or in a general chat channel, with no record and no way for other members to signal "yes, we want this too."
 
@@ -941,9 +941,9 @@ Submission posts to `POST /api/tickets` with the corresponding `kind` and the fi
 - Any automatic creation of an `EventDefinition` or `Announcement` from an approved request — this form produces a ticket for a human admin to read and act on manually through the existing admin console (§"Events"/"Announcements" tabs), exactly like every other admin-created row. Auto-materializing unreviewed community input into a real recurring Discord-posting event is a moderation risk this spec deliberately avoids.
 - Per-alliance approval routing (e.g. only that alliance's owner/coordinator sees requests tagged to their alliance) — every ticket is visible to every admin on the shared Access & Platform-adjacent triage view (§43.3), same as Audit Log's kingdom-wide visibility model (§31.1).
 
-## 42. Error-Flag Button on Events and Announcements (Proposed)
+## 42. Error-Flag Button on Events and Announcements
 
-**Status:** Spec only — not yet implemented. Shares storage/listing with §40/§41/§43; implement together.
+**Status:** Implemented. Shares storage/listing with §40/§41/§43.
 
 **Problem.** Event details are admin-typed (times, channels, descriptions) and Discord posting has its own failure modes (§30's retry-failed-targets exists precisely because delivery can fail) — a member who spots something wrong ("this says Tuesday but it's actually Wednesday," "wrong channel," "this posted twice") currently has no way to flag it from the page where they noticed it.
 
@@ -960,9 +960,9 @@ The modal is pre-scoped to the row it was opened from — no event/announcement 
 - Any automatic action on the underlying `Occurrence`/`Announcement` (e.g. auto-cancelling on N reports) — an error flag only ever produces a ticket for an admin to read; every existing admin action (edit, cancel, retry) remains manual and unchanged.
 - Rate-limiting or deduplicating repeated reports of the same underlying issue beyond what §43.2's per-voter upvote mechanism already provides — a second visitor hitting the same error is expected to upvote the existing ticket (the modal could eventually deep-link to "an issue like this may already be reported," but that lookup/matching UI is left for a future iteration, not this spec).
 
-## 43. Public Tickets Page with Upvoting (Proposed)
+## 43. Public Tickets Page with Upvoting
 
-**Status:** Spec only — not yet implemented. This is the shared backend and public listing page for §40–42's three submission forms; none of those forms are useful without it, so all four sections ship together.
+**Status:** Implemented. This is the shared backend and public listing page for §40–42's three submission forms; see the Addendum below for exactly what shipped.
 
 **Problem.** §40–42 each produce a piece of community input, but without a shared, visible destination there is no way for the community to see that their feedback landed anywhere, or to signal which of several open issues/requests matter most — every report currently either goes nowhere or has to be manually triaged over Discord with no visible record.
 
@@ -1010,6 +1010,17 @@ A new hand-written, idempotent migration script (`migrate_add_tickets.py`, same 
 - Merging duplicate tickets, or any admin tool beyond the status dropdown — an admin who spots duplicates handles it by setting the weaker one to `declined` with (informally, over Discord) a pointer to the surviving ticket; no in-app merge/redirect mechanism.
 - Search or filtering on the public board beyond the fixed upvote-count sort — with the volume this deployment expects, a flat sorted list is legible without it; can be revisited if the ticket count grows enough to warrant it.
 - Any change to `services/notifications.py` (email) or Discord posting triggered by ticket activity — every notification path in this section is "a human reads the admin Tickets tab," not an automated alert.
+
+### Addendum — Implementation Notes
+
+What shipped matches the design above with a few concrete choices worth recording:
+
+- **Routes.** `routers/tickets_public.py` (new, mounted at the app root alongside `events.py`/`ics.py`): `GET /feedback` (serves `static/feedback.html`), `GET /api/tickets` (public listing), `POST /api/tickets` (create — feedback/event_request/announcement_request/error), `POST /api/tickets/{id}/vote` (anonymous toggle). `routers/admin/tickets.py` (new, wired into `routers/admin/__init__.py`): `GET /api/tickets` (full detail incl. `submitter_contact`, behind `get_current_tenant` — logged in with access to *some* tenant, header required but the query itself is kingdom-wide and ignores it), `PATCH /api/tickets/{id}` (status only, behind `require_not_viewer`).
+- **`voter_key` derivation.** `hashlib.sha256(f"{SECRET_KEY}:{raw_voter_id}")` — reuses the app's existing `SECRET_KEY` (`services/sessions.py`) as the pepper rather than provisioning a second secret; this deployment already refuses to boot without it (`main.py`).
+- **Public listing statuses.** `open`/`planned`/`in_progress`/`done` all show on the public board (so the community can see triage progress, not just a raw inbox); only `declined` is hidden — a small addition beyond the original "every non-declined ticket" wording, which this is consistent with.
+- **Admin visibility.** Given to every logged-in user with access to at least one tenant (viewer included, read-only) via a new always-visible "Tickets" tab in `admin.html`/`js/tickets.js` — not gated behind `isSuperadmin()` the way Access/Audit are (spec §38's UI simplification), since kingdom-wide cross-alliance visibility here is the point for every coordinator, not just superadmins.
+- **Public events page integration (§42).** `events.html`'s `buildEventCardHtml` gained `reportIssueButton(ev)` in the meta line (next to the 🔔 badge, `event.stopPropagation()` so it doesn't also open the Discord-preview modal) and a "Report an Issue" modal; the events header also gained a plain "💬 Feedback" link to `/feedback`.
+- **Not yet built:** any deep-link from the error-flag modal to a possibly-already-reported duplicate (§42's Out of Scope already called this out), and comments/discussion on a ticket (§43.5).
 
 ## 44. Roadmap / Deferred Ideas
 
@@ -1184,3 +1195,28 @@ Each tenant sharing the guild still gets its own `PostLog` row (so its own Dashb
 
 - Guarding against a tenant's Cancel action deleting the shared Discord Scheduled Event out from under another tenant still relying on it existing — `cancel_occurrence_discord` cancels via whichever tenant's own `PostLog.discord_event_id` it's given, and since sharing tenants now share that same ID, cancelling from either tenant deletes the one real Discord object both were pointing at. A coordinator on a shared server should coordinate who cancels, same as they'd need to coordinate on any other shared-server action today.
 - Deduplicating identical notification channels across tenants sharing a guild — each tenant's configured `notification_channel_id`/`notification_role_id` still gets its own independent ping; if two tenants happen to share the exact same channel, that channel still gets pinged twice. Leaving one of the two tenants' notification fields blank remains the way to avoid that, same as before this fix.
+
+## 53. Public Notification Channel Name
+
+**Status:** Implemented.
+
+**Problem.** The public events page showed an event's lead-time-before-reminder (🔔 badge) but never *where* that reminder would actually post — a member had no way to know which Discord channel to watch for an event or announcement's ping without already having admin access.
+
+**Fix.** `routers/events.py` gained `_resolve_channel_name(tenant, channel_id)`, which resolves a raw Discord channel ID to its display name via `services/discord_api.get_guild_channels`, using whichever bot token is already available for that tenant's `DiscordServer` (falling back to `PLATFORM_BOT_TOKEN`). Results are cached in-process per `DiscordServer.id` for 5 minutes (`_CHANNEL_CACHE_TTL_SECONDS`) — the public page has no bot token of its own and can get bursty unauthenticated traffic, so resolving on every single page view was never reasonable. A transient Discord API error serves the last-known-good cached mapping rather than blanking out a name that was showing fine a moment ago; no channel configured, or no cache and no live answer, resolves to `null`.
+
+Both public endpoints now attach `notification_channel_name` to every row: `GET /t/{tenant_slug}/api/events` resolves each event via `_resolve_notification(db, event, tenant)` (imported from `routers.admin.occurrences` — the same function the admin posting path uses to decide which channel/role to ping) plus `_resolve_channel_name`, and each announcement via its own `AnnouncementTarget.discord_channel_id` for that tenant. `GET /api/events` (combined view) does the same using each row's owning tenant for events, and each target tenant for announcements (mirroring how that endpoint already fans announcements out one row per target tenant).
+
+**Deliberately channel name only, not role name** — a channel answers "where to watch" without exposing internal role/ping-targeting structure (e.g. "@Officers") to an unauthenticated visitor.
+
+### Out of Scope
+
+- Showing the role that gets pinged — see above; only the channel is exposed publicly.
+- A live Discord API call per page view — see the caching rationale above; a coordinator who renames a channel won't see the public page reflect it for up to 5 minutes.
+
+## 54. Legend Badge Truncation Fix
+
+**Status:** Implemented.
+
+**Problem.** The public events page's status/kind legend (§39, restyled into a 3-column grid by §47) was truncating badge text with an ellipsis — "Announcement" showed as "Announc…", "Failed" as "Fail…" — on narrower viewports. `.samaya-legend-kinds`/`.samaya-legend-statuses`'s `grid-template-columns: repeat(3, minmax(0, 1fr))` allows a column to shrink below its content's width, and PatternFly's `.pf-v6-c-label__text` truncates with an ellipsis once its flex parent (`.samaya-legend-item`, `display: flex`) is squeezed — exactly what happened once the row no longer had enough space for both the badge and its description at full width.
+
+**Fix.** `.samaya-legend-item > :first-child { flex-shrink: 0; }` (the badge is always the first child) stops the badge itself from ever being the thing that shrinks; the description text next to it (which already wraps onto multiple lines fine) absorbs the squeeze instead, along with `min-width: 0` on the row and the description span so the flex layout can actually give the description less width without it overflowing. No backend changes; `STATIC_ASSET_VERSION` bumped.

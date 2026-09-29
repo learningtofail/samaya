@@ -503,6 +503,83 @@ class AnnouncementTemplate(Base):
     )
 
 
+class Ticket(Base):
+    """Community-submitted input from the public /feedback board (spec
+    §40–43): general feedback, a request for a new event/announcement, or
+    an error report flagged from a specific row on the public events page.
+    One shared table for all three kinds (plus 'feedback') rather than
+    three separate tables, since they share the same public listing,
+    upvoting, and admin triage surface — the only real differences are
+    which of error_type/related_occurrence_id/related_announcement_id are
+    populated, which the CheckConstraints below document rather than
+    splitting into subclasses SQLAlchemy has no clean single-table story
+    for anyway.
+
+    No User FK anywhere on this table or TicketVote below — the public
+    board is deliberately unauthenticated (same trust level as the events
+    page itself, spec §43.2), so there is no user to attribute a ticket or
+    vote to, only an optional free-text submitter_contact for a human to
+    follow up with manually.
+    """
+    __tablename__ = "tickets"
+
+    id                       = Column(Integer, primary_key=True)
+    kind                     = Column(Text, nullable=False)  # feedback | event_request | announcement_request | error
+    # feedback: Bug/Suggestion/Other category. error: Wrong date or time /
+    # Wrong channel / Duplicate posting / Didn't happen as scheduled / Other.
+    # Unused (NULL) for event_request/announcement_request.
+    error_type               = Column(Text, nullable=True)
+    title                    = Column(Text, nullable=False)
+    description              = Column(Text, nullable=False)
+    tenant_id                = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+    related_occurrence_id    = Column(Integer, ForeignKey("occurrences.id"), nullable=True)
+    related_announcement_id  = Column(Integer, ForeignKey("announcements.id"), nullable=True)
+    submitter_contact        = Column(Text, nullable=True)
+    status                   = Column(Text, nullable=False, default="open")
+    upvote_count             = Column(Integer, nullable=False, default=1)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at               = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    votes = relationship("TicketVote", back_populates="ticket", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('feedback', 'event_request', 'announcement_request', 'error')",
+            name="ck_ticket_kind",
+        ),
+        CheckConstraint(
+            "status IN ('open', 'planned', 'in_progress', 'done', 'declined')",
+            name="ck_ticket_status",
+        ),
+        CheckConstraint(
+            "related_occurrence_id IS NULL OR related_announcement_id IS NULL",
+            name="ck_ticket_related_mutually_exclusive",
+        ),
+    )
+
+
+class TicketVote(Base):
+    """One row per (ticket, voter) — see Ticket's docstring and spec §43.2
+    for how voter_key is derived (a hash of the client's self-generated,
+    localStorage-persisted X-Voter-Id header plus a server-side pepper, so
+    the raw client token is never stored verbatim). Voting again for the
+    same (ticket, voter) pair deletes the row instead of inserting a
+    second one — a toggle, not an accumulator — which is why there is no
+    separate 'direction' column."""
+    __tablename__ = "ticket_votes"
+
+    id         = Column(Integer, primary_key=True)
+    ticket_id  = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False)
+    voter_key  = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    ticket = relationship("Ticket", back_populates="votes")
+
+    __table_args__ = (
+        UniqueConstraint("ticket_id", "voter_key", name="uq_ticket_vote"),
+    )
+
+
 class SchedulerState(Base):
     """One row per (tenant, job) — a regeneration failure for one alliance
     no longer masks another's status."""

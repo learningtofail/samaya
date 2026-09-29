@@ -21,6 +21,7 @@ export default [
         localStorage:  "readonly",
         Intl:          "readonly",
       URL:           "readonly",
+        crypto:        "readonly",
         CAT_COLORS:    "readonly",
         GANTT_PALETTE: "readonly",
         DOW3:          "readonly",

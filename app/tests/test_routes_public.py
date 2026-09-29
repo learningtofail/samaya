@@ -240,3 +240,67 @@ class TestAllianceRoster:
         default (auth is added explicitly via test_user/login elsewhere)."""
         r = await client.get("/api/alliances")
         assert r.status_code == 200
+
+
+class TestPublicNotificationChannelName:
+    """Spec §53 — the public events feed resolves an event/announcement's
+    notification channel *ID* to a channel *name* server-side, since the
+    public page itself has no bot-API access of its own."""
+
+    async def test_event_row_gets_resolved_channel_name(
+        self, client: AsyncClient, tenant: dict, db_session: AsyncSession, monkeypatch
+    ):
+        event, occ = await _make_event_with_occurrence(db_session, tenant["id"], "Weekly Reset", leadership_only=False)
+        event.notification_channel_id = "chan-1"
+        await db_session.commit()
+
+        monkeypatch.setattr("routers.events._channel_name_cache", {})
+        async def fake_channels(token, guild_id):
+            return [{"id": "chan-1", "name": "announcements"}], ""
+        monkeypatch.setattr("routers.events.get_guild_channels", fake_channels)
+
+        r = await client.get(f"/t/{tenant['slug']}/api/events")
+        assert r.status_code == 200
+        row = next(row for row in r.json() if row["event_name"] == "Weekly Reset")
+        assert row["notification_channel_name"] == "announcements"
+
+    async def test_no_notification_channel_configured_is_none(
+        self, client: AsyncClient, tenant: dict, db_session: AsyncSession
+    ):
+        await _make_event_with_occurrence(db_session, tenant["id"], "No Channel Event", leadership_only=False)
+        r = await client.get(f"/t/{tenant['slug']}/api/events")
+        row = next(row for row in r.json() if row["event_name"] == "No Channel Event")
+        assert row["notification_channel_name"] is None
+
+    async def test_discord_api_error_falls_back_to_none_not_crash(
+        self, client: AsyncClient, tenant: dict, db_session: AsyncSession, monkeypatch
+    ):
+        event, occ = await _make_event_with_occurrence(db_session, tenant["id"], "Errored Channel Event", leadership_only=False)
+        event.notification_channel_id = "chan-1"
+        await db_session.commit()
+
+        monkeypatch.setattr("routers.events._channel_name_cache", {})
+        async def fake_channels(token, guild_id):
+            return [], "401 Unauthorized"
+        monkeypatch.setattr("routers.events.get_guild_channels", fake_channels)
+
+        r = await client.get(f"/t/{tenant['slug']}/api/events")
+        assert r.status_code == 200
+        row = next(row for row in r.json() if row["event_name"] == "Errored Channel Event")
+        assert row["notification_channel_name"] is None
+
+    async def test_combined_view_also_resolves_channel_name(
+        self, client: AsyncClient, tenant: dict, db_session: AsyncSession, monkeypatch
+    ):
+        event, occ = await _make_event_with_occurrence(db_session, tenant["id"], "Combined Channel Event", leadership_only=False)
+        event.notification_channel_id = "chan-9"
+        await db_session.commit()
+
+        monkeypatch.setattr("routers.events._channel_name_cache", {})
+        async def fake_channels(token, guild_id):
+            return [{"id": "chan-9", "name": "general"}], ""
+        monkeypatch.setattr("routers.events.get_guild_channels", fake_channels)
+
+        r = await client.get("/api/events")
+        row = next(row for row in r.json() if row["event_name"] == "Combined Channel Event")
+        assert row["notification_channel_name"] == "general"

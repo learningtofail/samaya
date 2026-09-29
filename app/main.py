@@ -19,7 +19,7 @@ from scheduler.regeneration import regenerate_occurrences
 from scheduler.reminders import send_pre_event_reminders
 from scheduler.announcements import send_scheduled_announcements
 from scheduler.auto_post import auto_post_upcoming_occurrences
-from routers import events, admin, webhooks, ics, auth as auth_router, auth_pages
+from routers import events, admin, webhooks, ics, auth as auth_router, auth_pages, tickets_public
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -157,6 +157,7 @@ app.include_router(webhooks.router, prefix="/webhooks")
 app.include_router(ics.router)
 app.include_router(auth_router.router)
 app.include_router(auth_pages.router)
+app.include_router(tickets_public.router)
 
 
 @app.get("/health")

@@ -1,4 +1,5 @@
-from datetime import date, datetime, time, timedelta, timezone
+import time
+from datetime import date, datetime, time as dtime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -7,8 +8,46 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
 from models.db import Announcement, AnnouncementTarget, EventDefinition, Kingdom, Occurrence, PostLog, Tenant
+from services.discord_api import get_guild_channels
 
 router = APIRouter()
+
+# Spec §53 — resolving a notification's destination channel *name* for
+# public display. The public page has no bot-API access of its own (see
+# _announcement_row_dict's older docstring on why a raw channel ID was
+# never shown before this), so the server resolves it once, using
+# whichever tenant's own bot token is already available from this
+# request's DB session, and caches the {channel_id: name} map per guild
+# for a few minutes — an unauthenticated page can get bursty traffic, and
+# nothing about a guild's channel list changes often enough to justify a
+# live Discord API call on every single page view.
+_channel_name_cache: dict[int, tuple[dict[str, str], float]] = {}
+_CHANNEL_CACHE_TTL_SECONDS = 300
+
+
+async def _resolve_channel_name(tenant: Tenant, channel_id: str) -> str | None:
+    if not channel_id:
+        return None
+    from routers.admin.deps import PLATFORM_BOT_TOKEN
+    token = tenant.server.bot_token or PLATFORM_BOT_TOKEN
+    if not token:
+        return None
+
+    now = time.monotonic()
+    cached = _channel_name_cache.get(tenant.server_id)
+    if cached is not None and now - cached[1] <= _CHANNEL_CACHE_TTL_SECONDS:
+        return cached[0].get(channel_id)
+
+    channels, error = await get_guild_channels(token, tenant.server.guild_id)
+    if error:
+        # Serve a stale cache entry on a transient Discord/network failure
+        # rather than silently blanking out a channel name that was
+        # showing fine a moment ago.
+        return cached[0].get(channel_id) if cached else None
+
+    channel_map = {c["id"]: c["name"] for c in channels}
+    _channel_name_cache[tenant.server_id] = (channel_map, now)
+    return channel_map.get(channel_id)
 
 _DEFAULT_PUBLIC_SITE_TITLE = "Kingshot Event Schedule"
 
@@ -47,6 +86,10 @@ def _event_row_dict(occ: Occurrence, event: EventDefinition) -> dict:
         "post_status":          occ.post_status,
         "duration_hours":       float(event.duration_hours),
         "notify_minutes_before": event.notify_minutes_before,
+        # Spec §53 — filled in by the endpoint (requires an await this
+        # plain function can't perform); None means either no notification
+        # channel is configured or it couldn't be resolved right now.
+        "notification_channel_name": None,
     }
 
 
@@ -61,8 +104,10 @@ def _announcement_row_dict(a: Announcement) -> dict:
 
     No discord_channel is included: unlike EventDefinition.discord_channel
     (a free-text display name), AnnouncementTarget only stores the raw
-    numeric Discord channel ID, which isn't meaningful to show on an
-    unauthenticated page with no bot-API access to resolve it to a name.
+    numeric Discord channel ID. Spec §53 resolves that ID to a channel
+    *name* server-side (see _resolve_channel_name) and attaches it
+    separately as notification_channel_name after this dict is built,
+    since doing so requires an await this plain function can't perform.
     """
     sched_utc = a.scheduled_for.astimezone(timezone.utc)
     return {
@@ -85,14 +130,15 @@ def _announcement_row_dict(a: Announcement) -> dict:
         # "no referenced event") renders no badge at all, same as an event
         # with notify_minutes_before unset.
         "event_offset_minutes": a.event_offset_minutes,
+        "notification_channel_name": None,
     }
 
 
 def _window_bounds() -> tuple[date, date, datetime, datetime]:
     today = date.today()
     end   = today + timedelta(days=WINDOW_DAYS)
-    ann_start = datetime.combine(today, time.min, tzinfo=timezone.utc)
-    ann_end   = datetime.combine(end, time.max, tzinfo=timezone.utc)
+    ann_start = datetime.combine(today, dtime.min, tzinfo=timezone.utc)
+    ann_end   = datetime.combine(end, dtime.max, tzinfo=timezone.utc)
     return today, end, ann_start, ann_end
 
 
@@ -123,14 +169,22 @@ async def list_events(tenant_slug: str, db: AsyncSession = Depends(get_db)):
         )
         .order_by(Occurrence.occurrence_date, EventDefinition.name)
     )
-    rows = [_event_row_dict(occ, event) for occ, event in result.all()]
+    from routers.admin.occurrences import _resolve_notification
+
+    event_rows = []
+    for occ, event in result.all():
+        row = _event_row_dict(occ, event)
+        channel_id, _role_id = await _resolve_notification(db, event, tenant)
+        row["notification_channel_name"] = await _resolve_channel_name(tenant, channel_id)
+        event_rows.append(row)
+    rows = event_rows
 
     # This tenant's own announcement targets (spec §37) — each
     # AnnouncementTarget names exactly one tenant, so "targets this
     # tenant" is the whole scoping rule; no kingdom-wide equivalent exists
     # for announcements the way it does for events.
     ann_result = await db.execute(
-        select(Announcement)
+        select(Announcement, AnnouncementTarget.discord_channel_id)
         .join(AnnouncementTarget, AnnouncementTarget.announcement_id == Announcement.id)
         .where(
             AnnouncementTarget.tenant_id == tenant.id,
@@ -141,7 +195,10 @@ async def list_events(tenant_slug: str, db: AsyncSession = Depends(get_db)):
         )
         .order_by(Announcement.scheduled_for)
     )
-    rows += [_announcement_row_dict(a) for a in ann_result.scalars().all()]
+    for a, channel_id in ann_result.all():
+        row = _announcement_row_dict(a)
+        row["notification_channel_name"] = await _resolve_channel_name(tenant, channel_id)
+        rows.append(row)
     rows.sort(key=_sort_key)
 
     return JSONResponse(rows)
@@ -217,12 +274,16 @@ async def list_events_all(db: AsyncSession = Depends(get_db)):
         )
         .order_by(Occurrence.occurrence_date, EventDefinition.name)
     )
+    from routers.admin.occurrences import _resolve_notification
+
     rows = []
     for occ, event, tenant in result.all():
         row = _event_row_dict(occ, event)
         row["tenant_name"]  = tenant.name
         row["tenant_slug"]  = tenant.slug
         row["tenant_color"] = tenant.color
+        channel_id, _role_id = await _resolve_notification(db, event, tenant)
+        row["notification_channel_name"] = await _resolve_channel_name(tenant, channel_id)
         rows.append(row)
 
     # Every tenant's announcement targets (spec §37) — one row per
@@ -233,7 +294,7 @@ async def list_events_all(db: AsyncSession = Depends(get_db)):
     # how a kingdom-wide *event* instead shows once under its single
     # owning tenant, since that's a single Occurrence, not a fan-out.
     ann_result = await db.execute(
-        select(Announcement, Tenant)
+        select(Announcement, Tenant, AnnouncementTarget.discord_channel_id)
         .join(AnnouncementTarget, AnnouncementTarget.announcement_id == Announcement.id)
         .join(Tenant, AnnouncementTarget.tenant_id == Tenant.id)
         .where(
@@ -244,11 +305,12 @@ async def list_events_all(db: AsyncSession = Depends(get_db)):
         )
         .order_by(Announcement.scheduled_for)
     )
-    for a, tenant in ann_result.all():
+    for a, tenant, channel_id in ann_result.all():
         row = _announcement_row_dict(a)
         row["tenant_name"]  = tenant.name
         row["tenant_slug"]  = tenant.slug
         row["tenant_color"] = tenant.color
+        row["notification_channel_name"] = await _resolve_channel_name(tenant, channel_id)
         rows.append(row)
 
     rows.sort(key=_sort_key)

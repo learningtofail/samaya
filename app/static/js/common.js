@@ -326,6 +326,7 @@ function showView(id, btn) {
   // loadAccess() now also renders the Platform section for a superadmin.
   if (id === 'access')    loadAccess();
   if (id === 'audit')     loadAuditLog();
+  if (id === 'tickets')   loadTickets();
   if (id === 'announcements') { loadAnnouncements(); loadAnnouncementTemplates(); }
 }
 

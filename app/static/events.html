@@ -74,8 +74,16 @@
     display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--pf-t--global--spacer--md) var(--pf-t--global--spacer--lg);
   }
-  .samaya-legend-item { display: flex; align-items: flex-start; gap: var(--pf-t--global--spacer--sm); }
-  .samaya-legend-item span { line-height: 1.3; }
+  .samaya-legend-item { display: flex; align-items: flex-start; gap: var(--pf-t--global--spacer--sm); min-width: 0; }
+  /* The badge itself must never be the thing that shrinks — PatternFly's
+     .pf-v6-c-label__text truncates with an ellipsis once its flex parent
+     is squeezed below its content width (exactly what a 3-up grid with
+     minmax(0, 1fr) columns does by default), which is what was cutting
+     "Announcement"/"Failed" down to "Announc…"/"Fail…" here. Let the
+     description text (which already wraps onto multiple lines fine)
+     absorb the squeeze instead. */
+  .samaya-legend-item > :first-child { flex-shrink: 0; }
+  .samaya-legend-item span { line-height: 1.3; min-width: 0; }
   @media (max-width: 700px) {
     .samaya-legend-kinds, .samaya-legend-statuses { grid-template-columns: 1fr; }
   }
@@ -184,6 +192,14 @@
   }
   .samaya-modal-close:hover { color: var(--pf-t--global--text--color--regular); background: var(--pf-t--global--background--color--secondary--default); }
   .samaya-modal-close:focus-visible { outline: 2px solid var(--pf-t--global--color--brand--default); outline-offset: 1px; }
+  /* Spec §42 — the per-row "report an issue" affordance. Small and quiet
+     on purpose: it sits in the meta line alongside the 🔔 badge, not as a
+     competing call to action. */
+  .report-issue-btn {
+    background: none; border: none; cursor: pointer; padding: 2px 4px; border-radius: 4px;
+    color: var(--pf-t--global--text--color--subtle); font-size: var(--pf-t--global--font--size--body--sm);
+  }
+  .report-issue-btn:hover { color: var(--pf-t--global--text--color--regular); background: var(--pf-t--global--background--color--secondary--default); text-decoration: underline; }
   /* Same PatternFly page-layout fix admin.html already carries: .pf-v6-c-page
      is CSS grid with header/sidebar/main template areas, and with no
      sidebar element on this page, .pf-v6-c-page__main-container's default
@@ -211,6 +227,7 @@
     <div class="pf-v6-c-masthead__content" style="display:flex;align-items:center;gap:var(--pf-t--global--spacer--sm)">
       <a href="#" id="allianceLink" class="header-link" onclick="openAllianceModal();return false;" title="Switch to another alliance's events, or the combined all-alliances view">Loading…</a>
       <a href="#" id="headerClock" class="header-link" onclick="openTimezoneModal();return false;" title="Current UTC time and your local time — click to change your time zone">Loading…</a>
+      <a href="/feedback" class="header-link" title="Submit feedback, request an event/announcement, or see what others have asked for">💬 Feedback</a>
       <a class="pf-v6-c-button pf-m-primary" id="icsLink" href="#">📅 Subscribe to Calendar</a>
     </div>
   </header>
@@ -265,6 +282,45 @@
         </div>
         <footer class="pf-v6-c-modal-box__footer">
           <button class="pf-v6-c-button pf-m-primary" onclick="closeDiscordPreviewModal()">Close</button>
+        </footer>
+      </div>
+    </div>
+  </div>
+
+  <!-- REPORT AN ISSUE MODAL (spec §42) -->
+  <div class="pf-v6-c-backdrop" id="reportIssueModal" data-close-fn="closeReportIssueModal">
+    <div class="pf-v6-l-bullseye">
+      <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="reportIssueModalTitle">
+        <header class="pf-v6-c-modal-box__header">
+          <h2 class="pf-v6-c-modal-box__title" id="reportIssueModalTitle"><span class="pf-v6-c-modal-box__title-text">Report an Issue</span></h2>
+          <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeReportIssueModal()">&times;</button>
+        </header>
+        <div class="pf-v6-c-modal-box__body">
+          <p class="pf-v6-u-font-size-sm" id="reportIssueModalSubject" style="color:var(--pf-t--global--text--color--subtle);margin:0 0 12px"></p>
+          <div class="pf-v6-c-form">
+            <div class="pf-v6-c-form__group">
+              <label class="pf-v6-c-form__label" for="riErrorType">What's wrong?</label>
+              <select class="pf-v6-c-form-control" id="riErrorType">
+                <option>Wrong date or time</option>
+                <option>Wrong channel</option>
+                <option>Duplicate posting</option>
+                <option>Didn't happen as scheduled</option>
+                <option>Other</option>
+              </select>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <label class="pf-v6-c-form__label" for="riDescription">Description</label>
+              <textarea class="pf-v6-c-form-control" id="riDescription" rows="4" maxlength="2000" placeholder="What did you notice?"></textarea>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <label class="pf-v6-c-form__label" for="riContact">Contact (optional)</label>
+              <input class="pf-v6-c-form-control" id="riContact" placeholder="Discord handle or email — for follow-up only, never shown publicly">
+            </div>
+          </div>
+        </div>
+        <footer class="pf-v6-c-modal-box__footer">
+          <button class="pf-v6-c-button pf-m-primary" onclick="submitReportIssue()">Submit</button>
+          <button class="pf-v6-c-button pf-m-link" onclick="closeReportIssueModal()">Cancel</button>
         </footer>
       </div>
     </div>
@@ -665,6 +721,14 @@ function eventKindBadge() {
 // of the thing itself does a Discord notification go out", just for two
 // different fields (spec §37). Renders nothing when unset/zero, same as
 // every other optional meta item on this page.
+// Spec §42 — a small icon-button next to the 🔔 notify badge, not a
+// full-width button, so it doesn't compete visually with the row's own
+// content. stopPropagation keeps this from also triggering the card's
+// own onclick (which opens the Discord preview modal).
+function reportIssueButton(ev) {
+  return `<button type="button" class="report-issue-btn" title="Report an issue with this ${ev.kind}" aria-label="Report an issue with ${escapeHtml(ev.event_name)}" onclick="event.stopPropagation();openReportIssueModal(${escapeHtml(JSON.stringify(ev))})">⚑ Report an issue</button>`;
+}
+
 function notifyBadge(ev) {
   const mins = ev.kind === 'announcement' ? ev.event_offset_minutes : ev.notify_minutes_before;
   if (!mins) return '';
@@ -751,6 +815,7 @@ function buildEventCardHtml(ev, dayNum, dowLabel, isToday) {
               ${ev.discord_channel ? `<span class="pf-v6-u-font-size-sm">💬 ${escapeHtml(ev.discord_channel)}</span>` : ''}
               ${notifyBadge(ev)}
               ${isAnnouncement ? announcementStatusBadge(ev.post_status) : statusBadge(ev.post_status)}
+              ${reportIssueButton(ev)}
             </div>
             ${ev.description ? `<p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle)">${escapeHtml(ev.description)}</p>` : ''}
           </div>
@@ -1109,6 +1174,58 @@ function openDiscordPreview(ev) {
 
 function closeDiscordPreviewModal() {
   document.getElementById('discordPreviewModal').classList.remove('open');
+}
+
+// ── Report an Issue (spec §42) ──────────────────────────────────
+let REPORT_ISSUE_TARGET = null;
+
+function openReportIssueModal(ev) {
+  REPORT_ISSUE_TARGET = ev;
+  document.getElementById('reportIssueModalSubject').textContent =
+    `About: ${ev.event_name} (${ev.occurrence_date})`;
+  document.getElementById('riErrorType').selectedIndex = 0;
+  document.getElementById('riDescription').value = '';
+  document.getElementById('riContact').value = '';
+  document.getElementById('reportIssueModal').classList.add('open');
+}
+
+function closeReportIssueModal() {
+  document.getElementById('reportIssueModal').classList.remove('open');
+  REPORT_ISSUE_TARGET = null;
+}
+
+async function submitReportIssue() {
+  const ev = REPORT_ISSUE_TARGET;
+  if (!ev) return;
+  const description = document.getElementById('riDescription').value.trim();
+  if (!description) { alert('Please describe what looks wrong.'); return; }
+
+  const payload = {
+    kind: 'error',
+    error_type: document.getElementById('riErrorType').value,
+    title: `Issue: ${ev.event_name}`,
+    description,
+    tenant_slug: ev.tenant_slug || TENANT_SLUG || null,
+    submitter_contact: document.getElementById('riContact').value.trim() || null,
+  };
+  if (ev.kind === 'announcement') payload.related_announcement_id = ev.id;
+  else payload.related_occurrence_id = ev.id;
+
+  try {
+    const res = await fetch('/api/tickets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || res.statusText);
+    }
+    closeReportIssueModal();
+    alert('Thanks — your report was submitted. You can follow its status on the Feedback page.');
+  } catch (e) {
+    alert(`Couldn't submit that: ${e.message}`);
+  }
 }
 
 // Spec §38.9: a small marquee naming the last message actually sent for
