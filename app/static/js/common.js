@@ -566,3 +566,69 @@ async function openDiscordPreview(kind, item) {
 function closeDiscordPreviewModal() {
   document.getElementById('discordPreviewModal').classList.remove('open');
 }
+
+// ── Notification Targets column (spec §49) ─────────────────────────
+// The Alliance Events/Leadership Notifications tables (events.js) and the
+// Announcements table (announcements.js) all show a "Notification
+// Targets" column naming the actual Discord channel(s)/role(s) a row
+// posts/pings to. The channel/role fields involved are real Discord
+// snowflake IDs, not names — resolving them requires a per-tenant API
+// call, so each cell first renders with the bare ID (all that's known
+// synchronously) inside a `data-notif-channel="tenantSlug:id"` /
+// `data-notif-role="tenantSlug:id"` span, and enhanceNotificationTargetLabels()
+// upgrades every such span to a real "#name"/"@name" label afterward —
+// one batched fetch per distinct tenant rather than one per row/target.
+const _notifChannelNameCache = {};
+const _notifRoleNameCache = {};
+
+async function _loadNotifChannelMap(tenantSlug) {
+  if (_notifChannelNameCache[tenantSlug]) return _notifChannelNameCache[tenantSlug];
+  try {
+    const channels = await api('GET', '/api/discord/channels', null, false, tenantSlug);
+    const map = {};
+    channels.forEach(c => { map[c.id] = c.name; });
+    _notifChannelNameCache[tenantSlug] = map;
+    return map;
+  } catch (e) {
+    return {};
+  }
+}
+
+async function _loadNotifRoleMap(tenantSlug) {
+  if (_notifRoleNameCache[tenantSlug]) return _notifRoleNameCache[tenantSlug];
+  try {
+    const roles = await api('GET', '/api/discord/roles', null, false, tenantSlug);
+    const map = {};
+    roles.forEach(r => { map[r.id] = r.name; });
+    _notifRoleNameCache[tenantSlug] = map;
+    return map;
+  } catch (e) {
+    return {};
+  }
+}
+
+async function enhanceNotificationTargetLabels(root) {
+  const scope = root || document;
+  const chanEls = Array.from(scope.querySelectorAll('[data-notif-channel]'));
+  const roleEls = Array.from(scope.querySelectorAll('[data-notif-role]'));
+  const slugs = new Set(
+    chanEls.map(el => el.dataset.notifChannel.split(':')[0])
+      .concat(roleEls.map(el => el.dataset.notifRole.split(':')[0]))
+  );
+  for (const slug of slugs) {
+    if (!slug) continue;
+    const [channelMap, roleMap] = await Promise.all([_loadNotifChannelMap(slug), _loadNotifRoleMap(slug)]);
+    chanEls
+      .filter(el => el.dataset.notifChannel.startsWith(slug + ':'))
+      .forEach(el => {
+        const id = el.dataset.notifChannel.slice(slug.length + 1);
+        if (channelMap[id]) el.textContent = '#' + channelMap[id];
+      });
+    roleEls
+      .filter(el => el.dataset.notifRole.startsWith(slug + ':'))
+      .forEach(el => {
+        const id = el.dataset.notifRole.slice(slug.length + 1);
+        if (roleMap[id]) el.textContent = '@' + roleMap[id];
+      });
+  }
+}

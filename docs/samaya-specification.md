@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.23.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.24.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -1111,4 +1111,17 @@ No backend changes; `STATIC_ASSET_VERSION` bumped (`routers/admin/ui.py`) since 
 
 - Automatically re-populating a kingdom-wide announcement's targets when new alliances join the Kingdom, or removing them when `scope` changes back to `alliance` — targets remain a fully independent, explicitly-managed list either way (see the scope's own "display/ownership label only" note above).
 - Changing an Announcement's owning alliance's Discord identity implications — since Announcement has no bare `discord_channel`/notification fields of its own (unlike Event), there's nothing analogous to clear on reassignment.
+
+### Addendum — Standardized Table Columns and Real Notification Target Names
+
+Follow-up feedback on the same batch: the Alliance Events, Leadership Notifications, and Announcements tables (all in the admin Events/Announcements tabs — not the Schedule tab's per-occurrence tables, which are a different concern) had inconsistent, ad hoc column sets, and every "Targets" column only ever showed raw tenant names or bare Discord snowflake IDs, never the actual channel/role/server a coordinator would recognize.
+
+**Fix.**
+
+- All three tables now share one column set: **Name, Alliance, Interval, Schedule Start, Status, Notification Targets, Actions** — dropping the Alliance Events/Leadership tables' previous separate Duration/Anchor columns (still visible via Edit and the row's Discord-preview click) and adding a new Alliance column to the Announcements table (previously missing one entirely).
+- **Notification Targets column (`enhanceNotificationTargetLabels`, `common.js`)** — since the channel/role IDs involved are real Discord snowflakes, not names, each cell first renders with the bare ID (all that's known synchronously) inside a `data-notif-channel="tenantSlug:id"`/`data-notif-role="tenantSlug:id"` span, then a shared helper resolves every such span to a real `#name`/`@name` label — one batched `/api/discord/channels`+`/api/discord/roles` fetch per distinct tenant slug appearing in the table (cached), not one per row or per target. For events: the row's own primary channel (already a plain name, no resolution needed), its pre-event ping channel/role, and a summary line per extra `EventTarget`. For announcements: each `AnnouncementTarget`'s owning alliance name, its Discord server name (`Tenant.server_name`, already returned by `/api/tenants`), and its channel.
+- **Alliance Events section background tint** — `admin.css`'s existing `--bg2` token now tints the "🛡️ Alliance Events" heading the same way `--bg3` already tinted "👑 Leadership Notifications," so the two sections read as equally-deliberate, distinct bands instead of only one of them looking styled.
+- The Announcements page's stale "cannot be edited" copy was corrected to reflect §49's new in-place editing.
+
+Out of scope: resolving channel/role names server-side into the API response itself (kept as a client-side, cached lookup — consistent with how the Announcement composer's own preview already resolves mentions).
 - Any interactivity in the preview itself (actually clicking "Interested," reacting, replying) — it's a static visual approximation, not an embedded Discord widget.

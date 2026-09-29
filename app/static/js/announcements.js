@@ -494,23 +494,38 @@ async function loadAnnouncements() {
     ANNOUNCEMENTS = items;
     const tbody = document.getElementById('announcementsBody');
     if (!items.length) {
-      tbody.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="6" style="color:var(--muted);padding:20px">No announcements yet. Click &quot;+ New Announcement&quot; to schedule one.</td></tr>';
+      tbody.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">No announcements yet. Click &quot;+ New Announcement&quot; to schedule one.</td></tr>';
       return;
     }
     const deletableStatuses = ['posted', 'failed', 'cancelled'];
 
     tbody.innerHTML = items.map(a => {
+      // Spec §49 — Alliance column, matching events.js's own scopeLabel:
+      // the owning tenant's name/color dot, or a Kingdom-wide badge naming
+      // which alliance actually does the posting.
+      const allianceLabel = a.scope === 'kingdom-wide'
+        ? '🌐 Kingdom-wide <span style="color:var(--muted);font-size:var(--fs-sm)">(via ' + escapeHtml(a.owning_tenant_name || tenantName(a.owning_tenant_id)) + ')</span>'
+        : '<span class="cat-dot" style="background:' + (TENANT_COLORS[a.owning_tenant_id] || '#475569') + '"></span>' + escapeHtml(a.owning_tenant_name || tenantName(a.owning_tenant_id));
       // A cancelled announcement's targets never got a real post attempt
       // past that point, so showing their pre-cancel post_status (usually
       // a stale "pending") is misleading — the announcement-level status
-      // is what actually governs them once cancelled.
+      // is what actually governs them once cancelled. Spec §49 — each
+      // target now also names its Discord server and channel (not just
+      // the alliance), same data-notif-channel deferred-resolution pattern
+      // events.js's Notification Targets column uses.
       const targetsHtml = a.targets.map(t => {
         // AnnouncementTarget.post_status (pending/posted/error) uses the
         // exact same three underlying meanings as an Occurrence's
         // pending/posted/error, so occurrenceStatusBadge's mapping
         // (dashboard.js) applies unchanged — same word/color everywhere.
         const displayStatus = a.status === 'cancelled' ? 'cancelled' : t.post_status;
-        const label = tenantName(t.tenant_id) + ': ' + occurrenceStatusBadge(displayStatus);
+        const targetTenant = TENANTS.find(x => x.id === t.tenant_id);
+        const slug = targetTenant ? targetTenant.slug : '';
+        const serverName = targetTenant && targetTenant.server_name
+          ? ' <span style="color:var(--muted);font-size:var(--fs-xs)">(' + escapeHtml(targetTenant.server_name) + ')</span>'
+          : '';
+        const channelSpan = '<span data-notif-channel="' + escapeHtml(slug) + ':' + escapeHtml(t.discord_channel_id) + '">#' + escapeHtml(t.discord_channel_id) + '</span>';
+        const label = escapeHtml(tenantName(t.tenant_id)) + serverName + ': ' + channelSpan + ' ' + occurrenceStatusBadge(displayStatus);
         return t.status_detail && a.status !== 'cancelled'
           ? '<div title="' + escapeHtml(t.status_detail) + '">' + label + '</div>'
           : '<div>' + label + '</div>';
@@ -545,13 +560,15 @@ async function loadAnnouncements() {
       const previewData = escapeHtml(JSON.stringify(a));
       return '<tr class="pf-v6-c-table__tr samaya-row-clickable" onclick="handleRowPreviewClick(event,\'announcement\',' + previewData + ')" title="Click to preview how this looks on Discord">'
         + '<td class="pf-v6-c-table__td">' + escapeHtml(a.title) + leadershipBadge + '</td>'
-        + '<td class="pf-v6-c-table__td">' + fmtDateTime(a.scheduled_for) + '</td>'
+        + '<td class="pf-v6-c-table__td">' + allianceLabel + '</td>'
         + '<td class="pf-v6-c-table__td">' + recurringBadge + '</td>'
+        + '<td class="pf-v6-c-table__td">' + fmtDateTime(a.scheduled_for) + '</td>'
         + '<td class="pf-v6-c-table__td">' + announcementStatusBadgeAdmin(a.status) + '</td>'
         + '<td class="pf-v6-c-table__td">' + targetsHtml + '</td>'
         + '<td class="pf-v6-c-table__td"><div style="display:flex;gap:6px;flex-wrap:wrap">' + [editBtn, cancelBtn, retryBtn, deleteBtn, duplicateBtn].filter(Boolean).join('') + '</div></td>'
         + '</tr>';
     }).join('');
+    enhanceNotificationTargetLabels();
   } catch (e) { toast(e.message, true); }
 }
 

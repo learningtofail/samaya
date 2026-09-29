@@ -271,21 +271,21 @@
     <select class="pf-v6-c-form-control pf-m-small" id="eventsFilter" style="max-width:180px;margin-left:auto"></select>
     <input class="pf-v6-c-form-control pf-m-small" id="eventsFilterInput" placeholder="Filter by name or alliance…" style="max-width:240px">
   </div>
-  <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">🛡️ Alliance Events</h2>
+  <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs" style="background:var(--bg2);padding:8px 10px;border-radius:4px">🛡️ Alliance Events</h2>
   <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg" id="eventsTable">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
-      <th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Alliance</th><th class="pf-v6-c-table__th">Interval</th><th class="pf-v6-c-table__th">Start (UTC)</th>
-      <th class="pf-v6-c-table__th">Duration</th><th class="pf-v6-c-table__th">Anchor</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Actions</th>
+      <th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Alliance</th><th class="pf-v6-c-table__th">Interval</th><th class="pf-v6-c-table__th">Schedule Start</th>
+      <th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Notification Targets</th><th class="pf-v6-c-table__th">Actions</th>
     </tr></thead>
-    <tbody id="eventsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="8" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody id="eventsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
   </table>
   <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs" style="background:var(--bg3);padding:8px 10px;border-radius:4px">👑 Leadership Notifications</h2>
   <table class="pf-v6-c-table pf-m-grid-md" id="eventsTableLeadership">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
-      <th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Alliance</th><th class="pf-v6-c-table__th">Interval</th><th class="pf-v6-c-table__th">Start (UTC)</th>
-      <th class="pf-v6-c-table__th">Duration</th><th class="pf-v6-c-table__th">Anchor</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Actions</th>
+      <th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Alliance</th><th class="pf-v6-c-table__th">Interval</th><th class="pf-v6-c-table__th">Schedule Start</th>
+      <th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Notification Targets</th><th class="pf-v6-c-table__th">Actions</th>
     </tr></thead>
-    <tbody id="eventsBodyLeadership"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="8" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody id="eventsBodyLeadership"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
   </table>
 
   <details class="about-page">
@@ -641,13 +641,13 @@
     <button class="pf-v6-c-button pf-m-primary" onclick="openAnnouncementModal()" title="Schedule a one-off channel message — no event or recurrence involved.">+ New Announcement</button>
     <select class="pf-v6-c-form-control pf-m-small" id="announcementsFilter" style="max-width:180px;margin-left:auto"></select>
   </div>
-  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">Plain channel posts with a title, a Markdown body, and a send time — not tied to any event definition. Once scheduled, an announcement can be cancelled but not edited; cancel and create a new one instead.</p>
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">Plain channel posts with a title, a Markdown body, and a send time — not tied to any event definition. A still-scheduled announcement can be edited in place, or cancelled and deleted.</p>
   <table class="pf-v6-c-table pf-m-grid-md" id="announcementsTable">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
-      <th class="pf-v6-c-table__th">Title</th><th class="pf-v6-c-table__th">Scheduled For (UTC)</th><th class="pf-v6-c-table__th">Recurring</th><th class="pf-v6-c-table__th">Status</th>
-      <th class="pf-v6-c-table__th">Targets</th><th class="pf-v6-c-table__th">Actions</th>
+      <th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Alliance</th><th class="pf-v6-c-table__th">Interval</th><th class="pf-v6-c-table__th">Schedule Start</th>
+      <th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Notification Targets</th><th class="pf-v6-c-table__th">Actions</th>
     </tr></thead>
-    <tbody id="announcementsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="6" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody id="announcementsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
   </table>
 
   <details class="about-page">

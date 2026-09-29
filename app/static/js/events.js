@@ -95,8 +95,8 @@ function renderEventsTable(allEvents) {
     const tbody = document.getElementById('eventsBody');
     const tbodyLead = document.getElementById('eventsBodyLeadership');
     if (!events.length) {
-      tbody.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="8" style="color:var(--muted);padding:20px">No events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
-      tbodyLead.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="8" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
+      tbody.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">No events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
+      tbodyLead.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
       return;
     }
     function intervalLabel(i) {
@@ -106,6 +106,34 @@ function renderEventsTable(allEvents) {
       if (i===14) return 'Biweekly';
       if (i===28) return 'Every 4 weeks';
       return 'Every ' + i + ' days';
+    }
+    // Spec §49 — the Notification Targets column: the event's own primary
+    // channel (already a plain name, not an ID — see populateDiscordFields),
+    // its pre-event ping channel/role (real Discord snowflake IDs, shown
+    // as the bare ID until enhanceNotificationTargetLabels resolves them),
+    // and a summary of any extra EventTarget rows (spec §20).
+    function eventNotifTargetsHtml(e) {
+      const ownerSlug = tenantSlugFor(e.owning_tenant_id);
+      const parts = [];
+      if (e.discord_channel) {
+        parts.push('<span class="pf-v6-u-font-size-sm">#' + escapeHtml(e.discord_channel) + '</span>');
+      }
+      if (e.notification_channel_id) {
+        parts.push(
+          '<span class="pf-v6-u-font-size-sm" style="color:var(--muted)" title="Pre-event ping destination">🔔 '
+          + '<span data-notif-channel="' + escapeHtml(ownerSlug) + ':' + escapeHtml(e.notification_channel_id) + '">#' + escapeHtml(e.notification_channel_id) + '</span>'
+          + (e.notification_role_id ? ' <span data-notif-role="' + escapeHtml(ownerSlug) + ':' + escapeHtml(e.notification_role_id) + '">@' + escapeHtml(e.notification_role_id) + '</span>' : '')
+          + '</span>'
+        );
+      }
+      if (e.targets && e.targets.length) {
+        parts.push(e.targets.map(t => {
+          const slug = tenantSlugFor(t.tenant_id);
+          return '<span class="pf-v6-u-font-size-sm" style="color:var(--muted)">' + escapeHtml(tenantName(t.tenant_id)) + ': '
+            + '<span data-notif-channel="' + escapeHtml(slug) + ':' + escapeHtml(t.notification_channel_id) + '">#' + escapeHtml(t.notification_channel_id) + '</span></span>';
+        }).join('<br>'));
+      }
+      return parts.length ? parts.join('<br>') : '<span style="color:var(--muted)">—</span>';
     }
     function buildRow(e) {
       var allyColor = TENANT_COLORS[e.owning_tenant_id] || '#475569';
@@ -141,9 +169,8 @@ function renderEventsTable(allEvents) {
         + '<td class="pf-v6-c-table__td">' + scopeLabel + '</td>'
         + '<td class="pf-v6-c-table__td">' + intervalLabel(e.interval_days) + '</td>'
         + '<td class="pf-v6-c-table__td">' + e.start_time_utc + ' UTC</td>'
-        + '<td class="pf-v6-c-table__td">' + e.duration_hours + 'h</td>'
-        + '<td class="pf-v6-c-table__td">' + e.anchor_date + '</td>'
         + '<td class="pf-v6-c-table__td">' + statusLabel + '</td>'
+        + '<td class="pf-v6-c-table__td">' + eventNotifTargetsHtml(e) + '</td>'
         + '<td class="pf-v6-c-table__td">'
         + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" title="Edit this event definition." onclick="openEventModal(' + editData + ')">Edit</button> '
         + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" title="Create a new event pre-filled with these settings." onclick="duplicateEvent(' + editData + ')">Duplicate</button> '
@@ -156,10 +183,11 @@ function renderEventsTable(allEvents) {
     const leadership = events.filter(e => e.leadership_only);
     tbody.innerHTML = community.length
       ? community.map(buildRow).join('')
-      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="8" style="color:var(--muted);padding:20px">No events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
+      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">No events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
     tbodyLead.innerHTML = leadership.length
       ? leadership.map(buildRow).join('')
-      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="8" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
+      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
+    enhanceNotificationTargetLabels();
 }
 
 function tenantName(id) {
