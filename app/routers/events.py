@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -6,11 +6,21 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
-from models.db import EventDefinition, Occurrence, Tenant
+from models.db import Announcement, AnnouncementTarget, EventDefinition, Occurrence, Tenant
 
 router = APIRouter()
 
 WINDOW_DAYS = 28
+
+# Scheduled/already-posted announcements only (spec §37) — 'draft' isn't a
+# real public-facing state (nothing in the admin UI even creates one today;
+# see models.db.Announcement's status CheckConstraint for the full set),
+# and 'cancelled'/'failed' are deliberately left off the public page the
+# same way a cancelled Occurrence still shows (it gets a "Cancelled" badge,
+# §36's screenshot shows the pattern) — but a failed/cancelled announcement
+# has no useful "when will this go out" information left to show, unlike an
+# event, which keeps its own fixed schedule regardless of post outcome.
+_PUBLIC_ANNOUNCEMENT_STATUSES = ("scheduled", "posted")
 
 
 async def _get_tenant_by_slug(tenant_slug: str, db: AsyncSession) -> Tenant:
@@ -21,11 +31,77 @@ async def _get_tenant_by_slug(tenant_slug: str, db: AsyncSession) -> Tenant:
     return tenant
 
 
+def _event_row_dict(occ: Occurrence, event: EventDefinition) -> dict:
+    return {
+        "kind":                 "event",
+        "id":                   occ.id,
+        "event_name":           event.name,
+        "scope":                event.scope,
+        "occurrence_date":      str(occ.occurrence_date),
+        "start_datetime_utc":   occ.start_datetime_utc.isoformat(),
+        "end_datetime_utc":     occ.end_datetime_utc.isoformat(),
+        "discord_channel":      event.discord_channel,
+        "description":          event.description,
+        "post_status":          occ.post_status,
+        "duration_hours":       float(event.duration_hours),
+        "notify_minutes_before": event.notify_minutes_before,
+    }
+
+
+def _announcement_row_dict(a: Announcement) -> dict:
+    """Spec §37 — surfaces a scheduled/posted Announcement on the public
+    events page, shaped as close to an event row as an Announcement's own
+    fields allow so the client can group/sort/render both kinds with one
+    code path (distinguished by "kind"). Deliberately NOT added to the ICS
+    feed (routers/ics.py is untouched by this) — an Announcement has no
+    duration or end time, so it isn't a calendar event, just a scheduled
+    Discord text post the public page also wants to list.
+
+    No discord_channel is included: unlike EventDefinition.discord_channel
+    (a free-text display name), AnnouncementTarget only stores the raw
+    numeric Discord channel ID, which isn't meaningful to show on an
+    unauthenticated page with no bot-API access to resolve it to a name.
+    """
+    sched_utc = a.scheduled_for.astimezone(timezone.utc)
+    return {
+        "kind":                 "announcement",
+        "id":                   a.id,
+        "event_name":           a.title,
+        "scope":                None,
+        "occurrence_date":      str(sched_utc.date()),
+        "start_datetime_utc":   sched_utc.isoformat(),
+        "end_datetime_utc":     None,
+        "discord_channel":      None,
+        "description":          a.body_markdown,
+        "post_status":          a.status,
+        "duration_hours":       None,
+        "notify_minutes_before": None,
+        # How far ahead of the event it references this announcement goes
+        # out (spec §27's "warn ahead of an event" pattern) — the
+        # announcement equivalent of an event's notify_minutes_before,
+        # shown the same way on the public page. 0 (the default, meaning
+        # "no referenced event") renders no badge at all, same as an event
+        # with notify_minutes_before unset.
+        "event_offset_minutes": a.event_offset_minutes,
+    }
+
+
+def _window_bounds() -> tuple[date, date, datetime, datetime]:
+    today = date.today()
+    end   = today + timedelta(days=WINDOW_DAYS)
+    ann_start = datetime.combine(today, time.min, tzinfo=timezone.utc)
+    ann_end   = datetime.combine(end, time.max, tzinfo=timezone.utc)
+    return today, end, ann_start, ann_end
+
+
+def _sort_key(row: dict):
+    return (row["occurrence_date"], row["start_datetime_utc"])
+
+
 @router.get("/t/{tenant_slug}/api/events")
 async def list_events(tenant_slug: str, db: AsyncSession = Depends(get_db)):
     tenant = await _get_tenant_by_slug(tenant_slug, db)
-    today = date.today()
-    end   = today + timedelta(days=WINDOW_DAYS)
+    today, end, ann_start, ann_end = _window_bounds()
 
     # This tenant's own events, plus kingdom-wide events owned by any
     # tenant sharing this one's Kingdom (see models.db.EventDefinition.scope).
@@ -45,23 +121,28 @@ async def list_events(tenant_slug: str, db: AsyncSession = Depends(get_db)):
         )
         .order_by(Occurrence.occurrence_date, EventDefinition.name)
     )
-    rows = result.all()
+    rows = [_event_row_dict(occ, event) for occ, event in result.all()]
 
-    return JSONResponse([
-        {
-            "id":                 occ.id,
-            "event_name":         event.name,
-            "scope":              event.scope,
-            "occurrence_date":    str(occ.occurrence_date),
-            "start_datetime_utc": occ.start_datetime_utc.isoformat(),
-            "end_datetime_utc":   occ.end_datetime_utc.isoformat(),
-            "discord_channel":    event.discord_channel,
-            "description":        event.description,
-            "post_status":        occ.post_status,
-            "duration_hours":     float(event.duration_hours),
-        }
-        for occ, event in rows
-    ])
+    # This tenant's own announcement targets (spec §37) — each
+    # AnnouncementTarget names exactly one tenant, so "targets this
+    # tenant" is the whole scoping rule; no kingdom-wide equivalent exists
+    # for announcements the way it does for events.
+    ann_result = await db.execute(
+        select(Announcement)
+        .join(AnnouncementTarget, AnnouncementTarget.announcement_id == Announcement.id)
+        .where(
+            AnnouncementTarget.tenant_id == tenant.id,
+            Announcement.leadership_only == False,
+            Announcement.status.in_(_PUBLIC_ANNOUNCEMENT_STATUSES),
+            Announcement.scheduled_for >= ann_start,
+            Announcement.scheduled_for <= ann_end,
+        )
+        .order_by(Announcement.scheduled_for)
+    )
+    rows += [_announcement_row_dict(a) for a in ann_result.scalars().all()]
+    rows.sort(key=_sort_key)
+
+    return JSONResponse(rows)
 
 
 @router.get("/t/{tenant_slug}/events", response_class=HTMLResponse)
@@ -100,8 +181,7 @@ async def list_events_all(db: AsyncSession = Depends(get_db)):
     unrelated Kingdom sharing this same database would need this route
     revisited rather than assumed to still mean "everyone."
     """
-    today = date.today()
-    end   = today + timedelta(days=WINDOW_DAYS)
+    today, end, ann_start, ann_end = _window_bounds()
 
     result = await db.execute(
         select(Occurrence, EventDefinition, Tenant)
@@ -115,26 +195,42 @@ async def list_events_all(db: AsyncSession = Depends(get_db)):
         )
         .order_by(Occurrence.occurrence_date, EventDefinition.name)
     )
-    rows = result.all()
+    rows = []
+    for occ, event, tenant in result.all():
+        row = _event_row_dict(occ, event)
+        row["tenant_name"]  = tenant.name
+        row["tenant_slug"]  = tenant.slug
+        row["tenant_color"] = tenant.color
+        rows.append(row)
 
-    return JSONResponse([
-        {
-            "id":                 occ.id,
-            "event_name":         event.name,
-            "scope":              event.scope,
-            "tenant_name":        tenant.name,
-            "tenant_slug":        tenant.slug,
-            "tenant_color":       tenant.color,
-            "occurrence_date":    str(occ.occurrence_date),
-            "start_datetime_utc": occ.start_datetime_utc.isoformat(),
-            "end_datetime_utc":   occ.end_datetime_utc.isoformat(),
-            "discord_channel":    event.discord_channel,
-            "description":        event.description,
-            "post_status":        occ.post_status,
-            "duration_hours":     float(event.duration_hours),
-        }
-        for occ, event, tenant in rows
-    ])
+    # Every tenant's announcement targets (spec §37) — one row per
+    # (announcement, target tenant), same fan-out shape PostLog already
+    # uses for events: an announcement sent to three alliances' Discord
+    # servers is genuinely three independent posts, so it shows once per
+    # target tenant here, each with that tenant's own badge — mirroring
+    # how a kingdom-wide *event* instead shows once under its single
+    # owning tenant, since that's a single Occurrence, not a fan-out.
+    ann_result = await db.execute(
+        select(Announcement, Tenant)
+        .join(AnnouncementTarget, AnnouncementTarget.announcement_id == Announcement.id)
+        .join(Tenant, AnnouncementTarget.tenant_id == Tenant.id)
+        .where(
+            Announcement.leadership_only == False,
+            Announcement.status.in_(_PUBLIC_ANNOUNCEMENT_STATUSES),
+            Announcement.scheduled_for >= ann_start,
+            Announcement.scheduled_for <= ann_end,
+        )
+        .order_by(Announcement.scheduled_for)
+    )
+    for a, tenant in ann_result.all():
+        row = _announcement_row_dict(a)
+        row["tenant_name"]  = tenant.name
+        row["tenant_slug"]  = tenant.slug
+        row["tenant_color"] = tenant.color
+        rows.append(row)
+
+    rows.sort(key=_sort_key)
+    return JSONResponse(rows)
 
 
 @router.get("/events", response_class=HTMLResponse)

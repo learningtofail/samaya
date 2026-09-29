@@ -27,6 +27,11 @@
   .samaya-event-meta { display: flex; flex-wrap: wrap; gap: var(--pf-t--global--spacer--md); align-items: center; }
   .samaya-week-header { margin-block: var(--pf-t--global--spacer--lg) var(--pf-t--global--spacer--sm); text-transform: uppercase; letter-spacing: .08em; }
   .samaya-week-header:first-of-type { margin-block-start: 0; }
+  /* Spec §37 — a scheduled Discord announcement is not a calendar event
+     (no duration/end time, never in the ICS feed), so its card gets a
+     visually distinct left accent on top of the 📢 Announcement badge,
+     rather than looking identical to an event row until you read the text. */
+  .samaya-announcement-card { border-inline-start: 4px solid var(--pf-t--global--color--nonstatus--purple--default, #7d5260); }
   /* The masthead's own internal layout mechanism (CSS grid, per its
      grid-area:header) didn't shrink the title against the fixed-width
      button next to it the way a plain flex-child override assumed —
@@ -327,17 +332,56 @@ function formatDuration(hours) {
 // modifiers (pf-m-green/pf-m-blue/etc.) — these three badge kinds all map
 // to a fixed, small set of meanings, so they use real PatternFly labels
 // rather than one-off custom styling.
+function pfLabel(cls, text) {
+  return `<span class="pf-v6-c-label ${cls} pf-m-filled"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${text}</span></span></span>`;
+}
+
 function statusBadge(status) {
-  const label = (cls, text) =>
-    `<span class="pf-v6-c-label ${cls} pf-m-filled"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${text}</span></span></span>`;
   switch (status) {
-    case 'posted':    return label('pf-m-green',  'Announced');
-    case 'active':    return label('pf-m-blue',   'Live Now');
-    case 'completed': return label('pf-m-grey',   'Completed');
-    case 'cancelled': return label('pf-m-red',    'Cancelled');
+    case 'posted':    return pfLabel('pf-m-green',  'Announced');
+    case 'active':    return pfLabel('pf-m-blue',   'Live Now');
+    case 'completed': return pfLabel('pf-m-grey',   'Completed');
+    case 'cancelled': return pfLabel('pf-m-red',    'Cancelled');
     case 'pending':
-    default:          return label('pf-m-grey',   'Upcoming');
+    default:          return pfLabel('pf-m-grey',   'Upcoming');
   }
+}
+
+// Announcement.status has its own vocabulary (draft/scheduled/posted/
+// failed/cancelled — models.db.Announcement's CheckConstraint) distinct
+// from an Occurrence's post_status, so it gets its own badge mapping
+// rather than overloading statusBadge() with a second meaning per value
+// (spec §37).
+function announcementStatusBadge(status) {
+  switch (status) {
+    case 'posted':    return pfLabel('pf-m-green', 'Announced');
+    case 'scheduled': return pfLabel('pf-m-grey',  'Scheduled');
+    case 'failed':    return pfLabel('pf-m-red',   'Failed');
+    case 'cancelled': return pfLabel('pf-m-red',   'Cancelled');
+    default:          return pfLabel('pf-m-grey',  'Scheduled');
+  }
+}
+
+// Spec §37 — a small purple label marking an announcement row so it
+// reads as visually distinct from a calendar event at a glance, same
+// pf-m-custom technique kingdomBadge/tenantBadge already use for a fixed
+// but non-PatternFly-standard color.
+function announcementKindBadge() {
+  return pfLabel('pf-m-purple', '📢 Announcement');
+}
+
+// notify_minutes_before (events) / event_offset_minutes (announcements
+// referencing an event) — both answer the same question, "how far ahead
+// of the thing itself does a Discord notification go out", just for two
+// different fields (spec §37). Renders nothing when unset/zero, same as
+// every other optional meta item on this page.
+function notifyBadge(ev) {
+  const mins = ev.kind === 'announcement' ? ev.event_offset_minutes : ev.notify_minutes_before;
+  if (!mins) return '';
+  const label = ev.kind === 'announcement'
+    ? `Sent ${mins} min before event`
+    : `Reminder ${mins} min before`;
+  return `<span class="pf-v6-u-font-size-sm">🔔 ${label}</span>`;
 }
 
 function scopeBadge(scope) {
@@ -424,8 +468,10 @@ async function loadEvents() {
         const dayNum   = d.getUTCDate();
         const dowLabel = DOW_FULL[d.getUTCDay()].slice(0, 3);
 
+        const isAnnouncement = ev.kind === 'announcement';
+
         html += `
-          <div class="pf-v6-c-card pf-v6-u-mb-sm${isToday ? ' pf-m-selected' : ''}">
+          <div class="pf-v6-c-card pf-v6-u-mb-sm${isToday ? ' pf-m-selected' : ''}${isAnnouncement ? ' samaya-announcement-card' : ''}">
             <div class="pf-v6-c-card__body">
               <div class="samaya-event-row">
                 <div class="samaya-date-col${isToday ? ' samaya-today' : ''}">
@@ -434,15 +480,17 @@ async function loadEvents() {
                 </div>
                 <div style="flex:1;min-width:0">
                   <div class="pf-v6-l-flex pf-m-align-items-center pf-m-space-items-sm pf-v6-u-mb-xs">
+                    ${isAnnouncement ? announcementKindBadge() : ''}
                     <span><strong>${escapeHtml(ev.event_name)}</strong></span>
                     ${tenantBadge(ev)}
                     ${scopeBadge(ev.scope)}
                   </div>
                   <div class="samaya-event-meta pf-v6-u-mb-xs">
                     <span class="pf-v6-u-font-size-sm">🕐 ${formatTime(ev.start_datetime_utc)}</span>
-                    <span class="pf-v6-u-font-size-sm">⏱ ${formatDuration(ev.duration_hours)}</span>
+                    ${!isAnnouncement ? `<span class="pf-v6-u-font-size-sm">⏱ ${formatDuration(ev.duration_hours)}</span>` : ''}
                     ${ev.discord_channel ? `<span class="pf-v6-u-font-size-sm">💬 ${escapeHtml(ev.discord_channel)}</span>` : ''}
-                    ${statusBadge(ev.post_status)}
+                    ${notifyBadge(ev)}
+                    ${isAnnouncement ? announcementStatusBadge(ev.post_status) : statusBadge(ev.post_status)}
                   </div>
                   ${ev.description ? `<p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle)">${escapeHtml(ev.description)}</p>` : ''}
                 </div>
