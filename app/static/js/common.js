@@ -101,6 +101,49 @@ function renderOwningTenantSelect(selectId, selectedSlug) {
   ).join('');
 }
 
+// Spec §49 — the combined "Owning Alliance" selector Events and
+// Announcements both use, replacing a plain alliance <select> plus a
+// separate "Kingdom-wide" checkbox with a single control: every option
+// is either one alliance (scope=alliance, that tenant owns it) or that
+// same alliance's kingdom-wide option (scope=kingdom-wide, that tenant
+// still does the actual posting/owns the row — see EventDefinition/
+// Announcement.scope's own docstrings for why an owning tenant is still
+// needed even when kingdom-wide). Option values are "alliance:<slug>" or
+// "kingdomwide:<slug>"; callers split on the first ":" to recover both
+// the scope and the slug. Also used for reassigning an existing row to a
+// different alliance (or into/out of kingdom-wide) from the same control
+// on edit, not just at creation.
+function renderOwningTenantScopeSelect(selectId, selectedSlug, selectedScope) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  const allianceOptions = TENANTS.map(t =>
+    `<option value="alliance:${escapeHtml(t.slug)}">${escapeHtml(t.name)}</option>`
+  ).join('');
+  const kingdomOptions = TENANTS.map(t =>
+    `<option value="kingdomwide:${escapeHtml(t.slug)}">🌐 Kingdom-wide (posted via ${escapeHtml(t.name)})</option>`
+  ).join('');
+  select.innerHTML =
+    `<optgroup label="Alliance">${allianceOptions}</optgroup>` +
+    `<optgroup label="Kingdom-wide">${kingdomOptions}</optgroup>`;
+  const kind = selectedScope === 'kingdom-wide' ? 'kingdomwide' : 'alliance';
+  const wanted = `${kind}:${selectedSlug}`;
+  select.value = wanted;
+  // Fall back to the first option (rather than leaving the browser's
+  // default blank-ish selection) when selectedSlug doesn't match any
+  // known tenant — e.g. TENANTS[0] not loaded yet.
+  if (select.value !== wanted) select.selectedIndex = 0;
+}
+
+// Splits a renderOwningTenantScopeSelect option value back into
+// { scope, slug } — the one place both events.js and announcements.js
+// parse it, so the "alliance:"/"kingdomwide:" encoding only lives here.
+function parseOwningTenantScopeValue(value) {
+  const idx = value.indexOf(':');
+  const kind = value.slice(0, idx);
+  const slug = value.slice(idx + 1);
+  return { scope: kind === 'kingdomwide' ? 'kingdom-wide' : 'alliance', slug };
+}
+
 // Shows/hides the merged Access & Platform tab and the Audit tab —
 // superadmin-only now (see isSuperadmin()'s comment above). Called once
 // after login; there's no more per-tenant-switch re-check needed since

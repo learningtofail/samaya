@@ -178,9 +178,21 @@ async def update_event(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
+    # Spec §49 — reassigning to a different owning alliance. The caller
+    # must have access to the NEW tenant too (resolve_target_tenants runs
+    # the same access check Announcements'/Events' explicit targets
+    # already use) — being trusted with this event via the current
+    # tenant's access doesn't imply being trusted to move it into a
+    # completely different alliance.
+    new_owner = None
+    if payload.owning_tenant_slug is not None and payload.owning_tenant_slug != tenant.slug:
+        owner_map = await resolve_target_tenants(db, user, [payload.owning_tenant_slug])
+        new_owner = owner_map[payload.owning_tenant_slug]
+
+    effective_tenant = new_owner or tenant
     target_scope = payload.scope if payload.scope is not None else event.scope
     if target_scope == "kingdom-wide":
-        await check_kingdom_coordinator(db, user, tenant.kingdom_id)
+        await check_kingdom_coordinator(db, user, effective_tenant.kingdom_id)
 
     # Resolve/validate before mutating the event — same reasoning as
     # create_event: a bad target slug should fail clean, not leave a
@@ -189,7 +201,19 @@ async def update_event(
     if payload.targets is not None:
         targets_by_slug = await resolve_target_tenants(db, user, [t.tenant_slug for t in payload.targets])
 
-    before = {"name": event.name, "scope": event.scope, "active": event.active}
+    before = {"name": event.name, "scope": event.scope, "active": event.active, "owning_tenant_id": event.owning_tenant_id}
+
+    if new_owner is not None:
+        event.owning_tenant_id = new_owner.id
+        # discord_channel/notification_channel_id/notification_role_id are
+        # real Discord snowflake IDs tied to one guild — carrying them over
+        # onto a different alliance's (possibly different) server would be
+        # silently wrong, so they're cleared unless the two alliances
+        # actually share a Discord server (Tenant.server_id, spec §25).
+        if new_owner.server_id != tenant.server_id:
+            event.discord_channel = ""
+            event.notification_channel_id = ""
+            event.notification_role_id = ""
 
     if payload.name is not None:                    event.name                    = payload.name
     if payload.interval_days is not None:           event.interval_days           = payload.interval_days
@@ -233,7 +257,8 @@ async def update_event(
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id,
         table_name="event_definitions", row_id=event.id, action="update",
-        before=before, after={"name": event.name, "scope": event.scope, "active": event.active},
+        before=before,
+        after={"name": event.name, "scope": event.scope, "active": event.active, "owning_tenant_id": event.owning_tenant_id},
     )
     await db.commit()
     await db.refresh(event)

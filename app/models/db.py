@@ -404,6 +404,14 @@ class Announcement(Base):
 
     id               = Column(Integer, primary_key=True)
     owning_tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    # Spec §49 — same alliance/kingdom-wide concept as EventDefinition.scope,
+    # picked from the same single "Owning Alliance" selector in the admin
+    # UI. Display/ownership label only: delivery still goes through the
+    # explicit AnnouncementTarget rows below either way — picking
+    # kingdom-wide doesn't change how or where this actually gets sent,
+    # it just says what the announcement is *for* (matching how Events'
+    # own scope is independent of its explicit EventTarget list).
+    scope            = Column(Text, nullable=False, default="alliance")
     title            = Column(Text, nullable=False)
     body_markdown    = Column(Text, nullable=False)
     scheduled_for    = Column(DateTime(timezone=True), nullable=False)
@@ -427,6 +435,7 @@ class Announcement(Base):
             "NOT recurring OR interval_days > 0",
             name="ck_announcement_interval_positive_if_recurring",
         ),
+        CheckConstraint("scope IN ('alliance', 'kingdom-wide')", name="ck_announcement_scope_valid"),
     )
 
 

@@ -515,6 +515,13 @@ async function loadAnnouncements() {
           ? '<div title="' + escapeHtml(t.status_detail) + '">' + label + '</div>'
           : '<div>' + label + '</div>';
       }).join('');
+      // Spec §49 — editing in place is only offered while still
+      // 'scheduled', matching the backend's own restriction (once posted
+      // the message already went out; once failed/cancelled the row is
+      // terminal) — same condition cancelBtn already uses.
+      const editBtn = a.status === 'scheduled'
+        ? '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="editAnnouncement(' + a.id + ')" title="Edit this announcement in place">Edit</button>'
+        : '';
       const cancelBtn = a.status === 'scheduled'
         ? '<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="cancelAnnouncement(' + a.id + ')">Cancel</button>'
         : '';
@@ -542,7 +549,7 @@ async function loadAnnouncements() {
         + '<td class="pf-v6-c-table__td">' + recurringBadge + '</td>'
         + '<td class="pf-v6-c-table__td">' + announcementStatusBadgeAdmin(a.status) + '</td>'
         + '<td class="pf-v6-c-table__td">' + targetsHtml + '</td>'
-        + '<td class="pf-v6-c-table__td"><div style="display:flex;gap:6px;flex-wrap:wrap">' + [cancelBtn, retryBtn, deleteBtn, duplicateBtn].filter(Boolean).join('') + '</div></td>'
+        + '<td class="pf-v6-c-table__td"><div style="display:flex;gap:6px;flex-wrap:wrap">' + [editBtn, cancelBtn, retryBtn, deleteBtn, duplicateBtn].filter(Boolean).join('') + '</div></td>'
         + '</tr>';
     }).join('');
   } catch (e) { toast(e.message, true); }
@@ -647,29 +654,40 @@ function announcementTargetChannelValue(row) {
   return select.style.display !== 'none' ? select.value : fallback.value;
 }
 
-// source, when passed (duplicateAnnouncement below), pre-fills every
-// field except the send date/time — a duplicate always needs a fresh
-// future schedule, never the original's (which is either already past,
-// or the very thing that got cancelled/failed).
-function openAnnouncementModal(source) {
+// source, when passed, pre-fills every field. For a duplicate (isEdit
+// falsy) the send date/time is left blank — a duplicate always needs a
+// fresh future schedule, never the original's (which is either already
+// past, or the very thing that got cancelled/failed). For an edit
+// (isEdit true, spec §49) the existing schedule is shown too, since
+// there's a real row being modified in place rather than a fresh copy.
+function openAnnouncementModal(source, isEdit) {
+  document.getElementById('aAnnouncementId').value = isEdit && source ? source.id : '';
   document.getElementById('aTitle').value = source ? source.title : '';
   document.getElementById('aBody').value = source ? source.body_markdown : '';
   updateAnnouncementCharCount();
-  document.getElementById('aScheduledDate').value = '';
-  document.getElementById('aScheduledTime').value = '';
+  if (isEdit && source) {
+    const d = new Date(source.scheduled_for);
+    document.getElementById('aScheduledDate').value = new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+    document.getElementById('aScheduledTime').value = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+  } else {
+    document.getElementById('aScheduledDate').value = '';
+    document.getElementById('aScheduledTime').value = '';
+  }
   document.getElementById('aRecurring').checked = !!(source && source.recurring);
   document.getElementById('aIntervalDays').value = (source && source.interval_days) ? source.interval_days : '';
   document.getElementById('aIntervalGroup').style.display = (source && source.recurring) ? '' : 'none';
   document.getElementById('aLeadershipOnly').checked = !!(source && source.leadership_only);
   document.getElementById('aEventOffsetMinutes').value = (source && source.event_offset_minutes) ? source.event_offset_minutes : 0;
-  // Spec §38.3 — an announcement is authored by (owned by) one alliance
-  // even though it can target several; there's no more ambient "current
-  // tenant" to imply which one, so this always shows an explicit picker,
-  // defaulting to the source's own owning alliance when duplicating/using
-  // a template-derived source, or the Announcements tab's own filter
-  // otherwise.
+  // Spec §38.3/§49 — an announcement is owned by one alliance, or (like
+  // Events) that alliance's kingdom-wide option, via the same combined
+  // selector events.js uses; there's no more ambient "current tenant" to
+  // imply which one, so this always shows an explicit picker, defaulting
+  // to the source's own owning alliance/scope when editing/duplicating/
+  // using a template-derived source, or the Announcements tab's own
+  // filter otherwise.
   const ownerDefault = (source && source.owning_tenant_slug) || announcementsTenantSlug();
-  renderOwningTenantSelect('aOwningTenant', ownerDefault);
+  const scopeDefault = (source && source.scope) || 'alliance';
+  renderOwningTenantScopeSelect('aOwningTenant', ownerDefault, scopeDefault);
   document.getElementById('aTargetsList').innerHTML = '';
   if (source && source.targets && source.targets.length) {
     source.targets.forEach(t => addAnnouncementTargetRow(tenantSlugFor(t.tenant_id), t.discord_channel_id));
@@ -677,7 +695,7 @@ function openAnnouncementModal(source) {
     addAnnouncementTargetRow(ownerDefault);
   }
   document.querySelector('#announcementModalTitle .pf-v6-c-modal-box__title-text').textContent =
-    source ? 'Duplicate Announcement' : 'New Announcement';
+    isEdit ? 'Edit Announcement' : (source ? 'Duplicate Announcement' : 'New Announcement');
   document.getElementById('announcementModal').classList.add('open');
   renderAnnouncementPreview();
 }
@@ -689,7 +707,13 @@ function closeAnnouncementModal() {
 function duplicateAnnouncement(id) {
   const source = ANNOUNCEMENTS.find(a => a.id === id);
   if (!source) return;
-  openAnnouncementModal(source);
+  openAnnouncementModal(source, false);
+}
+
+function editAnnouncement(id) {
+  const source = ANNOUNCEMENTS.find(a => a.id === id);
+  if (!source) return;
+  openAnnouncementModal(source, true);
 }
 
 async function saveAnnouncement() {
@@ -740,22 +764,41 @@ async function saveAnnouncement() {
   }
   targetRows.forEach(row => row.classList.remove('target-row-invalid'));
 
+  const owningSelection = parseOwningTenantScopeValue(document.getElementById('aOwningTenant').value);
   const payload = {
     title,
     body_markdown: body,
     scheduled_for: scheduledDate + 'T' + scheduledTime + ':00+00:00', // explicit UTC offset, matching the "Send Date/Time (UTC)" field labels
     targets,
+    scope: owningSelection.scope,
     leadership_only: document.getElementById('aLeadershipOnly').checked,
     recurring,
     interval_days: recurring ? parseInt(intervalRaw) : null,
     event_offset_minutes: parseInt(document.getElementById('aEventOffsetMinutes').value, 10) || 0,
   };
 
-  const owningTenantOverride = document.getElementById('aOwningTenant').value;
+  // Spec §49 — editing sends the header as the announcement's ORIGINAL
+  // owning tenant (update_announcement looks the row up by that, and
+  // needs it to authorize a reassignment) and the modal's (possibly
+  // different) selection as owning_tenant_slug, same split saveEvent()
+  // uses for events.
+  const id = document.getElementById('aAnnouncementId').value;
+  let owningTenantOverride;
+  if (id) {
+    owningTenantOverride = announcementOwningSlug(parseInt(id, 10));
+    payload.owning_tenant_slug = owningSelection.slug;
+  } else {
+    owningTenantOverride = owningSelection.slug;
+  }
 
   try {
-    await api('POST', '/api/announcements', payload, false, owningTenantOverride);
-    toast('Announcement scheduled');
+    if (id) {
+      await api('PATCH', `/api/announcements/${id}`, payload, false, owningTenantOverride);
+      toast('Announcement updated');
+    } else {
+      await api('POST', '/api/announcements', payload, false, owningTenantOverride);
+      toast('Announcement scheduled');
+    }
     closeAnnouncementModal();
     loadAnnouncements();
   } catch (e) { toast(e.message, true); }

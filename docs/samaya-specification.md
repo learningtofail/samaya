@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.21.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.22.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -1068,6 +1068,7 @@ Every row-level click handler (`handleRowPreviewClick`, `common.js`) ignores cli
 
 - Browsing calendar months outside the existing 28-day-forward data window — see §46.1; would need a different backend query shape than exists today.
 - A live re-fetch of Discord's actual current role/channel names for the public page's preview — the public page has no authenticated path to that data at all (see §46.2); this is an inherent limitation of previewing from an unauthenticated context, not a bug.
+- Any interactivity in the preview itself (actually clicking "Interested," reacting, replying) — it's a static visual approximation, not an embedded Discord widget.
 
 ## 47. Calendar View Legibility and Accessibility Pass
 
@@ -1084,4 +1085,28 @@ Every row-level click handler (`handleRowPreviewClick`, `common.js`) ignores cli
 - **Keyboard accessibility** — calendar day cells and colored items (previously plain `<div onclick>` with no keyboard path at all) gained `role="button"`, `tabindex="0"`, a descriptive `aria-label` (the day cell's names the date and item count; each item's names the event/announcement title), and an `onkeydown` handler treating Enter/Space as a click, matching the existing `role="button"` convention `buildEventCardHtml`'s list-view cards already used — those cards additionally gained the same Enter/Space `onkeydown` handler and an `aria-label`, since `tabindex`+`role="button"` alone doesn't give a `<div>` native button key handling.
 
 No backend changes; `STATIC_ASSET_VERSION` bumped (`routers/admin/ui.py`) since only static assets changed.
+
+## 48. Reserved
+
+(Number skipped in the working session that produced §47/§49 — no content was ever assigned to it.)
+
+## 49. Combined Owning-Alliance/Scope Selector, Event/Announcement Reassignment, and In-Place Announcement Editing
+
+**Status:** Implemented.
+
+**Problem.** Three related gaps, all raised together: (1) creating an Event required picking an "Owning Alliance" from one `<select>` *and* separately ticking a "Kingdom-wide" checkbox — two controls for one underlying choice, and editing an existing event hid the alliance picker entirely (moving an event to a different alliance wasn't possible at all); (2) Announcement had no scope/kingdom-wide concept whatsoever, unlike Event, so the two forms felt inconsistent and there was no way to label an announcement as "this is for the whole Kingdom" the way an event's scope does; (3) an already-scheduled Announcement could only be Cancelled, Deleted, or Duplicated — never edited in place, so fixing a typo in a not-yet-sent announcement meant cancelling it and recreating it from scratch (losing its id/audit trail) or using Duplicate and then cancelling the original.
+
+**Fix:**
+
+- **Combined selector (`renderOwningTenantScopeSelect`, `common.js`)** — one `<select>` whose options are every alliance twice: once as a plain alliance option and once as that alliance's "🌐 Kingdom-wide (posted via `<name>`)" option, grouped into two `<optgroup>`s. The value encodes both pieces (`alliance:<slug>` / `kingdomwide:<slug>`); `parseOwningTenantScopeValue()` splits it back into `{scope, slug}`. This replaces the old plain `renderOwningTenantSelect` + a separate `#mKingdomWide` checkbox for both the Event modal (`events.js`) and the Announcement modal (`announcements.js`) — `renderOwningTenantSelect` itself is unchanged and still used where there's no scope concept at all (Access tab's alliance picker).
+- **Events: editable, not just at creation** — the Owning Alliance row in `admin.html`'s Event modal is no longer hidden on edit; `openEventModal()` always renders the combined selector, pre-filled from the event's current owner/scope. `saveEvent()` now always sends `scope`, and on an edit additionally sends `owning_tenant_slug` in the payload — the X-Tenant-Slug header stays the event's *original* owning tenant (so `update_event` can find and authorize the row), while `owning_tenant_slug` carries where it should move *to*.
+- **Backend reassignment (`EventPatch.owning_tenant_slug`, `routers/admin/events.py`)** — `update_event` resolves the new slug via `resolve_target_tenants` (the same access check Events'/Announcements' explicit multi-target lists already use), so moving an event requires access to *both* the old and new alliance, not just the old one. Picking kingdom-wide (on the new owner) still requires `check_kingdom_coordinator` for the *new* tenant's Kingdom. `discord_channel`/`notification_channel_id`/`notification_role_id` are real Discord snowflake IDs tied to one guild — reassigning across two tenants on *different* `DiscordServer`s (spec §25) clears them rather than silently carrying over IDs that belong to the wrong guild; reassigning between two tenants sharing the same server leaves them untouched, since they're still valid.
+- **Events table Alliance column bug fix (`events.js`)** — the column previously showed the literal word "Alliance" for every non-kingdom-wide row (a leftover `scopeLabel` bug) instead of the owning tenant's name; it now shows the tenant's color dot + name, or "🌐 Kingdom-wide (via `<name>`)". The event-name column no longer appends a redundant `(tenant name)` tag, since the Alliance column now carries that on its own.
+- **Announcements gain the same scope concept (`Announcement.scope`, migration `migrate_add_announcement_scope.py`)** — a new `scope` column (`'alliance'`/`'kingdom-wide'`, same CHECK-constraint shape as `EventDefinition.scope`), picked from the same combined selector in the Announcement modal. It's a display/ownership label only: delivery still goes entirely through the existing explicit `AnnouncementTarget` rows (the pre-existing "+ Add all alliances" button, spec §29, is still how a kingdom-wide announcement actually reaches every alliance) — picking kingdom-wide doesn't change *how* or *where* it's sent, only what the announcement is labeled as *for*.
+- **Announcements: editable in place (`AnnouncementPatch`, `PATCH /api/announcements/{id}`)** — a new endpoint alongside the existing create/cancel/retry/delete ones, gated to `status == 'scheduled'` only (once posted, the message already went out; once failed/cancelled, the row is terminal — same terminal-state reasoning `delete_announcement` already applies). Supports the same `owning_tenant_slug` reassignment as events (no Discord-field-clearing needed here, since Announcement has no bare channel/role fields of its own — only its explicit targets, each already tied to its own tenant). The admin table gained an **Edit** button (shown only while `status == 'scheduled'`, next to Cancel) that reopens the compose modal pre-filled with the announcement's current title/body/schedule/targets/scope, via the same `openAnnouncementModal(source, isEdit)` the "New"/Duplicate/"Use template" flows already used — `isEdit=true` additionally prefills the existing Send Date/Time (a duplicate still leaves those blank, since a copy always needs a fresh future schedule) and routes `saveAnnouncement()` to `PATCH` instead of `POST`.
+
+### Out of Scope
+
+- Automatically re-populating a kingdom-wide announcement's targets when new alliances join the Kingdom, or removing them when `scope` changes back to `alliance` — targets remain a fully independent, explicitly-managed list either way (see the scope's own "display/ownership label only" note above).
+- Changing an Announcement's owning alliance's Discord identity implications — since Announcement has no bare `discord_channel`/notification fields of its own (unlike Event), there's nothing analogous to clear on reassignment.
 - Any interactivity in the preview itself (actually clicking "Interested," reacting, replying) — it's a static visual approximation, not an embedded Discord widget.

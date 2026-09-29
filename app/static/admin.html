@@ -686,26 +686,17 @@
         <input type="hidden" id="modalEventId">
         <form class="pf-v6-c-form">
           <div class="form-grid">
-            <div class="pf-v6-c-form__group full" id="mOwningTenantRow" style="display:none">
+            <div class="pf-v6-c-form__group full" id="mOwningTenantRow">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mOwningTenant"><span class="pf-v6-c-form__label-text">Owning Alliance</span></label></div>
               <div class="pf-v6-c-form__group-control">
                 <select class="pf-v6-c-form-control" id="mOwningTenant"></select>
-                <div class="pf-v6-c-form__helper-text">Shown only in combined view — pick which alliance this new event belongs to.</div>
+                <div class="pf-v6-c-form__helper-text">Which alliance this event belongs to, or pick its Kingdom-wide option to have every alliance in that Kingdom take part — editable here too, to move an existing event to a different alliance.</div>
               </div>
             </div>
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mName"><span class="pf-v6-c-form__label-text">Event Name</span></label></div>
               <div class="pf-v6-c-form__group-control">
                 <input class="pf-v6-c-form-control" type="text" id="mName" placeholder="Tri-Alliance Clash">
-              </div>
-            </div>
-            <div class="pf-v6-c-form__group">
-              <div class="pf-v6-c-form__group-label"><span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Scope</span></span></div>
-              <div class="pf-v6-c-form__group-control">
-                <span class="pf-v6-c-check">
-                  <input class="pf-v6-c-check__input" type="checkbox" id="mKingdomWide">
-                  <label class="pf-v6-c-check__label" for="mKingdomWide">Kingdom-wide (every alliance's own server)</label>
-                </span>
               </div>
             </div>
             <div class="pf-v6-c-form__group">
@@ -847,13 +838,14 @@
         <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeAnnouncementModal()">&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
+        <input type="hidden" id="aAnnouncementId">
         <form class="pf-v6-c-form">
           <div class="form-grid">
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aOwningTenant"><span class="pf-v6-c-form__label-text">Owning Alliance</span></label></div>
               <div class="pf-v6-c-form__group-control">
                 <select class="pf-v6-c-form-control" id="aOwningTenant"></select>
-                <div class="pf-v6-c-form__helper-text">Which alliance this announcement belongs to for filtering/audit purposes — the Targets list below still controls where it's actually posted.</div>
+                <div class="pf-v6-c-form__helper-text">Which alliance this announcement belongs to, or pick its Kingdom-wide option — for filtering/audit and the Alliance column, editable here on an existing announcement too. The Targets list below still controls where it's actually posted.</div>
               </div>
             </div>
             <div class="pf-v6-c-form__group full">

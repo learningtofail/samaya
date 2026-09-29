@@ -56,6 +56,13 @@ class EventIn(BaseModel):
 
 
 class EventPatch(BaseModel):
+    # Spec §49 — reassigning an event to a different owning alliance (or
+    # switching it to/from kingdom-wide) from the same combined selector
+    # the Edit modal now uses for both create and edit. None means "leave
+    # the current owning tenant alone" (the overwhelming majority of
+    # patches); the caller must have access to this slug too — see
+    # update_event's use of resolve_target_tenants.
+    owning_tenant_slug:      Optional[str]  = None
     name:                    Optional[str]  = None
     interval_days:           Optional[int]  = None
     start_time_utc:          Optional[str]  = None
@@ -212,10 +219,13 @@ class AnnouncementIn(BaseModel):
     body_markdown: str
     scheduled_for: str  # ISO datetime, UTC
     targets: list[AnnouncementTargetIn]
+    scope: str = "alliance"
     leadership_only: bool = False
     recurring: bool = False
     interval_days: Optional[int] = None
     event_offset_minutes: int = 0
+
+    _validate_scope = field_validator("scope", mode="before")(parse_scope)
 
     @field_validator("body_markdown")
     @classmethod
@@ -243,6 +253,43 @@ class AnnouncementIn(BaseModel):
         if not self.recurring:
             self.interval_days = None
         return self
+
+
+class AnnouncementPatch(BaseModel):
+    """Spec §49 — editing a still-`scheduled` announcement (the admin UI
+    previously only offered Cancel/Delete/Duplicate, no way to fix a typo
+    or reschedule without cancelling and starting over). Every field is
+    optional/None-means-unchanged, same convention as EventPatch; the
+    router only allows this while status == 'scheduled' — once posted (or
+    failed/cancelled), the message already went out or the row is
+    terminal, so there's nothing left to edit."""
+    owning_tenant_slug:    Optional[str] = None
+    title:                 Optional[str] = None
+    body_markdown:         Optional[str] = None
+    scheduled_for:         Optional[str] = None
+    targets:               Optional[list[AnnouncementTargetIn]] = None
+    scope:                 Optional[str] = None
+    leadership_only:       Optional[bool] = None
+    recurring:             Optional[bool] = None
+    interval_days:         Optional[int] = None
+    event_offset_minutes:  Optional[int] = None
+
+    _validate_scope = field_validator("scope", mode="before")(
+        lambda cls, v: parse_scope(v, allow_none=True))
+
+    @field_validator("body_markdown")
+    @classmethod
+    def _validate_length(cls, v):
+        if v is not None and len(v) > 2000:
+            raise ValueError(f"Announcement body is {len(v)} characters; Discord's limit is 2000")
+        return v
+
+    @field_validator("targets")
+    @classmethod
+    def _validate_at_least_one_target(cls, v):
+        if v is not None and not v:
+            raise ValueError("At least one target is required")
+        return v
 
 
 class AnnouncementTemplateIn(BaseModel):

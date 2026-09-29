@@ -109,7 +109,13 @@ function renderEventsTable(allEvents) {
     }
     function buildRow(e) {
       var allyColor = TENANT_COLORS[e.owning_tenant_id] || '#475569';
-      var scopeLabel = e.scope === 'kingdom-wide' ? '🌐 Kingdom-wide' : 'Alliance';
+      // Spec §49 — the Alliance column names the actual owning alliance
+      // (or, for a kingdom-wide event, says so) instead of the previous
+      // bug where it just echoed the literal word "Alliance" for every
+      // non-kingdom-wide row.
+      var scopeLabel = e.scope === 'kingdom-wide'
+        ? '🌐 Kingdom-wide <span style="color:var(--muted);font-size:var(--fs-sm)">(via ' + escapeHtml(tenantName(e.owning_tenant_id)) + ')</span>'
+        : '<span class="cat-dot" style="background:' + allyColor + '"></span>' + escapeHtml(tenantName(e.owning_tenant_id));
       var statusLabel = pfLabel(e.active ? 'Active' : 'Inactive', e.active ? 'pf-m-green' : 'pf-m-gray');
       var btnCls    = e.active ? 'pf-m-danger' : 'pf-m-secondary';
       var btnTxt    = e.active ? 'Deactivate' : 'Activate';
@@ -127,14 +133,11 @@ function renderEventsTable(allEvents) {
           + 'data-id="' + e.id + '" data-name="' + safeName + '" '
           + 'onclick="permanentDelete(this)">Delete</button>';
       }
-      // In combined mode (spec §14.2), rows come from several tenants
-      // at once, so the tenant color dot alone is no longer enough —
-      // add the tenant name inline.
-      var tenantTag = getTabFilter('events') === COMBINED_SLUG
-        ? ' <span style="color:var(--muted);font-size:var(--fs-sm)">(' + escapeHtml(tenantName(e.owning_tenant_id)) + ')</span>'
-        : '';
+      // Spec §49 — the Alliance column (scopeLabel, above) now carries the
+      // owning alliance identity on its own, so the name column no longer
+      // needs a duplicate tenant tag appended to it.
       return '<tr class="pf-v6-c-table__tr samaya-row-clickable" style="border-left:3px solid ' + allyColor + '" onclick="handleRowPreviewClick(event,\'eventdef\',' + editData + ')" title="Click to preview how this looks on Discord">'
-        + '<td class="pf-v6-c-table__td"><span class="cat-dot" style="background:' + allyColor + '"></span>' + escapeHtml(e.name) + tenantTag + '</td>'
+        + '<td class="pf-v6-c-table__td">' + escapeHtml(e.name) + '</td>'
         + '<td class="pf-v6-c-table__td">' + scopeLabel + '</td>'
         + '<td class="pf-v6-c-table__td">' + intervalLabel(e.interval_days) + '</td>'
         + '<td class="pf-v6-c-table__td">' + e.start_time_utc + ' UTC</td>'
@@ -168,25 +171,16 @@ function openEventModal(event) {
   document.getElementById('modalTitle').textContent = event ? 'Edit Event' : 'Add Event';
   document.getElementById('modalEventId').value = event && event.id ? event.id : '';
 
-  // Spec §38.1: there's no more ambient "current tenant" at all — a new
-  // event always needs an explicit Alliance picker. Editing an existing
-  // event keeps its current owning tenant fixed (shown as plain text,
-  // not editable — moving an event to a different alliance isn't a
-  // supported action); only creation needs the choice.
-  const ownerRow = document.getElementById('mOwningTenantRow');
+  // Spec §49 — one combined "Owning Alliance" selector (alliance or that
+  // alliance's kingdom-wide option) for both create and edit; editing an
+  // existing event no longer locks its owning tenant/scope — picking a
+  // different option here reassigns it (see saveEvent()).
   const ownerSelect = document.getElementById('mOwningTenant');
-  let resolvedTenantSlug;
-  if (!event) {
-    ownerRow.style.display = '';
-    renderOwningTenantSelect('mOwningTenant', TENANTS[0]?.slug);
-    resolvedTenantSlug = ownerSelect.value;
-    ownerSelect.onchange = () => populateDiscordFields(event, ownerSelect.value);
-  } else {
-    ownerRow.style.display = 'none';
-    resolvedTenantSlug = tenantSlugFor(event.owning_tenant_id);
-  }
+  const resolvedTenantSlug = event ? tenantSlugFor(event.owning_tenant_id) : TENANTS[0]?.slug;
+  renderOwningTenantScopeSelect('mOwningTenant', resolvedTenantSlug, event?.scope || 'alliance');
+  ownerSelect.onchange = () => populateDiscordFields(event, parseOwningTenantScopeValue(ownerSelect.value).slug);
+
   document.getElementById('mName').value        = event?.name || '';
-  document.getElementById('mKingdomWide').checked = event?.scope === 'kingdom-wide';
   document.getElementById('mInterval').value    = event?.interval_days || '';
   document.getElementById('mStartTime').value   = event?.start_time_utc || '';
   document.getElementById('mDuration').value    = event?.duration_hours || '';
@@ -493,9 +487,10 @@ async function saveEvent() {
     toast('Start time must be 24-hour HH:MM (e.g. 19:00)', true);
     return;
   }
+  const owningSelection = parseOwningTenantScopeValue(document.getElementById('mOwningTenant').value);
   const payload = {
     name:            document.getElementById('mName').value,
-    scope:           document.getElementById('mKingdomWide').checked ? 'kingdom-wide' : 'alliance',
+    scope:           owningSelection.scope,
     leadership_only: document.getElementById('mLeadershipOnly').checked,
     interval_days:   parseInt(document.getElementById('mInterval').value),
     start_time_utc:  startTime,
@@ -516,14 +511,19 @@ async function saveEvent() {
     description:     document.getElementById('mDescription').value,
     cover_image_data: document.getElementById('mCoverImageData').value,
   };
-  // Spec §38.1/§38.3: no more ambient "current tenant" — a create sends
-  // the modal's explicit Alliance picker; an edit sends the event's own
-  // (fixed, non-editable) owning tenant, looked up from EVENTS_CACHE
-  // since editing doesn't keep the full original event object around
-  // beyond its id.
-  const owningTenantOverride = document.getElementById('mOwningTenantRow').style.display !== 'none'
-    ? document.getElementById('mOwningTenant').value
-    : tenantSlugFor((EVENTS_CACHE.find(e => String(e.id) === String(id)) || {}).owning_tenant_id);
+  // Spec §49 — a create sends the modal's selection straight as the
+  // X-Tenant-Slug header (that tenant becomes the owner). An edit's
+  // header must stay the event's ORIGINAL owning tenant (update_event
+  // looks the row up by that, and needs it to authorize a reassignment);
+  // the modal's (possibly different) selection goes in the payload as
+  // owning_tenant_slug instead, so the backend can move it.
+  let owningTenantOverride;
+  if (id) {
+    owningTenantOverride = tenantSlugFor((EVENTS_CACHE.find(e => String(e.id) === String(id)) || {}).owning_tenant_id);
+    payload.owning_tenant_slug = owningSelection.slug;
+  } else {
+    owningTenantOverride = owningSelection.slug;
+  }
 
   try {
     if (id) {

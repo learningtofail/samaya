@@ -14,8 +14,11 @@ from models import get_db
 from models.db import Announcement, AnnouncementTarget, Tenant, User
 from services.audit import log_change
 
-from .deps import get_current_tenant, get_current_tenants, require_not_viewer, get_current_user, resolve_target_tenants
-from .schemas import AnnouncementIn
+from .deps import (
+    check_kingdom_coordinator, get_current_tenant, get_current_tenants, require_not_viewer,
+    get_current_user, resolve_target_tenants,
+)
+from .schemas import AnnouncementIn, AnnouncementPatch
 
 router = APIRouter()
 
@@ -24,6 +27,7 @@ def _announcement_dict(a: Announcement, owning_tenant: Tenant | None = None) -> 
     d = {
         "id":               a.id,
         "owning_tenant_id": a.owning_tenant_id,
+        "scope":            a.scope,
         "title":            a.title,
         "body_markdown":    a.body_markdown,
         "scheduled_for":    a.scheduled_for.isoformat(),
@@ -98,6 +102,9 @@ async def create_announcement(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if payload.scope == "kingdom-wide":
+        await check_kingdom_coordinator(db, user, tenant.kingdom_id)
+
     tenants_by_slug = await resolve_target_tenants(db, user, [t.tenant_slug for t in payload.targets])
 
     try:
@@ -108,7 +115,7 @@ async def create_announcement(
         raise HTTPException(status_code=422, detail="scheduled_for must be in the future")
 
     announcement = Announcement(
-        owning_tenant_id=tenant.id, title=payload.title, body_markdown=payload.body_markdown,
+        owning_tenant_id=tenant.id, scope=payload.scope, title=payload.title, body_markdown=payload.body_markdown,
         scheduled_for=scheduled_for, status="scheduled", created_by=user.id,
         leadership_only=payload.leadership_only, recurring=payload.recurring,
         interval_days=payload.interval_days, event_offset_minutes=payload.event_offset_minutes,
@@ -137,6 +144,105 @@ async def create_announcement(
     )
     announcement = result.scalar_one()
     return _announcement_dict(announcement)
+
+
+@router.patch("/api/announcements/{announcement_id}")
+async def update_announcement(
+    announcement_id: int, payload: AnnouncementPatch,
+    tenant: Tenant = Depends(require_not_viewer),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Spec §49 — editing a still-scheduled announcement in place, instead
+    of the previous cancel-then-recreate-from-scratch-or-Duplicate-only
+    workflow. Only while status == 'scheduled': once it's posted (or
+    failed/cancelled), the message already went out (or the row is
+    terminal) and there's nothing left to edit — same reasoning
+    delete_announcement already applies to its own terminal-state check.
+    """
+    result = await db.execute(
+        select(Announcement)
+        .options(selectinload(Announcement.targets))
+        .where(Announcement.id == announcement_id, Announcement.owning_tenant_id == tenant.id)
+    )
+    announcement = result.scalar_one_or_none()
+    if not announcement:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+    if announcement.status != "scheduled":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot edit an announcement with status '{announcement.status}' — only a scheduled one can be edited",
+        )
+
+    # Spec §49 — reassigning to a different owning alliance, same access
+    # check (and same reasoning) as EventPatch.owning_tenant_slug.
+    new_owner = None
+    if payload.owning_tenant_slug is not None and payload.owning_tenant_slug != tenant.slug:
+        owner_map = await resolve_target_tenants(db, user, [payload.owning_tenant_slug])
+        new_owner = owner_map[payload.owning_tenant_slug]
+
+    effective_tenant = new_owner or tenant
+    target_scope = payload.scope if payload.scope is not None else announcement.scope
+    if target_scope == "kingdom-wide":
+        await check_kingdom_coordinator(db, user, effective_tenant.kingdom_id)
+
+    targets_by_slug = None
+    if payload.targets is not None:
+        targets_by_slug = await resolve_target_tenants(db, user, [t.tenant_slug for t in payload.targets])
+
+    scheduled_for = announcement.scheduled_for
+    if payload.scheduled_for is not None:
+        try:
+            scheduled_for = datetime.fromisoformat(payload.scheduled_for)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="scheduled_for must be a valid ISO 8601 datetime")
+        if scheduled_for <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=422, detail="scheduled_for must be in the future")
+
+    before = {"title": announcement.title, "scope": announcement.scope, "owning_tenant_id": announcement.owning_tenant_id}
+
+    if new_owner is not None:
+        announcement.owning_tenant_id = new_owner.id
+    if payload.title is not None:                announcement.title = payload.title
+    if payload.body_markdown is not None:         announcement.body_markdown = payload.body_markdown
+    announcement.scheduled_for = scheduled_for
+    if payload.scope is not None:                 announcement.scope = payload.scope
+    if payload.leadership_only is not None:       announcement.leadership_only = payload.leadership_only
+    if payload.event_offset_minutes is not None:  announcement.event_offset_minutes = payload.event_offset_minutes
+    if payload.recurring is not None:             announcement.recurring = payload.recurring
+    if payload.interval_days is not None:         announcement.interval_days = payload.interval_days
+    if announcement.recurring and not announcement.interval_days:
+        raise HTTPException(status_code=422, detail="interval_days must be a positive integer when recurring is true")
+    if not announcement.recurring:
+        announcement.interval_days = None
+
+    if targets_by_slug is not None:
+        # Full replace, same delete-then-add ordering as update_event's
+        # targets replacement (avoids uq_announcement_target tripping when
+        # a tenant is re-targeted with the same (announcement_id,
+        # tenant_id) pair within one flush).
+        for old in list(announcement.targets):
+            await db.delete(old)
+        await db.flush()
+        for t in payload.targets:
+            db.add(AnnouncementTarget(
+                announcement_id=announcement.id, tenant_id=targets_by_slug[t.tenant_slug].id,
+                discord_channel_id=t.discord_channel_id,
+            ))
+
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id,
+        table_name="announcements", row_id=announcement.id, action="update",
+        before=before,
+        after={"title": announcement.title, "scope": announcement.scope, "owning_tenant_id": announcement.owning_tenant_id},
+    )
+    await db.commit()
+    result = await db.execute(
+        select(Announcement)
+        .where(Announcement.id == announcement.id)
+        .options(selectinload(Announcement.targets))
+    )
+    return _announcement_dict(result.scalar_one())
 
 
 @router.post("/api/announcements/{announcement_id}/cancel")
