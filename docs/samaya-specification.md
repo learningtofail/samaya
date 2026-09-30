@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.30.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.31.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -1255,3 +1255,31 @@ Only the combined view is affected (`COMBINED_MODE` gate, same as `tenantBadge()
 
 - Any change to the API response shape or the per-tenant fan-out data model itself — `GET /api/events` still returns one row per target; grouping is purely a presentation step in the client.
 - Per-alliance detail inside the grouped card (e.g. showing each alliance's own delivery status individually) — the card shows one shared `post_status`/badge from whichever target row happened to be first; a target-by-target breakdown would need real UI work this pass didn't scope in.
+
+## 57. Deterministic Grouped-Announcement Badge Order
+
+**Status:** Implemented.
+
+**Problem.** §56's `groupCombinedAnnouncements()` collapses an announcement's fanned-out rows into one card, but the query behind it has no `ORDER BY` on the tenant side of the join — two same-timestamp announcements could come back with their `AnnouncementTarget`/`Tenant` rows in a different order each fetch, so the resulting badge order (e.g. "MOD, HTD" on one card, "HTD, MOD" on the next) looked inconsistent between otherwise-identical cards.
+
+**Fix.** `groupCombinedAnnouncements()` sorts each grouped announcement's `targets` array alphabetically by `tenant_name` after grouping, once per card (only when there's more than one target — a single-target row has nothing to sort).
+
+## 58. Removed the "Today" Card's Blue Outline
+
+**Status:** Implemented.
+
+**Problem.** Every event/announcement card starting today reused PatternFly's `.pf-m-selected` card modifier, which draws a full blue border. Nothing in the Legend explains this border, and on any day it's showing, every single card in the "Today" section gets outlined — it read as an unexplained highlight rather than a deliberate status.
+
+**Fix.** Replaced `.pf-m-selected` with a dedicated `.samaya-today-card` class (`events.html`) that applies a light background tint instead of a border, leaving the kind-color left-border accent (orange for events, purple for announcements, both already in the Legend) as the only stroke on any card.
+
+## 59. Calendar Month Grid Shows Adjacent-Month Days
+
+**Status:** Implemented.
+
+**Problem.** The calendar view's month grid (spec §46/§47) left the leading/trailing cells of a month's first and last week blank whenever the 1st didn't fall on a Monday or the last day didn't fall on a Sunday — e.g. September 2026 left Monday, August 31 blank before September 1, and four cells (October 1–4) blank after September 30.
+
+**Fix.** `renderCalendar()` (`events.html`) now computes the previous/next month's day count alongside the current month's, and fills every leading/trailing gap with that adjacent month's real day numbers via a shared `buildCalCell(year, month, day, isAdjacent)` helper (extracted from the render loop so the current-month and adjacent-month cells render identically otherwise). Adjacent-month cells get a `.cal-cell-adjacent` class (lowered opacity) to read as "not quite this month" while still showing any events that fall on them (relevant near the edges of the ~28-day fetch window) and remaining clickable — `openCalendarDay()` already keys off the absolute date string, not the currently-displayed month, so no change was needed there.
+
+### Out of Scope
+
+- Clicking an adjacent-month day switching the grid to that month — it opens the same day-detail panel in place instead, consistent with clicking any other day in the grid.

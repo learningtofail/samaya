@@ -119,8 +119,9 @@
   }
   .cal-cell:hover, .cal-cell:focus-visible { border-color: var(--pf-t--global--color--brand--default); }
   .cal-cell:focus-visible { outline: 2px solid var(--pf-t--global--color--brand--default); outline-offset: 1px; }
-  .cal-cell.cal-empty { visibility: hidden; cursor: default; }
   .cal-cell.cal-today { border-color: var(--pf-t--global--color--brand--default); border-width: 2px; }
+  .cal-cell.cal-cell-adjacent { opacity: 0.45; }
+  .cal-cell.cal-cell-adjacent .cal-daynum { font-weight: var(--pf-t--global--font--weight--body--default); }
   .cal-daynum { font-size: var(--pf-t--global--font--size--body--sm); font-weight: var(--pf-t--global--font--weight--body--bold); }
   .cal-today .cal-daynum { color: var(--pf-t--global--color--brand--default); }
   /* Legibility fix: larger, bolder text and darker fills so white text
@@ -1105,11 +1106,18 @@ function renderCalendar() {
   const leadingBlanks = (firstOfMonth.getUTCDay() + 6) % 7; // Monday-first
   const daysInMonth = new Date(Date.UTC(CAL_YEAR, CAL_MONTH + 1, 0)).getUTCDate();
 
-  let html = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => `<div class="cal-dow">${d}</div>`).join('');
-  for (let i = 0; i < leadingBlanks; i++) html += '<div class="cal-cell cal-empty"></div>';
+  // Spec §57 — fill the leading/trailing gaps with the adjacent month's own
+  // days (dimmed via .cal-cell-adjacent) instead of leaving them blank, so
+  // every week row is a complete Mon–Sun rather than stopping mid-week.
+  const prevMonthIdx  = CAL_MONTH === 0 ? 11 : CAL_MONTH - 1;
+  const prevMonthYear = CAL_MONTH === 0 ? CAL_YEAR - 1 : CAL_YEAR;
+  const prevMonthDays = new Date(Date.UTC(prevMonthYear, prevMonthIdx + 1, 0)).getUTCDate();
+  const nextMonthIdx  = CAL_MONTH === 11 ? 0 : CAL_MONTH + 1;
+  const nextMonthYear = CAL_MONTH === 11 ? CAL_YEAR + 1 : CAL_YEAR;
+  const trailingBlanks = (7 - ((leadingBlanks + daysInMonth) % 7)) % 7;
 
-  for (let day = 1; day <= daysInMonth; day++) {
-    const key = `${CAL_YEAR}-${pad2(CAL_MONTH + 1)}-${pad2(day)}`;
+  function buildCalCell(year, month, day, isAdjacent) {
+    const key = `${year}-${pad2(month + 1)}-${pad2(day)}`;
     const items = (byDay.get(key) || []).sort((a, b) => new Date(a.start_datetime_utc) - new Date(b.start_datetime_utc));
     const isToday = key === todayKey;
     const shown = items.slice(0, 3);
@@ -1118,11 +1126,24 @@ function renderCalendar() {
       return `<div class="cal-item ${cls}" role="button" tabindex="0" aria-label="${escapeHtml(ev.event_name)} — view Discord preview" title="${escapeHtml(ev.event_name)}" onclick="event.stopPropagation();openDiscordPreview(${escapeHtml(JSON.stringify(ev))})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();openDiscordPreview(${escapeHtml(JSON.stringify(ev))});}">${escapeHtml(ev.event_name)}</div>`;
     }).join('');
     const moreHtml = items.length > 3 ? `<div class="cal-more">+${items.length - 3} more</div>` : '';
-    const dayLabel = `${MONTH_FULL[CAL_MONTH]} ${day}, ${CAL_YEAR}${items.length ? `, ${items.length} item${items.length === 1 ? '' : 's'}` : ''}`;
-    html += `<div class="cal-cell${isToday ? ' cal-today' : ''}" role="button" tabindex="0" aria-label="${escapeHtml(dayLabel)}" onclick="openCalendarDay('${key}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openCalendarDay('${key}');}">
+    const dayLabel = `${MONTH_FULL[month]} ${day}, ${year}${items.length ? `, ${items.length} item${items.length === 1 ? '' : 's'}` : ''}`;
+    const cellCls = `cal-cell${isToday ? ' cal-today' : ''}${isAdjacent ? ' cal-cell-adjacent' : ''}`;
+    return `<div class="${cellCls}" role="button" tabindex="0" aria-label="${escapeHtml(dayLabel)}" onclick="openCalendarDay('${key}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openCalendarDay('${key}');}">
       <div class="cal-daynum">${day}</div>
       ${itemsHtml}${moreHtml}
     </div>`;
+  }
+
+  let html = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => `<div class="cal-dow">${d}</div>`).join('');
+
+  for (let i = 0; i < leadingBlanks; i++) {
+    html += buildCalCell(prevMonthYear, prevMonthIdx, prevMonthDays - leadingBlanks + 1 + i, true);
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    html += buildCalCell(CAL_YEAR, CAL_MONTH, day, false);
+  }
+  for (let day = 1; day <= trailingBlanks; day++) {
+    html += buildCalCell(nextMonthYear, nextMonthIdx, day, true);
   }
 
   grid.innerHTML = html;
