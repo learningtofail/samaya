@@ -10,6 +10,7 @@ from sqlalchemy.orm import aliased
 from models import get_db
 from models.db import Announcement, AnnouncementTarget, EventDefinition, EventTarget, Kingdom, Occurrence, PostLog, Tenant
 from services.discord_api import get_guild_channels
+from services.static_assets import bust_static_cache
 
 router = APIRouter()
 
@@ -91,6 +92,13 @@ def _event_row_dict(occ: Occurrence, event: EventDefinition) -> dict:
         # plain function can't perform); None means either no notification
         # channel is configured or it couldn't be resolved right now.
         "notification_channel_name": None,
+        # Spec §35/§62 — was never actually included here despite both the
+        # old and new public Discord-preview modals reading ev.cover_image_data
+        # (admin's own preview always had it; this page's never did, so the
+        # cover image silently never rendered here). Whatever the column
+        # already stores — the same data:image/...;base64,... URI
+        # create_discord_event's own image payload uses.
+        "cover_image_data":     event.cover_image_data,
     }
 
 
@@ -236,7 +244,12 @@ async def list_events(tenant_slug: str, db: AsyncSession = Depends(get_db)):
 async def events_page(tenant_slug: str, db: AsyncSession = Depends(get_db)):
     await _get_tenant_by_slug(tenant_slug, db)  # 404s early for an unknown slug
     with open("/app/static/events.html") as f:
-        return HTMLResponse(f.read())
+        # Spec §62 — events.html now loads its own external events.css/
+        # events-public.js under /static/, which Cloudflare edge-caches by
+        # extension the same way it does admin.html's assets (spec §23);
+        # this page never needed busting before that, since everything was
+        # inline.
+        return HTMLResponse(bust_static_cache(f.read()))
 
 
 @router.get("/api/alliances")
@@ -475,4 +488,4 @@ async def last_activity_all(db: AsyncSession = Depends(get_db)):
 @router.get("/events", response_class=HTMLResponse)
 async def events_page_all():
     with open("/app/static/events.html") as f:
-        return HTMLResponse(f.read())
+        return HTMLResponse(bust_static_cache(f.read()))

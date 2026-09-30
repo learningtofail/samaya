@@ -437,3 +437,29 @@ class TestSpec61VisibilitySeparateFromNotificationTargets:
         rows = [e for e in r.json() if e["event_name"] == "Kingdom Siege"]
         assert len(rows) == 1
         assert rows[0]["scope"] == "kingdom-wide"
+
+
+class TestPublicEventCoverImage:
+    """Spec §35/§62 — cover_image_data was already stored on EventDefinition
+    and already read by this page's own Discord-preview modal, but
+    _event_row_dict() never actually included it in the response, so the
+    preview's cover image silently never rendered here."""
+
+    async def test_event_row_carries_cover_image_data(
+        self, client: AsyncClient, db_session: AsyncSession, tenant: dict
+    ):
+        event, occ = await _make_event_with_occurrence(db_session, tenant["id"], "Cover Image Event", leadership_only=False)
+        event.cover_image_data = "data:image/png;base64,aGVsbG8="
+        await db_session.commit()
+
+        r = await client.get(f"/t/{tenant['slug']}/api/events")
+        row = next(e for e in r.json() if e["event_name"] == "Cover Image Event")
+        assert row["cover_image_data"] == "data:image/png;base64,aGVsbG8="
+
+    async def test_event_row_cover_image_null_when_unset(
+        self, client: AsyncClient, db_session: AsyncSession, tenant: dict
+    ):
+        await _make_event_with_occurrence(db_session, tenant["id"], "No Cover Event", leadership_only=False)
+        r = await client.get(f"/t/{tenant['slug']}/api/events")
+        row = next(e for e in r.json() if e["event_name"] == "No Cover Event")
+        assert row["cover_image_data"] is None

@@ -4,6 +4,14 @@ Not an HTTP-level test of GET / itself: admin_home() reads a hardcoded
 /app/static/admin.html path that only exists inside the built container,
 not in a bare pytest checkout — so this exercises _bust_static_cache()
 directly on representative HTML fragments instead.
+
+Spec §62 moved the actual implementation to services/static_assets.py
+(shared with routers/events.py, once the public events page also started
+loading external /static/*.css and /static/*.js of its own) — this module
+now just re-exports both names under their original spelling so this file
+keeps testing them the way anything importing from routers.admin.ui would
+still see them. See tests/test_static_assets.py for the implementation's
+own tests.
 """
 from routers.admin.ui import STATIC_ASSET_VERSION, _bust_static_cache
 

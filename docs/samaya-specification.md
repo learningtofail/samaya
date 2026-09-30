@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.33.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.34.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -1312,3 +1312,31 @@ Only the combined view is affected (`COMBINED_MODE` gate, same as `tenantBadge()
 
 - A UI affordance in the admin Targets panel clarifying that a target row now only controls delivery, not visibility, for a kingdom-wide item — the screenshot that prompted this fix was about the public page's behavior, not the admin form's wording; worth a follow-up if it causes confusion.
 - Retroactively backfilling anything — no migration needed, since `EventTarget`/`Announcement.scope` are pre-existing columns/tables; this is a read-path (query + rendering) change only.
+
+## 62. Public Events Page Redesign
+
+**Status:** Implemented. Delivered as a design handoff package (markup, CSS, JS, and a manual test checklist) and integrated as-is, with two small backend fixes discovered along the way. **Admin pages (`admin.html` and every `admin/js/*.js` file) are explicitly untouched — this is the public `/events`/`/t/{slug}/events` page only.**
+
+**Problem.** The public schedule page had grown, section by section (§26 through §61), into a PatternFly-themed page whose dark masthead, small link-styled controls, and This-Week/Next-Week grouping were harder to scan at a glance than a purpose-built public page should be — most recently flagged as the header's alliance switcher not reading as an interactive control (§61's border/chevron tweak was a partial answer to the same complaint this redesign fully replaces).
+
+**Fix.** `events.html` is now markup only (no inline CSS/JS); all styling moved to a new standalone `events.css` (a light theme with a gold accent, 4.5:1-contrast text/status colors, no PatternFly — PatternFly stays in the repo for `admin.html`); all behavior moved to a new standalone `events-public.js` (one IIFE, no globals, deliberately named to avoid colliding with the admin's own `js/events.js`). The data contract, routes, and every feature are unchanged: same `GET /api/events`/`/t/{slug}/api/events`/`/api/alliances`/`/api/last-activity`/`/api/kingdom-branding` calls, same `POST /api/tickets` report flow, same `samaya_display_tz`/`samaya_events_view` `localStorage` keys, same Add-to-Calendar menu and its scope note, same combined-view fan-out grouping (`groupCombinedFanoutRows()`, carrying forward §61's exact logic: kingdom-wide items never fan out and never get a per-alliance badge), same Discord preview (message and Scheduled-Event styles) with the same placeholder/markdown rendering.
+
+What visibly changed for a visitor:
+- **Alliance filter chips** replace the old dropdown-link alliance switcher entirely. On the combined page they're click-to-filter toggle chips (kingdom-wide items always show, since every alliance takes part — there's no separate "Kingdom-wide" chip to remember to also select); on a single-alliance page they're plain links to the other alliance pages and to `/events`.
+- **A "Live now / Next up" hero** with a live countdown and a "Then" list of the next three upcoming events (events only, not announcements — an announcement has no duration to count down against).
+- **Schedule grouped by day** (Today, Tomorrow, then weekday name and date) in the visitor's chosen time zone, replacing the previous This-Week/Next-Week grouping.
+- **Collapsed rows that expand.** Each row shows local time, UTC time, name, kind, duration, a relative time, status, and alliance crests by default; channel, reminder, description, Discord preview, and Report-an-issue open only once a row is expanded.
+- **Multi-day events** appear on every day they cover: later days render a dimmed "continues, until HH:MM" row (list view) or a continuation chip (calendar view), and duration reads as whole days (e.g. "2 days") once it crosses 24 hours.
+- **Calendar view** gained a selected-day detail panel below the grid (click a day to see that day's rows there) instead of only the month grid.
+- Noto Sans throughout, 24-hour clock, no emoji icons (crests use `icon_image_data` when set, otherwise a shield with the alliance's initials), and an accessibility pass: skip link, visible focus rings, `aria-expanded`/`aria-pressed` on every toggle, Escape closes dialogs with focus returned to the trigger, `prefers-reduced-motion` respected, 44px minimum touch targets.
+
+Two backend fixes surfaced while integrating this, both narrowly scoped and covered by new tests:
+- **`_event_row_dict()` (`routers/events.py`) now includes `cover_image_data`.** The column has existed since §35 and both the old and new Discord-preview modal already read `ev.cover_image_data` — the field was simply never included in the API response, so the cover image silently never rendered on this page (admin's own preview always had it, since it reads straight from the ORM object rather than this serialized row).
+- **The two HTML-serving endpoints (`events_page`, `events_page_all`) now bust the static-asset cache.** This page previously had nothing under `/static/` to go stale — everything was inline — so it never needed the `?v=STATIC_ASSET_VERSION` treatment `admin.html` has had since §23. Now that it loads external `events.css`/`events-public.js`, the same Cloudflare edge-caching-by-extension problem applies. Rather than reach into `routers/admin/ui.py` from a public router, the implementation (`STATIC_ASSET_VERSION`/`bust_static_cache()`) moved to a new `services/static_assets.py`, shared by both; `routers/admin/ui.py` re-exports both names under their original spelling so nothing importing from there needed to change.
+- Also added `eslint.config.mjs` coverage for the new standalone `events-public.js` (a rule block for top-level `app/static/*.js`, not `app/static/js/*.js`) — the pre-existing HTML-only lint rule only ever covered inline `<script>` blocks via `eslint-plugin-html`, and this page's script is no longer inline. `app/static/js/*.js` (the admin console's scripts) remain uncovered, exactly as before this change — a pre-existing gap this redesign didn't introduce and wasn't asked to fix.
+
+### Out of Scope
+
+- Self-hosting Noto Sans under `static/vendor/` instead of loading it from Google Fonts — the `<link>` in `events.html` is a one-line change to make later if the external font request becomes a concern.
+- Translating the page's interface text — every string lives in `events-public.js`/`events.html`, not baked into markup elsewhere, specifically so this stays straightforward later, but no translation was requested or done here.
+- Covering `app/static/js/*.js` (the admin console's own scripts) with ESLint — see the note above; unrelated to this page and untouched.
