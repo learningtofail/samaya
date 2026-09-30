@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.32.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.33.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -1295,3 +1295,20 @@ Only the combined view is affected (`COMBINED_MODE` gate, same as `tenantBadge()
 ### Out of Scope
 
 - A way to subscribe to more than one specific alliance (e.g. two out of three) in a single feed — the feed is still exactly "this one alliance" or "every alliance," matching the two views the page itself offers.
+
+## 61. Kingdom-Wide Visibility Decoupled From Notification Targets
+
+**Status:** Implemented.
+
+**Problem.** Reported directly against the public pages, with screenshots: (1) an announcement set to `scope="kingdom-wide"` never showed a "🌐 Kingdom-wide" badge — `_announcement_row_dict()` (`routers/events.py`) hardcoded `"scope": None` on every response, a leftover from before `Announcement.scope` existed at all (§49), so the column was write-only from the admin UI's own perspective. (2) The only way to get an alliance's badge to show up on the public pages at all — for either an event or an announcement — was to configure an explicit notification target (an `EventTarget` row, spec §20, or an `AnnouncementTarget` row) naming that alliance's own Discord channel. Visibility/badging and "where does the Discord ping go" were the same mechanism, so a coordinator who wanted an alliance-scope event or announcement to simply *show up* on another alliance's page — with no interest in that alliance also getting a duplicate Discord notification — had no way to do that without also wiring up a channel. And a kingdom-wide item had no dedicated automatic-fan-out equivalent for announcements at all: `EventDefinition.scope="kingdom-wide"` already drove automatic same-Kingdom visibility for events, but `Announcement.scope="kingdom-wide"` did not — every kingdom-wide announcement needed one explicit `AnnouncementTarget` row per alliance to appear anywhere outside its own owning tenant's page, and even then it showed with per-alliance badges (§56/§57's fan-out), never a single "🌐 Kingdom-wide" one.
+
+**Fix.** Two independent changes, kept independent on purpose (bullet 3 of the request):
+
+- **Visibility ("does this show, and with what badge") — `routers/events.py`, both `GET /t/{slug}/api/events` and `GET /api/events`.** An alliance-scope event or announcement is visible on the owning tenant's own page (unchanged) plus any tenant with an explicit target row (`EventTarget` for events, `AnnouncementTarget` for announcements) — this part is unchanged behavior, just no longer the *only* path to visibility. A `scope="kingdom-wide"` item is now visible on every tenant in the same `Kingdom` as its owner automatically, with zero target rows required — mirroring the fan-out `EventDefinition.scope="kingdom-wide"` already gave events, now extended to `Announcement.scope`. The per-tenant query joins `EventTarget`/`AnnouncementTarget` as an *outer* join scoped to the requesting tenant (so it never fans out rows — at most one match per item) and widens each `OR` clause with the kingdom-wide same-Kingdom check (announcements need `aliased(Tenant)` as `OwnerTenant` to read the *owning* tenant's `kingdom_id`, since the query has no other join to it). The combined view splits each item type into two queries instead: the owning-tenant/single-row query (unchanged), plus a second fan-out query over `EventTarget`/`AnnouncementTarget` — both filtered to `scope != "kingdom-wide"` and (for events) `tenant_id != owning_tenant_id`, so a kingdom-wide item that also happens to carry explicit targets for delivery routing is never counted twice.
+- **Badging (client, `events.html`).** `_announcement_row_dict()` no longer hardcodes `scope: None` — it passes through the real column value, which is what makes `scopeBadge()` (already correct, unchanged) start rendering "🌐 Kingdom-wide" for announcements at all. `tenantBadge()` gained an early `if (ev.scope === 'kingdom-wide') return '';` — a kingdom-wide item shows only the scope badge, never an alliance badge, however many `EventTarget`/`AnnouncementTarget` rows it happens to have configured underneath for delivery. The former `groupCombinedAnnouncements()` (announcement-only, §56) is generalized to `groupCombinedFanoutRows()`, keyed by `${kind}:${id}` instead of announcement id alone, so an alliance-scope event's `EventTarget` fan-out rows on the combined view get the same one-card-with-multiple-badges treatment an announcement's `AnnouncementTarget` fan-out already had — multiple alliance badges now only ever appear for a non-kingdom-wide item with more than one valid destination, per the request's last bullet.
+- **Notification targeting (`_resolve_notification`, `routers/admin/occurrences.py`) is unchanged** — it already resolved a per-target-tenant channel/role independently of anything above, returning empty strings (which the client already renders as "no channel") when nothing is configured for a given tenant. This is what made bullet 3 ("target for notifications separate from tagging/display") already true underneath; only the visibility and badging logic needed to change to stop being solely target-driven.
+
+### Out of Scope
+
+- A UI affordance in the admin Targets panel clarifying that a target row now only controls delivery, not visibility, for a kingdom-wide item — the screenshot that prompted this fix was about the public page's behavior, not the admin form's wording; worth a follow-up if it causes confusion.
+- Retroactively backfilling anything — no migration needed, since `EventTarget`/`Announcement.scope` are pre-existing columns/tables; this is a read-path (query + rendering) change only.

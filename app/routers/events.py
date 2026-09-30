@@ -3,11 +3,12 @@ from datetime import date, datetime, time as dtime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from models import get_db
-from models.db import Announcement, AnnouncementTarget, EventDefinition, Kingdom, Occurrence, PostLog, Tenant
+from models.db import Announcement, AnnouncementTarget, EventDefinition, EventTarget, Kingdom, Occurrence, PostLog, Tenant
 from services.discord_api import get_guild_channels
 
 router = APIRouter()
@@ -114,7 +115,11 @@ def _announcement_row_dict(a: Announcement) -> dict:
         "kind":                 "announcement",
         "id":                   a.id,
         "event_name":           a.title,
-        "scope":                None,
+        # Spec §61 — was hardcoded None (a leftover from before Announcement
+        # had a scope column at all, spec §49); a real value here is what
+        # lets the client render the same "🌐 Kingdom-wide" badge an Event
+        # already gets, instead of the badge silently never appearing.
+        "scope":                a.scope,
         "occurrence_date":      str(sched_utc.date()),
         "start_datetime_utc":   sched_utc.isoformat(),
         "end_datetime_utc":     None,
@@ -151,12 +156,22 @@ async def list_events(tenant_slug: str, db: AsyncSession = Depends(get_db)):
     tenant = await _get_tenant_by_slug(tenant_slug, db)
     today, end, ann_start, ann_end = _window_bounds()
 
-    # This tenant's own events, plus kingdom-wide events owned by any
-    # tenant sharing this one's Kingdom (see models.db.EventDefinition.scope).
+    # This tenant's own events, kingdom-wide events owned by any tenant
+    # sharing this one's Kingdom (models.db.EventDefinition.scope), or an
+    # alliance-scope event that explicitly targets this tenant (spec §20's
+    # EventTarget — independent of Kingdom membership, e.g. HTD). Spec §61:
+    # visibility here is deliberately keyed off scope/targeting alone, not
+    # whether a notification channel/role was ever configured for this
+    # tenant — _resolve_notification below may still come back empty for a
+    # target with no channel set, and that's fine, it just means no ping.
     result = await db.execute(
         select(Occurrence, EventDefinition)
         .join(EventDefinition)
         .join(Tenant, EventDefinition.owning_tenant_id == Tenant.id)
+        .outerjoin(
+            EventTarget,
+            and_(EventTarget.event_id == EventDefinition.id, EventTarget.tenant_id == tenant.id),
+        )
         .where(
             Occurrence.occurrence_date >= today,
             Occurrence.occurrence_date <= end,
@@ -165,6 +180,7 @@ async def list_events(tenant_slug: str, db: AsyncSession = Depends(get_db)):
             or_(
                 EventDefinition.owning_tenant_id == tenant.id,
                 (EventDefinition.scope == "kingdom-wide") & (Tenant.kingdom_id == tenant.kingdom_id),
+                EventTarget.id.isnot(None),
             ),
         )
         .order_by(Occurrence.occurrence_date, EventDefinition.name)
@@ -179,19 +195,31 @@ async def list_events(tenant_slug: str, db: AsyncSession = Depends(get_db)):
         event_rows.append(row)
     rows = event_rows
 
-    # This tenant's own announcement targets (spec §37) — each
-    # AnnouncementTarget names exactly one tenant, so "targets this
-    # tenant" is the whole scoping rule; no kingdom-wide equivalent exists
-    # for announcements the way it does for events.
+    # This tenant's own announcements (spec §37, revised spec §61): visible
+    # either because this tenant is an explicit AnnouncementTarget (the
+    # existing alliance-scope mechanism), or because the announcement is
+    # scope="kingdom-wide" and owned by a tenant in this one's Kingdom —
+    # mirroring the event query above exactly. Before §61, a kingdom-wide
+    # announcement with no explicit target for this tenant simply never
+    # appeared here at all, which was the actual bug being fixed: scope was
+    # a pure display label with no visibility effect of its own.
+    OwnerTenant = aliased(Tenant)
     ann_result = await db.execute(
         select(Announcement, AnnouncementTarget.discord_channel_id)
-        .join(AnnouncementTarget, AnnouncementTarget.announcement_id == Announcement.id)
+        .join(OwnerTenant, Announcement.owning_tenant_id == OwnerTenant.id)
+        .outerjoin(
+            AnnouncementTarget,
+            and_(AnnouncementTarget.announcement_id == Announcement.id, AnnouncementTarget.tenant_id == tenant.id),
+        )
         .where(
-            AnnouncementTarget.tenant_id == tenant.id,
             Announcement.leadership_only == False,
             Announcement.status.in_(_PUBLIC_ANNOUNCEMENT_STATUSES),
             Announcement.scheduled_for >= ann_start,
             Announcement.scheduled_for <= ann_end,
+            or_(
+                AnnouncementTarget.id.isnot(None),
+                (Announcement.scope == "kingdom-wide") & (OwnerTenant.kingdom_id == tenant.kingdom_id),
+            ),
         )
         .order_by(Announcement.scheduled_for)
     )
@@ -286,19 +314,72 @@ async def list_events_all(db: AsyncSession = Depends(get_db)):
         row["notification_channel_name"] = await _resolve_channel_name(tenant, channel_id)
         rows.append(row)
 
+    # Spec §61 — an alliance-scope event's explicit EventTargets (spec §20)
+    # also get their own badge here, one row per (occurrence, target
+    # tenant), same fan-out shape the announcement targets below already
+    # use — mirroring the client's own groupCombinedFanoutRows(), which
+    # collapses same-id rows back into one card with every alliance's
+    # badge. A kingdom-wide event is excluded here on purpose: it already
+    # shows once above, under its owning tenant's row, and §61 wants a
+    # single "🌐 Kingdom-wide" badge for it, not one badge per Kingdom member.
+    et_result = await db.execute(
+        select(Occurrence, EventDefinition, Tenant)
+        .join(EventDefinition, Occurrence.event_id == EventDefinition.id)
+        .join(EventTarget, EventTarget.event_id == EventDefinition.id)
+        .join(Tenant, EventTarget.tenant_id == Tenant.id)
+        .where(
+            Occurrence.occurrence_date >= today,
+            Occurrence.occurrence_date <= end,
+            EventDefinition.active == True,
+            EventDefinition.leadership_only == False,
+            EventDefinition.scope != "kingdom-wide",
+            EventTarget.tenant_id != EventDefinition.owning_tenant_id,
+        )
+        .order_by(Occurrence.occurrence_date, EventDefinition.name)
+    )
+    for occ, event, tenant in et_result.all():
+        row = _event_row_dict(occ, event)
+        row["tenant_name"]  = tenant.name
+        row["tenant_slug"]  = tenant.slug
+        row["tenant_color"] = tenant.color
+        channel_id, _role_id = await _resolve_notification(db, event, tenant)
+        row["notification_channel_name"] = await _resolve_channel_name(tenant, channel_id)
+        rows.append(row)
+
+    # Spec §61 — a kingdom-wide announcement shows once, with no per-tenant
+    # fan-out and no alliance badge at all (the client renders its scope
+    # badge instead) — the same treatment a kingdom-wide Event already got
+    # above, and the whole point of decoupling "who sees this" from
+    # "which AnnouncementTargets happen to exist for delivery."
+    kw_result = await db.execute(
+        select(Announcement)
+        .where(
+            Announcement.leadership_only == False,
+            Announcement.scope == "kingdom-wide",
+            Announcement.status.in_(_PUBLIC_ANNOUNCEMENT_STATUSES),
+            Announcement.scheduled_for >= ann_start,
+            Announcement.scheduled_for <= ann_end,
+        )
+        .order_by(Announcement.scheduled_for)
+    )
+    for a in kw_result.scalars().all():
+        rows.append(_announcement_row_dict(a))
+
     # Every tenant's announcement targets (spec §37) — one row per
     # (announcement, target tenant), same fan-out shape PostLog already
     # uses for events: an announcement sent to three alliances' Discord
     # servers is genuinely three independent posts, so it shows once per
-    # target tenant here, each with that tenant's own badge — mirroring
-    # how a kingdom-wide *event* instead shows once under its single
-    # owning tenant, since that's a single Occurrence, not a fan-out.
+    # target tenant here, each with that tenant's own badge. Excludes
+    # scope="kingdom-wide" (handled as a single row above) so a kingdom-wide
+    # announcement that also happens to carry explicit targets isn't shown
+    # twice.
     ann_result = await db.execute(
         select(Announcement, Tenant, AnnouncementTarget.discord_channel_id)
         .join(AnnouncementTarget, AnnouncementTarget.announcement_id == Announcement.id)
         .join(Tenant, AnnouncementTarget.tenant_id == Tenant.id)
         .where(
             Announcement.leadership_only == False,
+            Announcement.scope != "kingdom-wide",
             Announcement.status.in_(_PUBLIC_ANNOUNCEMENT_STATUSES),
             Announcement.scheduled_for >= ann_start,
             Announcement.scheduled_for <= ann_end,

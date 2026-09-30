@@ -57,8 +57,18 @@
   /* Header's alliance/time-zone controls (spec §26, mirroring admin's
      §24) — plain text links rather than a <select>, each opening a modal
      with the actual option list. */
-  .header-link { color: var(--pf-t--global--text--color--inverse); font-size: var(--pf-t--global--font--size--body--sm); text-decoration: none; white-space: nowrap; padding: 4px 8px; border-radius: 4px; }
+  /* Bumped from --body--sm: at masthead scale next to the heading-lg
+     title, the small body size read as an afterthought rather than a set
+     of controls people are meant to actually use. */
+  .header-link { color: var(--pf-t--global--text--color--inverse); font-size: var(--pf-t--global--font--size--body--default, 1rem); text-decoration: none; white-space: nowrap; padding: 4px 8px; border-radius: 4px; }
   .header-link:hover { background: rgba(255,255,255,.1); text-decoration: underline; }
+  /* The alliance switcher is the one header link that changes what the
+     whole page is showing (single alliance vs. every alliance combined),
+     so it gets its own pill/chevron treatment instead of looking like a
+     plain text link the way the time-zone and feedback links do — a
+     bordered box reads as "click me to change this" at a glance. */
+  #allianceLink { border: 1px solid rgba(255,255,255,.35); font-weight: var(--pf-t--global--font--weight--body--bold, 600); }
+  #allianceLink:hover { border-color: rgba(255,255,255,.6); }
   /* Spec §38: 1:1 alliance icon images, replacing the generic 🛡️/color-dot
      wherever an alliance is named — masthead, switcher, per-row badge. */
   .samaya-tenant-icon { width: 1.1em; height: 1.1em; border-radius: 3px; object-fit: cover; vertical-align: -0.2em; margin-inline-end: 0.25em; }
@@ -829,9 +839,15 @@ function tenantBadge(ev) {
   // --pf-v6-c-label--m-custom--BackgroundColor/Color, which is exactly
   // what an inline style below can override with an arbitrary hex.
   if (!COMBINED_MODE) return '';
-  // A multi-target announcement (groupCombinedAnnouncements below) carries
-  // one badge per alliance it was actually sent to, instead of the single
-  // tenant_name/tenant_slug/tenant_color every other row has.
+  // Spec §61 — a kingdom-wide item shows scopeBadge()'s single "🌐
+  // Kingdom-wide" label instead: every alliance in the Kingdom sees it, so
+  // one-badge-per-alliance would just be noise (and for a big Kingdom, a
+  // wall of badges). Multiple alliance badges are reserved for the
+  // non-kingdom-wide, multiple-explicit-target case below.
+  if (ev.scope === 'kingdom-wide') return '';
+  // A multi-target announcement/event (groupCombinedFanoutRows below)
+  // carries one badge per alliance it was actually sent to, instead of the
+  // single tenant_name/tenant_slug/tenant_color every other row has.
   if (ev.targets && ev.targets.length) {
     return ev.targets.map(t => _oneTenantBadge(t.tenant_name, t.tenant_slug, t.tenant_color)).join('');
   }
@@ -839,33 +855,39 @@ function tenantBadge(ev) {
   return _oneTenantBadge(ev.tenant_name, ev.tenant_slug, ev.tenant_color);
 }
 
-// Spec §54 addendum — the combined /api/events view intentionally returns
-// one row per (announcement, target tenant): a kingdom-wide announcement
-// sent to 3 alliances is 3 independent Discord posts (see routers/events.py's
-// own comment on this). Left ungrouped, that reads as accidental duplicate
-// cards with identical titles/times. This collapses those rows back into
-// one card per announcement, carrying every target alliance's badge, right
-// after the fetch — so both the list view and the calendar view (which both
-// read from EVENTS_DATA) get the fix for free. Events never need this: a
-// kingdom-wide Event is already a single Occurrence row, not a fan-out.
-function groupCombinedAnnouncements(events) {
+// Spec §54/§61 — the combined /api/events view intentionally returns one
+// row per (item, target tenant) for anything with explicit, independent
+// per-alliance destinations: an alliance-scope announcement sent to 3
+// alliances is 3 independent Discord posts, and an alliance-scope event
+// with explicit EventTargets (spec §20) to other alliances is the same
+// idea (see routers/events.py's own comments on both queries). Left
+// ungrouped, that reads as accidental duplicate cards with identical
+// titles/times. This collapses those rows back into one card per
+// (kind, id), carrying every target alliance's badge, right after the
+// fetch — so both the list view and the calendar view (which both read
+// from EVENTS_DATA) get the fix for free. A kingdom-wide item is never
+// part of this fan-out server-side (it's always a single row, with no
+// per-alliance badge at all — see tenantBadge's own scope check above),
+// so it passes through here untouched.
+function groupCombinedFanoutRows(events) {
   if (!COMBINED_MODE) return events;
   const grouped = [];
-  const indexByAnnouncementId = new Map();
+  const indexByKey = new Map();
   events.forEach(ev => {
-    if (ev.kind !== 'announcement') { grouped.push(ev); return; }
+    if (ev.scope === 'kingdom-wide' || !ev.tenant_slug) { grouped.push(ev); return; }
+    const key = `${ev.kind}:${ev.id}`;
     const target = { tenant_name: ev.tenant_name, tenant_slug: ev.tenant_slug, tenant_color: ev.tenant_color, notification_channel_name: ev.notification_channel_name };
-    if (indexByAnnouncementId.has(ev.id)) {
-      grouped[indexByAnnouncementId.get(ev.id)].targets.push(target);
+    if (indexByKey.has(key)) {
+      grouped[indexByKey.get(key)].targets.push(target);
       return;
     }
-    indexByAnnouncementId.set(ev.id, grouped.length);
+    indexByKey.set(key, grouped.length);
     grouped.push({ ...ev, targets: [target] });
   });
-  // Deterministic badge order — the query behind this has no ORDER BY on
-  // the tenant side, so same-timestamp announcements can come back with
-  // their targets in a different order per row otherwise, which reads as
-  // the badges randomly shuffling between otherwise-identical cards.
+  // Deterministic badge order — the queries behind this have no ORDER BY
+  // on the tenant side, so same-timestamp items can come back with their
+  // targets in a different order per row otherwise, which reads as the
+  // badges randomly shuffling between otherwise-identical cards.
   grouped.forEach(ev => {
     if (ev.targets && ev.targets.length > 1) {
       ev.targets.sort((a, b) => a.tenant_name.localeCompare(b.tenant_name));
@@ -960,7 +982,7 @@ async function loadEvents() {
   try {
     const res    = await fetch(API_URL);
     const events = await res.json();
-    EVENTS_DATA = groupCombinedAnnouncements(events);
+    EVENTS_DATA = groupCombinedFanoutRows(events);
 
     if (!events.length) {
       content.innerHTML = emptyState(

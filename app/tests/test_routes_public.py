@@ -10,7 +10,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.db import EventDefinition, Occurrence
+from models.db import Announcement, AnnouncementTarget, EventDefinition, EventTarget, Occurrence
 
 
 async def _make_event_with_occurrence(
@@ -304,3 +304,136 @@ class TestPublicNotificationChannelName:
         r = await client.get("/api/events")
         row = next(row for row in r.json() if row["event_name"] == "Combined Channel Event")
         assert row["notification_channel_name"] == "general"
+
+
+async def _make_announcement(
+    db_session: AsyncSession,
+    owning_tenant_id: int,
+    title: str,
+    scope: str = "alliance",
+    status: str = "scheduled",
+) -> Announcement:
+    a = Announcement(
+        owning_tenant_id=owning_tenant_id,
+        scope=scope,
+        title=title,
+        body_markdown="Test body",
+        scheduled_for=datetime.now(timezone.utc) + timedelta(hours=2),
+        status=status,
+        leadership_only=False,
+    )
+    db_session.add(a)
+    await db_session.commit()
+    await db_session.refresh(a)
+    return a
+
+
+class TestSpec61VisibilitySeparateFromNotificationTargets:
+    """Spec §61 — visibility/badging on the public pages is driven by
+    scope (kingdom-wide vs alliance) and explicit targets alone, never by
+    whether a notification channel/role happens to be configured for a
+    given destination. See routers/events.py's own comments on the
+    per-tenant and combined queries for the reasoning."""
+
+    async def test_announcement_scope_field_round_trips_on_public_api(
+        self, client: AsyncClient, db_session: AsyncSession, tenant: dict
+    ):
+        await _make_announcement(db_session, tenant["id"], "Kingdom Reset", scope="kingdom-wide")
+        r = await client.get(f"/t/{tenant['slug']}/api/events")
+        row = next(row for row in r.json() if row["event_name"] == "Kingdom Reset")
+        assert row["scope"] == "kingdom-wide"
+
+    async def test_kingdom_wide_announcement_visible_on_every_same_kingdom_tenant_with_no_targets(
+        self, client: AsyncClient, db_session: AsyncSession, tenant: dict, second_tenant: dict
+    ):
+        """The actual bug: before §61 an announcement's visibility was
+        driven purely by AnnouncementTarget rows, so a kingdom-wide
+        announcement with zero explicit targets for a sibling tenant
+        never showed up on that tenant's own page at all."""
+        await _make_announcement(db_session, tenant["id"], "Kingdom Reset", scope="kingdom-wide")
+        r1 = await client.get(f"/t/{tenant['slug']}/api/events")
+        r2 = await client.get(f"/t/{second_tenant['slug']}/api/events")
+        assert "Kingdom Reset" in [e["event_name"] for e in r1.json()]
+        assert "Kingdom Reset" in [e["event_name"] for e in r2.json()]
+
+    async def test_alliance_scope_announcement_not_visible_on_other_tenant_without_a_target(
+        self, client: AsyncClient, db_session: AsyncSession, tenant: dict, second_tenant: dict
+    ):
+        await _make_announcement(db_session, tenant["id"], "MOD Only Announcement", scope="alliance")
+        r = await client.get(f"/t/{second_tenant['slug']}/api/events")
+        assert "MOD Only Announcement" not in [e["event_name"] for e in r.json()]
+
+    async def test_kingdom_wide_announcement_single_row_no_alliance_fields_on_combined_view(
+        self, client: AsyncClient, db_session: AsyncSession, tenant: dict, second_tenant: dict
+    ):
+        """A kingdom-wide item must not fan out into one row per Kingdom
+        member on the combined page — that's the whole point of pulling
+        scope out of the AnnouncementTarget-driven fan-out. Client-side,
+        the absence of tenant_slug/targets is what keeps tenantBadge()
+        from rendering any alliance badge at all for it."""
+        await _make_announcement(db_session, tenant["id"], "Kingdom Reset", scope="kingdom-wide")
+        r = await client.get("/api/events")
+        rows = [e for e in r.json() if e["event_name"] == "Kingdom Reset"]
+        assert len(rows) == 1
+        assert rows[0].get("tenant_slug") is None
+
+    async def test_kingdom_wide_announcement_with_explicit_targets_not_double_counted(
+        self, client: AsyncClient, db_session: AsyncSession, tenant: dict, second_tenant: dict
+    ):
+        """A kingdom-wide announcement that also happens to carry explicit
+        AnnouncementTargets (e.g. for delivery/channel routing) must still
+        show as exactly one row on the combined view, not one plus a
+        second fan-out row from the target-based query."""
+        a = await _make_announcement(db_session, tenant["id"], "Kingdom Reset", scope="kingdom-wide")
+        db_session.add(AnnouncementTarget(announcement_id=a.id, tenant_id=tenant["id"], discord_channel_id="chan-1"))
+        await db_session.commit()
+        r = await client.get("/api/events")
+        rows = [e for e in r.json() if e["event_name"] == "Kingdom Reset"]
+        assert len(rows) == 1
+
+    async def test_alliance_scope_announcement_with_targets_gets_one_badge_row_per_target(
+        self, client: AsyncClient, db_session: AsyncSession, tenant: dict, second_tenant: dict
+    ):
+        a = await _make_announcement(db_session, tenant["id"], "Joint Op Announcement", scope="alliance")
+        db_session.add(AnnouncementTarget(announcement_id=a.id, tenant_id=tenant["id"], discord_channel_id="chan-1"))
+        db_session.add(AnnouncementTarget(announcement_id=a.id, tenant_id=second_tenant["id"], discord_channel_id="chan-2"))
+        await db_session.commit()
+        r = await client.get("/api/events")
+        rows = [e for e in r.json() if e["event_name"] == "Joint Op Announcement"]
+        assert {row["tenant_slug"] for row in rows} == {tenant["slug"], second_tenant["slug"]}
+
+        r2 = await client.get(f"/t/{second_tenant['slug']}/api/events")
+        assert "Joint Op Announcement" in [e["event_name"] for e in r2.json()]
+
+    async def test_event_target_makes_alliance_scope_event_visible_on_targeted_tenant(
+        self, client: AsyncClient, db_session: AsyncSession, tenant: dict, second_tenant: dict
+    ):
+        """Bullet 2 of the request: an explicit EventTarget alone — with
+        no notification channel/role configured — must be enough to make
+        an alliance-scope event show up (and badge) on the targeted
+        tenant's own page and the combined page, independent of whether
+        a ping channel was ever set for that destination."""
+        event, occ = await _make_event_with_occurrence(db_session, tenant["id"], "Cross-Alliance Rally", leadership_only=False)
+        db_session.add(EventTarget(event_id=event.id, tenant_id=second_tenant["id"]))
+        await db_session.commit()
+
+        r = await client.get(f"/t/{second_tenant['slug']}/api/events")
+        assert "Cross-Alliance Rally" in [e["event_name"] for e in r.json()]
+
+        r2 = await client.get("/api/events")
+        rows = [e for e in r2.json() if e["event_name"] == "Cross-Alliance Rally"]
+        assert {row["tenant_slug"] for row in rows} == {tenant["slug"], second_tenant["slug"]}
+
+    async def test_kingdom_wide_event_with_event_target_not_double_counted(
+        self, client: AsyncClient, db_session: AsyncSession, tenant: dict, second_tenant: dict
+    ):
+        event, occ = await _make_event_with_occurrence(
+            db_session, tenant["id"], "Kingdom Siege", leadership_only=False, scope="kingdom-wide"
+        )
+        db_session.add(EventTarget(event_id=event.id, tenant_id=second_tenant["id"]))
+        await db_session.commit()
+
+        r = await client.get("/api/events")
+        rows = [e for e in r.json() if e["event_name"] == "Kingdom Siege"]
+        assert len(rows) == 1
+        assert rows[0]["scope"] == "kingdom-wide"
