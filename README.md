@@ -36,6 +36,31 @@ tenant header — do this from the admin UI's Schedule tab rather than a bare
 curl; the endpoint itself is `POST /admin/api/scheduler/regenerate` with
 `X-Tenant-Slug: <slug>` and the session cookie a browser would already have.
 
+### Adding a new public route
+
+Caddy sits in front of this app on `lxc-taraka`, outside this repo, at
+`/etc/caddy/Caddyfile` (native systemd service, not a container — `systemctl
+status caddy`/`journalctl -xeu caddy` for its logs). It does *not* have a
+catch-all proxy rule; each public path is listed individually. **Any new
+top-level public route added to the app (a new page, a new unauthenticated
+API prefix) needs a matching `reverse_proxy /that-path 127.0.0.1:8000` line
+added there too**, or it 404s/blanks out in the browser even though the app
+itself serves it fine on `127.0.0.1:8000` — this bit us once with `/feedback`
+(spec §40-43) shipping in the app before Caddy knew about it.
+
+That Caddyfile also sets `admin off`, which disables Caddy's local admin API.
+That means `systemctl reload caddy` (and `caddy reload --force`) **always
+fail** with `dial tcp [::1]:2019: connect: connection refused` — reload
+works by POSTing the new config to that API. A config change there needs a
+full restart instead:
+
+    caddy validate --config /etc/caddy/Caddyfile   # catch syntax errors first
+    systemctl restart caddy
+    systemctl status caddy --no-pager
+
+A restart briefly drops the listener (sub-second), unlike a reload — fine
+for a deliberate change, just don't expect a clean zero-downtime reload here.
+
 ## Running Tests
 
     pip install -r app/requirements-dev.txt
