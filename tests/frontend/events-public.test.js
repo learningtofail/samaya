@@ -1,0 +1,186 @@
+// Unit tests for the pure, DOM-independent functions in
+// app/static/events-public.js (audit remediation, Phase 4).
+//
+// events-public.js is a plain classic <script> (no build step, no ES
+// modules — see CLAUDE.md's app/static/ section), and it wires up real
+// page elements and fires fetches as soon as it runs. Rather than
+// stubbing an entire fake events.html DOM just to import a handful of
+// pure helper functions, the script itself carries a small, explicit test
+// hook: setting globalThis.__SAMAYA_TEST__ = true before it's evaluated
+// makes it stop right after its pure-function section (before any DOM
+// wiring or fetch) and hand those functions to
+// globalThis.__SAMAYA_TEST_EXPORTS__ instead. That flag is never set in
+// the browser, so production behavior is unchanged — see the comments
+// around both guards in events-public.js itself.
+import { readFileSync } from "node:fs";
+import { beforeAll, describe, expect, test } from "vitest";
+
+let fns;
+
+beforeAll(async () => {
+  globalThis.__SAMAYA_TEST__ = true;
+  // events-public.js references window.location/localStorage/Intl at
+  // module-evaluation time (before it even reaches the test-export
+  // guard), so a browser-like global environment is needed to load it at
+  // all. jsdom is already a vitest dependency; construct a minimal one
+  // here rather than adding `environment: 'jsdom'` project-wide, since
+  // nothing else in this suite needs a DOM.
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://ks138.taraka.dev/events" });
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.localStorage = dom.window.localStorage;
+  globalThis.Intl = Intl;
+
+  const source = readFileSync(new URL("../../app/static/events-public.js", import.meta.url), "utf8");
+  // eslint-disable-next-line no-new-func -- executing the real production
+  // script verbatim is the point: these tests exercise events-public.js
+  // itself, not a reimplementation of it.
+  new Function(source)();
+
+  fns = globalThis.__SAMAYA_TEST_EXPORTS__;
+});
+
+describe("displayStatus", () => {
+  test("event: pending occurrence not yet started", () => {
+    expect(fns.displayStatus({ kind: "event", post_status: "pending", _start: 2000, _end: 3000 }, 1000)).toBe("scheduled");
+  });
+
+  test("event: posted and currently within its window is live", () => {
+    expect(fns.displayStatus({ kind: "event", post_status: "posted", _start: 1000, _end: 3000 }, 2000)).toBe("live");
+  });
+
+  test("event: posted and past its end is completed", () => {
+    expect(fns.displayStatus({ kind: "event", post_status: "posted", _start: 1000, _end: 2000 }, 3000)).toBe("completed");
+  });
+
+  test("event: error post_status is failed", () => {
+    expect(fns.displayStatus({ kind: "event", post_status: "error", _start: 1000, _end: 2000 }, 500)).toBe("failed");
+  });
+
+  test("announcement: draft maps to scheduled", () => {
+    expect(fns.displayStatus({ kind: "announcement", post_status: "draft" }, 0)).toBe("scheduled");
+  });
+
+  test("announcement: posted maps to announced, never 'live' (no duration)", () => {
+    expect(fns.displayStatus({ kind: "announcement", post_status: "posted" }, 0)).toBe("announced");
+  });
+
+  test("unrecognized post_status defaults to scheduled", () => {
+    expect(fns.displayStatus({ kind: "event", post_status: "something-new", _start: 1000, _end: 2000 }, 0)).toBe("scheduled");
+  });
+});
+
+describe("daySpan", () => {
+  const tz = "UTC";
+
+  test("a same-day event returns exactly one key", () => {
+    const ev = { _start: Date.UTC(2026, 5, 15, 10, 0), _end: Date.UTC(2026, 5, 15, 12, 0) };
+    expect(fns.daySpan(ev, tz)).toEqual(["2026-06-15"]);
+  });
+
+  test("a multi-day event returns one key per day it touches", () => {
+    const ev = { _start: Date.UTC(2026, 5, 15, 23, 0), _end: Date.UTC(2026, 5, 17, 1, 0) };
+    expect(fns.daySpan(ev, tz)).toEqual(["2026-06-15", "2026-06-16", "2026-06-17"]);
+  });
+
+  test("an announcement (_end === _start) returns just its one day", () => {
+    const ev = { _start: Date.UTC(2026, 5, 15, 9, 0), _end: Date.UTC(2026, 5, 15, 9, 0) };
+    expect(fns.daySpan(ev, tz)).toEqual(["2026-06-15"]);
+  });
+});
+
+describe("buildDayMap", () => {
+  const tz = "UTC";
+
+  test("groups events under their day key(s), earliest start first within a day", () => {
+    const early = { _start: Date.UTC(2026, 5, 15, 8, 0), _end: Date.UTC(2026, 5, 15, 9, 0), _k: "e:1" };
+    const late = { _start: Date.UTC(2026, 5, 15, 18, 0), _end: Date.UTC(2026, 5, 15, 19, 0), _k: "e:2" };
+    const map = fns.buildDayMap([late, early], tz);
+    const day = map.get("2026-06-15");
+    expect(day.map((x) => x.ev._k)).toEqual(["e:1", "e:2"]);
+    expect(day.every((x) => x.cont === false)).toBe(true);
+  });
+
+  test("a multi-day event's continuation rows are marked cont:true, last row marked last:true", () => {
+    const ev = { _start: Date.UTC(2026, 5, 15, 20, 0), _end: Date.UTC(2026, 5, 17, 2, 0), _k: "e:multi" };
+    const map = fns.buildDayMap([ev], tz);
+    expect(map.get("2026-06-15")[0]).toMatchObject({ cont: false, last: false });
+    expect(map.get("2026-06-16")[0]).toMatchObject({ cont: true, last: false });
+    expect(map.get("2026-06-17")[0]).toMatchObject({ cont: true, last: true });
+  });
+});
+
+describe("groupCombinedFanoutRows", () => {
+  test("collapses one row per (kind, id, target) back into one row per item, with a targets array", () => {
+    const rows = [
+      { kind: "event", id: 1, tenant_slug: "mod", tenant_name: "MOD", tenant_color: "#111" },
+      { kind: "event", id: 1, tenant_slug: "nsr", tenant_name: "NSR", tenant_color: "#222" },
+      { kind: "announcement", id: 5, tenant_slug: "mod", tenant_name: "MOD", tenant_color: "#111" },
+    ];
+    const grouped = fns.groupCombinedFanoutRows(rows);
+    expect(grouped).toHaveLength(2);
+    const eventRow = grouped.find((g) => g.kind === "event");
+    expect(eventRow.targets.map((t) => t.tenant_slug).sort()).toEqual(["mod", "nsr"]);
+  });
+
+  test("a kingdom-wide row is never fanned out and passes through untouched", () => {
+    const rows = [{ kind: "event", id: 9, scope: "kingdom-wide" }];
+    expect(fns.groupCombinedFanoutRows(rows)).toEqual(rows);
+  });
+
+  test("targets on a grouped row are sorted alphabetically by tenant_name", () => {
+    const rows = [
+      { kind: "event", id: 1, tenant_slug: "z", tenant_name: "Zeta" },
+      { kind: "event", id: 1, tenant_slug: "a", tenant_name: "Alpha" },
+    ];
+    const [grouped] = fns.groupCombinedFanoutRows(rows);
+    expect(grouped.targets.map((t) => t.tenant_name)).toEqual(["Alpha", "Zeta"]);
+  });
+});
+
+describe("formatDuration", () => {
+  test("falsy hours renders nothing (announcements have no duration)", () => {
+    expect(fns.formatDuration(0)).toBe("");
+    expect(fns.formatDuration(undefined)).toBe("");
+  });
+
+  test("exactly 24 hours is called out as all day", () => {
+    expect(fns.formatDuration(24)).toBe("24h (all day)");
+  });
+
+  test("sub-hour durations render in minutes", () => {
+    expect(fns.formatDuration(0.5)).toBe("30 min");
+  });
+
+  test("multi-day durations render in days", () => {
+    expect(fns.formatDuration(48)).toBe("2 days");
+  });
+
+  test("ordinary durations render in hours", () => {
+    expect(fns.formatDuration(3)).toBe("3h");
+  });
+});
+
+describe("evAlliances", () => {
+  test("kingdom-wide scope always returns the single Kingdom-wide pseudo-alliance", () => {
+    const result = fns.evAlliances({ scope: "kingdom-wide", targets: [{ tenant_slug: "mod", tenant_name: "MOD" }] });
+    expect(result).toEqual([{ name: "Kingdom-wide", icon: "", color: expect.any(String), slug: "" }]);
+  });
+
+  test("an explicit targets array is mapped to alliance info per target", () => {
+    const result = fns.evAlliances({ targets: [{ tenant_slug: "mod", tenant_name: "MOD" }] });
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("MOD");
+  });
+});
+
+describe("matchesFilter", () => {
+  // matchesFilter reads the module-scoped FILTER variable indirectly
+  // (it's not a parameter), so these only exercise the branch that
+  // doesn't depend on FILTER's current value — a kingdom-wide item always
+  // matches regardless of which alliance filter chip is active.
+  test("a kingdom-wide event always matches, regardless of the active filter", () => {
+    expect(fns.matchesFilter({ scope: "kingdom-wide" })).toBe(true);
+  });
+});

@@ -28,7 +28,10 @@ jobs:
       - run: pip install --no-cache-dir -r requirements-dev.txt
       - run: pytest -q
 
-  eslint:
+  frontend:
+    # eslint plus (audit remediation, Phase 4) the vitest suite covering
+    # events-public.js's pure functions (tests/frontend/) — npm ci already
+    # pulls both eslint and vitest from devDependencies, so this is one job.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +40,7 @@ jobs:
           node-version: "20"
       - run: npm ci
       - run: npm run lint
+      - run: npm test
 
   alembic-baseline:
     # Verifies app/alembic/versions/ actually applies cleanly against a real

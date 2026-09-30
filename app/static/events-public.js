@@ -3,6 +3,15 @@
 (function () {
 'use strict';
 
+// Set by tests/frontend/events-public.test.js before this script is
+// evaluated (audit remediation, Phase 4) — never true in the browser, so
+// production behavior below is completely unaffected. Lets the pure,
+// DOM-independent functions defined above the "Modals" section get unit
+// tested directly, without a bundler and without executing this file's
+// real DOM wiring/fetches against a fake page (see the guard right before
+// those begin, below).
+const SAMAYA_TEST = typeof globalThis !== 'undefined' && globalThis.__SAMAYA_TEST__ === true;
+
 // ── Page mode ───────────────────────────────────────────────────
 const PATH_PARTS = window.location.pathname.split('/').filter(Boolean);
 const COMBINED_MODE = PATH_PARTS[0] !== 't';
@@ -180,6 +189,19 @@ function buildDayMap(list, tz) {
   });
   map.forEach((arr) => arr.sort((a, b) => (a.cont === b.cont ? a.ev._start - b.ev._start : (a.cont ? -1 : 1))));
   return map;
+}
+
+// Everything above this line is pure/DOM-independent; everything below
+// wires up real page elements and fetches. Under test, stop here and hand
+// the pure functions to the test file instead of running any of that
+// against a document that isn't the real events.html.
+if (SAMAYA_TEST) {
+  globalThis.__SAMAYA_TEST_EXPORTS__ = {
+    escapeHtml, safeColor, inkOn, pad2, parseIso, hm, dayKey, fmtDay, tzShort, cd, rel, formatDuration,
+    displayStatus, fallbackColor, allianceInfo, initials, crestHtml, evAlliances, matchesFilter,
+    groupCombinedFanoutRows, daySpan, buildDayMap,
+  };
+  return;
 }
 
 // ── Modals ──────────────────────────────────────────────────────

@@ -4,7 +4,8 @@
   "description": "Kingshot Community Event Scheduler — self-hosted FastAPI + PostgreSQL + Discord integration.",
   "main": "index.js",
   "scripts": {
-    "lint": "eslint app/static/"
+    "lint": "eslint app/static/",
+    "test": "vitest run"
   },
   "repository": {
     "type": "git",
@@ -20,7 +21,9 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.10.0",
-    "eslint-plugin-html": "^8.2.0"
+    "eslint-plugin-html": "^8.2.0",
+    "jsdom": "^30.1.1",
+    "vitest": "^5.0.2"
   },
   "type": "module"
 }
