@@ -10,7 +10,6 @@ dist/
 build/
 .venv/
 venv/
-alembic/
 *.log
 .DS_Store
 Thumbs.db

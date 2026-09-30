@@ -61,6 +61,29 @@ full restart instead:
 A restart briefly drops the listener (sub-second), unlike a reload — fine
 for a deliberate change, just don't expect a clean zero-downtime reload here.
 
+## Schema Migrations
+
+Alembic (already a listed dependency, unused until now). Every future schema
+change goes through it — not a new hand-written `migrate_*.py` script, which
+was this repo's only option before an Alembic baseline existed.
+
+    cd app && alembic revision --autogenerate -m "add whatever_column"
+    # review the generated file under app/alembic/versions/ before committing —
+    # autogenerate is a starting point, not a guarantee (it won't catch a
+    # renamed column, for instance — that needs to be hand-edited into an
+    # op.alter_column instead of a drop+add)
+    docker compose exec app alembic upgrade head   # deploy step, after a backup
+
+The one-time step this app's actual production database needs, since it
+already has this exact schema (built up via the 10 hand-rolled `migrate_*.py`
+scripts before Alembic existed): `alembic stamp head`, not `alembic upgrade
+head` — see the baseline revision's own docstring
+(`app/alembic/versions/6fc935931248_baseline_schema_as_of_spec_62.py`) for
+why upgrading instead of stamping would fail outright (it would try to
+`CREATE TABLE` on tables that already exist).
+
+A fresh install (no existing database) runs `alembic upgrade head` normally.
+
 ## Running Tests
 
     pip install -r app/requirements-dev.txt

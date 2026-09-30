@@ -13,17 +13,9 @@ added, removed, or renamed — not on every logic change inside a file.
 - `docker-compose.yml` — app + Postgres 16, Caddy/Cloudflare Tunnel in front (not in this repo)
 - `.env.example` — required env vars (`DB_PASSWORD`, `SECRET_KEY`, `DISCORD_OAUTH_CLIENT_ID`/`_SECRET`/`_REDIRECT_URI`, `SUPERADMIN_DISCORD_IDS`, `PLATFORM_BOT_TOKEN`, `PLATFORM_PUBLIC_KEY`, SMTP settings)
 - `package.json` / `eslint.config.mjs` — lints `app/static/` JS only; no JS build step, no bundler. Two rule blocks: `app/static/*.html` (via `eslint-plugin-html`, extracting inline `<script>` blocks — this is how `admin.html`/`feedback.html`'s inline scripts get linted) and, since spec §62, `app/static/*.js` (top-level only, not `app/static/js/*.js`) for `events-public.js` now that the public events page's script lives in its own file instead of inline. The admin console's `js/*.js` files were never covered by either block before or after this — a pre-existing gap, not something §62 introduced or fixed
-- `migrate_to_multitenant.py` (repo root, one level up from `app/`) — one-time hand-written production migration (this repo has never actually used Alembic despite listing it as a dependency); already run once for the Kingdom/Tenant model — check with whoever deployed last before assuming it still needs running
-- `migrate_add_announcement_recurring.py` (`app/`) — one-time hand-written migration adding `leadership_only`/`recurring`/`interval_days` to `announcements`; same no-Alembic caveat as above — check whether it's already been run before assuming it still needs running
-- `migrate_add_event_targets.py` (`app/`) — one-time hand-written migration creating the `event_targets` table (spec §20); same no-Alembic caveat, same check-before-assuming-it's-needed caveat
-- `migrate_add_viewer_role.py` (`app/`) — one-time hand-written migration widening `ck_user_tenant_role`/`ck_invite_role` to allow `'viewer'` (spec §31); idempotent via `pg_get_constraintdef`, same check-before-assuming-it's-needed caveat
-- `migrate_add_event_cover_image.py` (`app/`) — one-time hand-written migration adding `event_definitions.cover_image_data TEXT` (spec §35 — Event cover images); idempotent via `_column_exists`, same check-before-assuming-it's-needed caveat
-- `migrate_add_announcement_scope.py` (`app/`) — one-time hand-written migration adding `announcements.scope` (spec §49 — same alliance/kingdom-wide concept `event_definitions.scope` already has); same no-Alembic/check-before-assuming-it's-needed caveats
-- `migrate_add_tickets.py` (`app/`) — one-time hand-written migration creating the `tickets`/`ticket_votes` tables (spec §40-43 — the public feedback/request/error-report board at `/feedback`); same no-Alembic/check-before-assuming-it's-needed caveats
-- `migrate_add_discord_servers.py` (`app/`) — one-time hand-written migration introducing `discord_servers` as a first-class table and repointing `tenants.server_id` at it, replacing `tenants.guild_id`/`bot_token`/`public_key` (spec §25 — Discord Server as a First-Class Entity); same no-Alembic/check-before-assuming-it's-needed caveats
-- `migrate_add_announcement_templates.py` (`app/`) — one-time hand-written migration adding `announcements.event_offset_minutes` and creating the `announcement_templates` table (spec §27 — reusable, placeholder-aware Announcement templates); same no-Alembic/check-before-assuming-it's-needed caveats
-- `migrate_add_tenant_icon_and_branding.py` (`app/`) — one-time hand-written migration adding `tenants.icon_image_data` and `kingdoms.public_site_title`/`admin_console_title` (spec §38 — uploadable alliance icons, editable kingdom-wide page titles); same no-Alembic/check-before-assuming-it's-needed caveats
-- `.github/workflows/ci.yml` (spec §30) — runs `pytest` (in-memory SQLite, no Postgres service needed) and `eslint` on every push/PR to `master`. Doesn't replace this repo's own commit/diff/worktree-verify patch practice — it's a second, automatic check once a patch actually lands
+- `app/alembic/` (Phase: audit remediation) — **the current, only convention for schema changes**, as of the baseline revision below. `alembic/env.py` reads `DATABASE_URL` from the environment (same var `models/__init__.py` uses) and points `target_metadata` at `models.db.Base.metadata`, so `alembic revision --autogenerate` diffs against the real ORM models. `alembic/versions/6fc935931248_baseline_schema_as_of_spec_62.py` is the first-ever revision: a tool-generated (not hand-written), `alembic check`-verified exact snapshot of the schema as of spec §62 — see its own docstring for why production needs `alembic stamp head` (not `upgrade head`) to adopt it, since production already has this schema via the 10 hand-rolled scripts below. See README's "Schema Migrations" section for the day-to-day `revision --autogenerate`/`upgrade head` workflow.
+- `migrate_to_multitenant.py` (repo root) through `migrate_add_tenant_icon_and_branding.py` (`app/`) — **historical only**, superseded by `app/alembic/` above; kept in the repo as a record of what already happened, never run again. 10 one-time hand-written scripts (this repo never actually used Alembic despite it being a listed dependency, until the baseline revision above), each predating a specific spec section: `migrate_to_multitenant.py` (Kingdom/Tenant model), `migrate_add_announcement_recurring.py` (`leadership_only`/`recurring`/`interval_days` on `announcements`), `migrate_add_event_targets.py` (spec §20, `event_targets` table), `migrate_add_viewer_role.py` (spec §31, widens `ck_user_tenant_role`/`ck_invite_role`), `migrate_add_event_cover_image.py` (spec §35, `event_definitions.cover_image_data`), `migrate_add_announcement_scope.py` (spec §49, `announcements.scope`), `migrate_add_tickets.py` (spec §40-43, `tickets`/`ticket_votes`), `migrate_add_discord_servers.py` (spec §25, `discord_servers` table + `tenants.server_id`), `migrate_add_announcement_templates.py` (spec §27, `announcement_templates` + `announcements.event_offset_minutes`), `migrate_add_tenant_icon_and_branding.py` (spec §38, `tenants.icon_image_data` + `kingdoms.public_site_title`/`admin_console_title`).
+- `.github/workflows/ci.yml` (spec §30) — runs `pytest` (in-memory SQLite, no Postgres service needed), `eslint`, and (Phase 1 audit remediation) an `alembic-baseline` job against a real `postgres:16-alpine` service container: `alembic upgrade head` then `alembic check`, so a model change with no matching migration fails CI instead of only surfacing at deploy time — the pytest job's SQLite database never touches Alembic at all, so nothing else would have caught this. All three run on every push/PR to `master`. Doesn't replace this repo's own commit/diff/worktree-verify patch practice — it's a second, automatic check once a patch actually lands
 - `ops/backup.sh` (spec §30) — nightly Postgres backup via `docker compose exec db pg_dump`, gzipped, rotated at 14 days. Runs on the LXC host, not in the `app` container (which has no `pg_dump`). Needs a one-time `crontab` install on `lxc-taraka` — see the script's own header comment for the exact line
 
 ## `app/main.py`
@@ -31,11 +23,16 @@ added, removed, or renamed — not on every logic change inside a file.
 FastAPI app entrypoint. Owns: the startup check (`SECRET_KEY` + Discord OAuth
 credentials must be set — the app refuses to boot without them, the same
 fail-closed posture the old `ADMIN_API_KEY` check used before Phase 4 replaced
-it with real sessions), the `lifespan` context (creates tables, runs a catch-up
-regeneration per tenant if overdue, starts APScheduler's four jobs), the
-validation-error handler, and wiring all routers/static mount together. Touch
-this for startup/shutdown behavior or to add a new top-level router — not for
-route logic itself.
+it with real sessions), the `lifespan` context (runs a catch-up regeneration
+per tenant if overdue, starts APScheduler's four jobs), the validation-error
+handler, and wiring all routers/static mount together. Touch this for
+startup/shutdown behavior or to add a new top-level router — not for route
+logic itself. `lifespan` no longer calls `Base.metadata.create_all()` on
+every boot (audit remediation, Phase 1) — schema creation/changes are
+`app/alembic/`'s job now, run as a deploy step (`alembic upgrade head`),
+not something to paper over silently at startup. `tests/conftest.py` still
+calls `create_all()` directly against its own in-memory SQLite engine,
+independent of this.
 
 ## `app/routers/` — HTTP layer
 

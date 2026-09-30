@@ -12,8 +12,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from models import engine
-from models.db import Base
 from models import AsyncSessionLocal
 from scheduler.regeneration import regenerate_occurrences
 from scheduler.reminders import send_pre_event_reminders
@@ -47,8 +45,20 @@ if not os.environ.get("DISCORD_OAUTH_CLIENT_ID") or not os.environ.get("DISCORD_
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Schema creation/changes are Alembic's job now (see alembic/versions/
+    # 6fc935931248_baseline_schema_as_of_spec_62.py) — `alembic upgrade
+    # head` runs as its own deploy step before the app starts, not here.
+    # This used to call Base.metadata.create_all() on every boot, which
+    # only ever creates a table that's entirely missing; it silently did
+    # nothing for every ALTER-shaped schema change (a new column, a widened
+    # CHECK constraint), which is why every one of those needed its own
+    # hand-run migrate_*.py script in the first place. Removing it doesn't
+    # change what already exists in production — it just stops boot from
+    # quietly papering over a schema that's actually out of date.
+    #
+    # tests/conftest.py still calls Base.metadata.create_all() directly
+    # against its own in-memory SQLite engine — that's independent of this
+    # lifespan and unaffected by this change.
 
     # SchedulerState rows are now per-tenant (tenant_id, job_name), created
     # lazily by scheduler.jobs._update_state on each tenant's first run —

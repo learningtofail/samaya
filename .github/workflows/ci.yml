@@ -37,3 +37,37 @@ jobs:
           node-version: "20"
       - run: npm ci
       - run: npm run lint
+
+  alembic-baseline:
+    # Verifies app/alembic/versions/ actually applies cleanly against a real
+    # Postgres and stays in sync with models/db.py — the in-memory-SQLite
+    # pytest job above never touches Alembic at all, so this is the only
+    # thing that would catch "someone changed a model but forgot to add a
+    # migration" before it reaches production.
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: kingshot_scheduler
+          POSTGRES_USER: taraka
+          POSTGRES_PASSWORD: ci_only_password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U taraka -d kingshot_scheduler"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: app
+    env:
+      DATABASE_URL: postgresql+asyncpg://taraka:ci_only_password@localhost:5432/kingshot_scheduler
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install --no-cache-dir -r requirements.txt
+      - run: alembic upgrade head
+      - run: alembic check   # fails if models/db.py drifted from the migrations
