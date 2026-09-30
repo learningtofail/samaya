@@ -175,6 +175,23 @@ const GANTT_PALETTE = ['#bbf7d0','#bfdbfe','#fed7aa','#fde68a','#e9d5ff','#99f6e
 const DOW3 = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 let occurrenceData = [];
 
+// The last list loaded by loadAnnouncements() (announcements.js) —
+// duplicateAnnouncement() reads from this instead of a second GET, since
+// the row it's duplicating is already sitting in front of the user.
+// schedule.js's loadSchedule() also reassigns this directly (rather than
+// keeping a Schedule-local cache) so editAnnouncement()/duplicateAnnouncement()
+// stay in sync regardless of which tab last fetched. Declared here, in the
+// first-loaded file, rather than in announcements.js: admin.html loads
+// schedule.js before announcements.js, and a `let` declared later in load
+// order isn't in scope yet for an earlier file's top-level code — this
+// only happened not to matter because schedule.js's own reference is
+// inside a function, called well after every script has finished loading.
+let ANNOUNCEMENTS = [];
+
+// Same pattern for Announcement Templates (spec §27) — useTemplate() and
+// editTemplate() (announcements.js) read from this instead of a second GET.
+let ANNOUNCEMENT_TEMPLATES = [];
+
 // ── Display time zone (spec §15) ────────────────────────────
 // Governs the "local" half of every dual-time display (dualTimeString/
 // fmtTime/fmtDateTime in events.js) across the whole admin UI — global,

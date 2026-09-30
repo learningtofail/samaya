@@ -12,7 +12,8 @@
 // ANNOUNCEMENTS cache (rather than a Schedule-local one) so editAnnouncement/
 // cancelAnnouncement/deleteAnnouncement work identically whether opened from
 // here or from the Announcements tab itself, even if that tab was never
-// visited this session.
+// visited this session. The cache itself is declared in common.js, not
+// announcements.js — see that declaration's comment.
 
 async function loadSchedule() {
   renderAllianceFilterSelect('scheduleFilter', 'schedule', loadSchedule);

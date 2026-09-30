@@ -351,14 +351,9 @@ async function renderComposerPreview({
   `;
 }
 
-// The last list loaded by loadAnnouncements() — duplicateAnnouncement()
-// reads from this instead of a second GET, since the row it's duplicating
-// is already sitting in front of the user.
-let ANNOUNCEMENTS = [];
-
-// Same pattern for Announcement Templates (spec §27) — useTemplate() and
-// editTemplate() read from this instead of a second GET.
-let ANNOUNCEMENT_TEMPLATES = [];
+// ANNOUNCEMENTS / ANNOUNCEMENT_TEMPLATES are declared in common.js (the
+// first-loaded file) rather than here — see that declaration's comment for
+// why a script-load-order hazard made this file the wrong place for them.
 
 async function loadAnnouncementTemplates() {
   try {
