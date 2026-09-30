@@ -26,6 +26,7 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install --no-cache-dir -r requirements-dev.txt
+      - run: ruff check .   # audit remediation, Phase 5 — config/ignores in the repo-root pyproject.toml
       - run: pytest -q
 
   frontend:
@@ -41,6 +42,69 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
+
+  docker-build:
+    # Audit remediation, Phase 5 — proves app/Dockerfile still builds and
+    # actually boots on every push/PR. Before this, a change that broke the
+    # image (a typo in requirements.txt, a COPY path that stopped matching,
+    # the app failing main.py's own startup check inside the container) was
+    # only caught manually at deploy time on lxc-taraka, after the fact.
+    # Needs a real Postgres — main.py's lifespan no longer creates tables
+    # itself (Phase 1: that's Alembic's job now), and the production image
+    # only ever installs requirements.txt, which has no sqlite driver — so
+    # this runs `alembic upgrade head` against a real postgres:16-alpine
+    # service first, then boots the actual built image against it with
+    # --network host (the only way a plain `docker run` container can reach
+    # a GitHub Actions service container's mapped port). This does not push
+    # the image anywhere or replace the actual deploy step.
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: kingshot_scheduler
+          POSTGRES_USER: taraka
+          POSTGRES_PASSWORD: ci_only_password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U taraka -d kingshot_scheduler"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+asyncpg://taraka:ci_only_password@localhost:5432/kingshot_scheduler
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install --no-cache-dir -r app/requirements.txt
+      - run: cd app && alembic upgrade head
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: false
+          load: true
+          tags: samaya-ci:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke-test the built image
+        run: |
+          docker run -d --name samaya-ci --network host \
+            -e SECRET_KEY=ci-only-secret \
+            -e DISCORD_OAUTH_CLIENT_ID=ci-client-id \
+            -e DISCORD_OAUTH_CLIENT_SECRET=ci-client-secret \
+            -e DISCORD_OAUTH_REDIRECT_URI=http://localhost:8000/auth/callback \
+            -e DATABASE_URL="$DATABASE_URL" \
+            samaya-ci:latest
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:8000/api/kingdom-branding >/dev/null 2>&1; then
+              echo "Container is up and responding."; exit 0
+            fi
+            sleep 2
+          done
+          echo "Container never became healthy:"; docker logs samaya-ci; exit 1
 
   alembic-baseline:
     # Verifies app/alembic/versions/ actually applies cleanly against a real

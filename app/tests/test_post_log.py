@@ -6,7 +6,6 @@ because this endpoint's path had no test exercising it end to end.
 """
 from datetime import date, datetime, timezone
 
-import pytest
 from httpx import AsyncClient
 
 from models.db import PostLog

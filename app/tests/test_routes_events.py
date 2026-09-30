@@ -2,7 +2,6 @@
 Integration tests for /admin/api/events endpoints.
 Uses the test database via the client fixture from conftest.py.
 """
-import pytest
 from httpx import AsyncClient
 
 
@@ -223,7 +222,7 @@ class TestScopeField:
         """Kingdom-wide events owned by another tenant in the same Kingdom
         are visible (read-only) — see routers/admin/events.py's docstring."""
         client.headers["X-Tenant-Slug"] = second_tenant["slug"]
-        kw_event = await create_event(client, {"scope": "kingdom-wide", "name": "NSR-created Kingdom Event"})
+        await create_event(client, {"scope": "kingdom-wide", "name": "NSR-created Kingdom Event"})
         client.headers["X-Tenant-Slug"] = "mod"
 
         r = await client.get("/admin/api/events")

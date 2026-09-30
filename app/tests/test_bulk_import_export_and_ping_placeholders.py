@@ -7,7 +7,6 @@ extra line.
 from datetime import date, datetime, time, timedelta, timezone
 
 from httpx import AsyncClient
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.db import EventDefinition, Occurrence

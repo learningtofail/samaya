@@ -75,7 +75,7 @@ class TestEventTargetsApi:
         await coordinator.aclose()
 
     async def test_patch_replaces_target_list(self, client: AsyncClient, tenant: dict, db_session: AsyncSession):
-        htd = await _third_tenant(db_session)
+        await _third_tenant(db_session)
         create = await client.post("/admin/api/events", json={
             "name": "Replaceable", "interval_days": 7, "start_time_utc": "19:00",
             "duration_hours": 1.0, "anchor_date": str(date.today()),
@@ -154,7 +154,7 @@ class TestEventTargetsPosting:
         assert {t["status"] for t in body["targets"]} == {"posted"}
 
         logs = (await db_session.execute(select(PostLog))).scalars().all()
-        assert {l.tenant_id for l in logs} == {tenant["id"], htd["id"]}
+        assert {log.tenant_id for log in logs} == {tenant["id"], htd["id"]}
         assert set(pinged) == {"mod-chan", "htd-chan"}
 
     async def test_kingdom_wide_target_already_in_kingdom_is_not_double_posted(
@@ -197,7 +197,7 @@ class TestEventTargetsPosting:
 
         logs = (await db_session.execute(select(PostLog))).scalars().all()
         assert len(logs) == 2
-        assert {l.tenant_id for l in logs} == {tenant["id"], second_tenant["id"]}
+        assert {log.tenant_id for log in logs} == {tenant["id"], second_tenant["id"]}
 
     async def test_target_outside_kingdom_gets_its_own_notification(
         self, client: AsyncClient, db_session: AsyncSession, tenant: dict, monkeypatch

@@ -23,9 +23,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models import get_db
 from services.static_assets import bust_static_cache
 from models.db import Announcement, Occurrence, Tenant, Ticket, TicketVote
+from services.rate_limit import RateLimiter
 from services.sessions import SECRET_KEY
 
 router = APIRouter()
+
+# Audit remediation, Phase 5 — see services/rate_limit.py's own docstring.
+# The write endpoints get the tight limits (this board has no CAPTCHA or
+# any other anti-spam layer); the listing gets a generous one mainly to
+# cap a runaway client/script rather than to constrain a real visitor —
+# feedback.js only ever fetches it once per page load, no polling.
+_create_ticket_limit = RateLimiter("create_ticket", max_requests=5, window_seconds=600)
+_vote_ticket_limit = RateLimiter("vote_ticket", max_requests=30, window_seconds=600)
+_list_tickets_limit = RateLimiter("list_tickets", max_requests=60, window_seconds=60)
 
 _TITLE_MAX = 120
 _DESCRIPTION_MAX = 2000  # same ceiling Announcement.body_markdown uses, spec §40
@@ -102,7 +112,9 @@ def _ticket_public_dict(t: Ticket, tenant_by_id: dict, occ_by_id: dict, ann_by_i
 
 
 @router.get("/api/tickets")
-async def list_tickets(x_voter_id: str = Header(default=""), db: AsyncSession = Depends(get_db)):
+async def list_tickets(
+    x_voter_id: str = Header(default=""), db: AsyncSession = Depends(get_db), _rl: None = Depends(_list_tickets_limit)
+):
     """Public board listing (spec §43.3) — every non-declined ticket,
     sorted by upvote_count descending. No submitter_contact anywhere in
     this response shape."""
@@ -149,7 +161,7 @@ async def list_tickets(x_voter_id: str = Header(default=""), db: AsyncSession = 
 
 
 @router.post("/api/tickets")
-async def create_ticket(payload: TicketIn, db: AsyncSession = Depends(get_db)):
+async def create_ticket(payload: TicketIn, db: AsyncSession = Depends(get_db), _rl: None = Depends(_create_ticket_limit)):
     tenant_id = None
     if payload.tenant_slug:
         result = await db.execute(select(Tenant).where(Tenant.slug == payload.tenant_slug))
@@ -198,7 +210,12 @@ async def create_ticket(payload: TicketIn, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/api/tickets/{ticket_id}/vote")
-async def vote_ticket(ticket_id: int, x_voter_id: str = Header(default=""), db: AsyncSession = Depends(get_db)):
+async def vote_ticket(
+    ticket_id: int,
+    x_voter_id: str = Header(default=""),
+    db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(_vote_ticket_limit),
+):
     """Spec §43.2 — a toggle, not an accumulator: voting again for the
     same (ticket, voter) pair removes the earlier vote instead of adding
     a second one."""

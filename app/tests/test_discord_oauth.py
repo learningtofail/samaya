@@ -9,7 +9,6 @@ test. Follows the same monkeypatch-httpx.AsyncClient-directly style
 test_event_cover_image.py's TestDiscordApiImageField uses.
 """
 import httpx
-import pytest
 
 from services.discord_oauth import (
     build_authorize_url,

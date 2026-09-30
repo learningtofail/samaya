@@ -6,3 +6,7 @@
 pytest>=9.1
 pytest-asyncio>=0.24
 aiosqlite>=0.19
+
+# Lint only (audit remediation, Phase 5) — config lives in the repo root's
+# pyproject.toml, including the codebase's own documented rule ignores.
+ruff>=0.15

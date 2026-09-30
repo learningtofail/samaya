@@ -25,7 +25,7 @@ from services.discord_posting import (
 )
 from services.time_utils import ensure_utc
 
-from .deps import get_current_tenant, get_current_tenants, get_occurrence_with_event, require_not_viewer
+from .deps import get_current_tenants, get_occurrence_with_event, require_not_viewer
 from .schemas import OccurrencePatch
 from .serializers import _occurrence_dict
 

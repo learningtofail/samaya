@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse
 # (previously everything there was inline, so only this admin shell needed
 # cache-busting at all). Re-exported under their original names here so
 # nothing importing from this module (see tests/test_ui.py) needed to change.
-from services.static_assets import STATIC_ASSET_VERSION, bust_static_cache as _bust_static_cache
+from services.static_assets import STATIC_ASSET_VERSION, bust_static_cache as _bust_static_cache  # noqa: F401 — deliberate re-export, see comment above
 
 router = APIRouter()
 

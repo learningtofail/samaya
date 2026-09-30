@@ -3,7 +3,6 @@ Tests for EventIn Pydantic validation.
 All bad inputs should return 422 with a readable detail message.
 All good inputs should return 201.
 """
-import pytest
 from httpx import AsyncClient
 
 

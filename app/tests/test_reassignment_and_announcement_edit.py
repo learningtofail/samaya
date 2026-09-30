@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from models.db import Announcement, DiscordServer, EventDefinition, Tenant
+from models.db import Announcement, Tenant
 
 
 def _future_iso(minutes=60):

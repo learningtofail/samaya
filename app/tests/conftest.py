@@ -16,8 +16,14 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production")
 os.environ.setdefault("DISCORD_OAUTH_CLIENT_ID", "test-client-id")
 os.environ.setdefault("DISCORD_OAUTH_CLIENT_SECRET", "test-client-secret")
 os.environ.setdefault("DISCORD_OAUTH_REDIRECT_URI", "http://test/auth/discord/callback")
+# services/rate_limit.py's in-memory hit counters are module-level and
+# persist for the whole pytest process — without this, business-logic
+# tests that legitimately POST /api/tickets or vote several times across
+# the suite could eventually trip a limit meant for real anonymous abuse.
+# tests/test_rate_limit.py flips this back on to test the real enforcement
+# logic directly, bypassing the app.
+os.environ.setdefault("SAMAYA_DISABLE_RATE_LIMIT", "1")
 
-import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine

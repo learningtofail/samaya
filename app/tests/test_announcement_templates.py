@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from models.db import Announcement, AnnouncementTemplate
+from models.db import Announcement
 from scheduler.announcements import send_scheduled_announcements
 
 

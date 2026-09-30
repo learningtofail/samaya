@@ -12,6 +12,33 @@ from datetime import date, datetime, time, timedelta, timezone
 
 
 @pytest.mark.asyncio
+class TestCreateTicketRateLimiting:
+    """Integration-level proof that services/rate_limit.py's RateLimiter
+    is actually wired into POST /api/tickets through the real ASGI stack,
+    not just correct in isolation (see tests/test_rate_limit.py for the
+    limiter's own unit tests). SAMAYA_DISABLE_RATE_LIMIT=1 (set in
+    conftest.py) would otherwise make this endpoint never enforce a limit
+    at all under the `client` fixture — flip it back on for this one test
+    via the same RateLimiter instance the router constructed."""
+
+    async def test_exceeding_the_limit_returns_429(self, client, monkeypatch):
+        import routers.tickets_public as tickets_public
+        monkeypatch.setattr(tickets_public._create_ticket_limit, "max_requests", 2)
+        monkeypatch.setattr("services.rate_limit.DISABLED", False)
+
+        def _payload(n):
+            return {"kind": "feedback", "title": f"Ticket {n}", "description": "Some description text."}
+
+        r1 = await client.post("/api/tickets", json=_payload(1))
+        r2 = await client.post("/api/tickets", json=_payload(2))
+        r3 = await client.post("/api/tickets", json=_payload(3))
+
+        assert r1.status_code == 201
+        assert r2.status_code == 201
+        assert r3.status_code == 429
+
+
+@pytest.mark.asyncio
 class TestPublicTicketCreation:
     async def test_create_feedback_ticket(self, client):
         r = await client.post("/api/tickets", json={

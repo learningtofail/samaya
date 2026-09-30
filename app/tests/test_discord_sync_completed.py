@@ -14,10 +14,9 @@ routers/admin/discord_sync.py, so the patch target is the defining module,
 not the importer) to simulate "Discord no longer lists this event" without
 any real network call.
 """
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from httpx import AsyncClient
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.db import EventDefinition, PostLog

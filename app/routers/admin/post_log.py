@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models import get_db
 from models.db import EventDefinition, PostLog, Tenant
 
-from .deps import get_current_tenant, get_current_tenants
+from .deps import get_current_tenants
 from .serializers import _log_dict
 
 router = APIRouter()
@@ -30,7 +30,7 @@ async def get_post_log(
         .order_by(PostLog.occurrence_date.desc(), PostLog.posted_at_utc.desc())
         .limit(limit).offset(offset)
     )
-    return [_log_dict(l, ev) for l, ev in result.all()]
+    return [_log_dict(log, ev) for log, ev in result.all()]
 
 
 @router.get("/api/post-log/export.csv")
@@ -44,8 +44,8 @@ async def export_post_log(
     logs = result.scalars().all()
     def generate():
         yield "Event Name,Date,Discord Event ID,Posted At (UTC),Posted By,Status\n"
-        for l in logs:
-            yield f'"{l.event_name}","{l.occurrence_date}","{l.discord_event_id or ""}","{l.posted_at_utc or ""}","{l.posted_by}","{l.status}"\n'
+        for log in logs:
+            yield f'"{log.event_name}","{log.occurrence_date}","{log.discord_event_id or ""}","{log.posted_at_utc or ""}","{log.posted_by}","{log.status}"\n'
     return StreamingResponse(
         generate(),
         media_type="text/csv",

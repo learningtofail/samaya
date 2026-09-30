@@ -84,6 +84,12 @@ why upgrading instead of stamping would fail outright (it would try to
 
 A fresh install (no existing database) runs `alembic upgrade head` normally.
 
+## Rollback
+
+See [`docs/rollback-runbook.md`](docs/rollback-runbook.md) — code-only
+rollback, rolling back a migration (and when that's actually safe), and
+restoring from `ops/backup.sh`'s nightly dump.
+
 ## Running Tests
 
     pip install -r app/requirements-dev.txt

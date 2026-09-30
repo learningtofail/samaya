@@ -15,7 +15,7 @@ from models.db import Announcement, AnnouncementTarget, Tenant, User
 from services.audit import log_change
 
 from .deps import (
-    check_kingdom_coordinator, get_current_tenant, get_current_tenants, require_not_viewer,
+    check_kingdom_coordinator, get_current_tenants, require_not_viewer,
     get_current_user, resolve_target_tenants,
 )
 from .schemas import AnnouncementIn, AnnouncementPatch

@@ -6,7 +6,6 @@ These are pure functions with no I/O. They should be fast and exhaustive.
 """
 from datetime import date, timedelta
 
-import pytest
 
 from services.recurrence import (
     does_occur_on,
@@ -205,7 +204,7 @@ class TestBuildStartDatetime:
     from datetime import time as dtime
 
     def test_combines_date_and_time(self):
-        from datetime import time as dtime, timezone
+        from datetime import time as dtime
         occ_date = date(2025, 5, 1)
         t = dtime(19, 0)
         result = build_start_datetime(occ_date, t)
@@ -216,7 +215,7 @@ class TestBuildStartDatetime:
         assert result.minute == 0
 
     def test_result_is_utc_aware(self):
-        from datetime import time as dtime, timezone
+        from datetime import time as dtime
         result = build_start_datetime(date(2025, 5, 1), dtime(0, 0))
         assert result.tzinfo is not None
         assert result.utcoffset().total_seconds() == 0

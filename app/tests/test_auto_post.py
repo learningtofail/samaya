@@ -10,7 +10,6 @@ same convention as test_post_occurrence.py.
 """
 from datetime import date, datetime, time, timedelta, timezone
 
-import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 

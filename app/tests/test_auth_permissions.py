@@ -3,7 +3,6 @@ non-superadmin users with specific grants so these tests actually
 exercise the checks in routers/admin/deps.py rather than skating past
 them the way the superadmin default in `client` would.
 """
-import pytest
 
 
 class TestNoSession:

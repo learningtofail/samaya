@@ -36,7 +36,6 @@ def next_occurrences(
 ) -> list[date]:
     """Return the next N occurrence dates from from_date."""
     results = []
-    d = from_date
     max_days = interval_days * count + 60
     for i in range(max_days):
         candidate = from_date + timedelta(days=i)

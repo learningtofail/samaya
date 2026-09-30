@@ -1,12 +1,12 @@
 """Tests for spec §38: cross-alliance admin views, Tenant icon images,
 Kingdom branding titles, and the public last-activity endpoints.
 """
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.db import Announcement, AnnouncementTarget, EventDefinition, Occurrence, PostLog
+from models.db import Announcement, AnnouncementTarget, PostLog
 
 TINY_PNG_DATA_URI = (
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQV"

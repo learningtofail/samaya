@@ -8,7 +8,6 @@ call pattern exists to close (two simultaneous posts of the same occurrence
 should not both succeed, and should not leave an orphaned Discord event with
 no PostLog row).
 """
-import asyncio
 from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
@@ -195,8 +194,8 @@ class TestKingdomWidePost:
         # One independent PostLog row per tenant, not one shared row
         logs = (await db_session.execute(select(PostLog))).scalars().all()
         assert len(logs) == 2
-        assert {l.tenant_id for l in logs} == {tenant["id"], second_tenant["id"]}
-        assert all(l.status == "posted" for l in logs)
+        assert {log.tenant_id for log in logs} == {tenant["id"], second_tenant["id"]}
+        assert all(log.status == "posted" for log in logs)
         assert sorted(calls) == sorted(["test-guild-mod", "test-guild-nsr"])
 
     async def test_kingdom_wide_post_one_tenant_failing_does_not_block_the_other(
@@ -237,7 +236,7 @@ class TestKingdomWidePost:
         assert by_slug["mod"]["status"] == "posted"
         assert by_slug["nsr"]["status"] == "error"
 
-        logs = {l.tenant_id: l for l in (await db_session.execute(select(PostLog))).scalars().all()}
+        logs = {log.tenant_id: log for log in (await db_session.execute(select(PostLog))).scalars().all()}
         assert logs[tenant["id"]].status == "posted"
         assert logs[second_tenant["id"]].status == "error"
 
@@ -278,7 +277,7 @@ class TestKingdomWidePost:
         r = await client.delete(f"/admin/api/occurrences/{occ.id}/discord")
         assert r.status_code == 200, r.text
 
-        logs = {l.tenant_id: l for l in (await db_session.execute(select(PostLog))).scalars().all()}
+        logs = {log.tenant_id: log for log in (await db_session.execute(select(PostLog))).scalars().all()}
         assert logs[second_tenant["id"]].status == "cancelled"
         assert logs[tenant["id"]].status == "posted"  # MOD's own copy untouched
 
@@ -341,9 +340,9 @@ class TestSharedDiscordServerDedup:
         # Sibling share a guild, so that guild is only ever created once.
         assert sorted(calls) == sorted(["test-guild-mod", "test-guild-nsr"])
 
-        logs = {l.tenant_id: l for l in (await db_session.execute(select(PostLog))).scalars().all()}
+        logs = {log.tenant_id: log for log in (await db_session.execute(select(PostLog))).scalars().all()}
         assert len(logs) == 3
-        assert all(l.status == "posted" for l in logs.values())
+        assert all(log.status == "posted" for log in logs.values())
         # MOD and Sibling share the same discord_event_id (one real event);
         # NSR, on its own server, gets its own.
         assert logs[tenant["id"]].discord_event_id == logs[sibling_id].discord_event_id

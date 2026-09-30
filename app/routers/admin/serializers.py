@@ -68,20 +68,20 @@ def _occurrence_dict(occ: Occurrence, ev: EventDefinition) -> dict:
         "cover_image_data":   ev.cover_image_data or None,
     }
 
-def _log_dict(l: PostLog, ev: EventDefinition | None = None) -> dict:
+def _log_dict(log: PostLog, ev: EventDefinition | None = None) -> dict:
     today = date.today()
-    diff  = (l.occurrence_date - today).days
+    diff  = (log.occurrence_date - today).days
     timing = "Today" if diff == 0 else (f"In {diff} days" if diff > 0 else f"{abs(diff)} days ago")
     return {
-        "id":               l.id,
-        "tenant_id":        l.tenant_id,
-        "event_name":       l.event_name,
-        "occurrence_date":  str(l.occurrence_date),
-        "discord_event_id": l.discord_event_id,
-        "posted_at_utc":    l.posted_at_utc.isoformat() if l.posted_at_utc else None,
-        "posted_by":        l.posted_by,
-        "status":           l.status,
-        "status_detail":    l.status_detail,
+        "id":               log.id,
+        "tenant_id":        log.tenant_id,
+        "event_name":       log.event_name,
+        "occurrence_date":  str(log.occurrence_date),
+        "discord_event_id": log.discord_event_id,
+        "posted_at_utc":    log.posted_at_utc.isoformat() if log.posted_at_utc else None,
+        "posted_by":        log.posted_by,
+        "status":           log.status,
+        "status_detail":    log.status_detail,
         "timing":           timing,
         "scope":            ev.scope if ev else None,
         "leadership_only":  ev.leadership_only if ev else False,

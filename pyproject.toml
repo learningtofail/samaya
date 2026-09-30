@@ -1,0 +1,28 @@
+[tool.ruff]
+line-length = 160
+
+[tool.ruff.lint]
+# Default select (E, F) plus the codebase's own conventions accounted for
+# below — see CLAUDE.md's "Conventions worth knowing before editing" for
+# the repo-wide context these three ignores are pulled from.
+ignore = [
+    # E711/E712 ("== None"/"== True"/"== False"): required SQLAlchemy 2.0
+    # ORM filter syntax, not a style slip. `Model.column is not None` does
+    # NOT work in a .where()/.filter() clause — `is`/`is not` can't be
+    # overloaded in Python, so SQLAlchemy's InstrumentedAttribute relies on
+    # `==`/`!=` to build the SQL expression. Every flagged site (routers/
+    # events.py, routers/ics.py, scheduler/regeneration.py,
+    # scheduler/reminders.py) is a .where()/.filter() clause, confirmed by
+    # hand before adding this ignore rather than assumed.
+    "E711",
+    "E712",
+    # E701 (multiple statements on one line via `:`, e.g. `if x: return y`):
+    # a deliberate, pervasive style choice across this codebase (guard
+    # clauses, short branches) predating Ruff's adoption here. Enforcing it
+    # now would mean rewriting ~35 call sites across routers/, services/,
+    # and scheduler/ purely for style with zero behavior change — out of
+    # proportion for a pre-beta audit-remediation pass. Revisit if the
+    # project ever adopts a formatter (Black/Ruff format) that would
+    # rewrite these mechanically instead of by hand.
+    "E701",
+]

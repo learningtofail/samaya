@@ -19,7 +19,7 @@ from models.db import EventDefinition, PostLog, Tenant
 from services.discord_api import update_discord_event
 from services.discord_posting import PLATFORM_BOT_TOKEN, find_post_log
 
-from .deps import get_current_tenant, get_current_tenants, get_occurrence_with_event, require_not_viewer
+from .deps import get_current_tenants, get_occurrence_with_event, require_not_viewer
 
 router = APIRouter()
 
@@ -289,7 +289,7 @@ async def acknowledge_discord_event(
         await db.rollback()
         raise HTTPException(status_code=409, detail=f"Could not acknowledge: {str(e)}")
 
-    return {"status": "ok", "message": f"Event acknowledged and added to PostLog"}
+    return {"status": "ok", "message": "Event acknowledged and added to PostLog"}
 
 
 @router.post("/api/sync/push-by-log/{post_log_id}")

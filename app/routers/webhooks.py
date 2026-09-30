@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import os
 from datetime import datetime, timezone
@@ -27,7 +26,6 @@ PLATFORM_PUBLIC_KEY = os.environ.get("PLATFORM_PUBLIC_KEY", "")
 def verify_signature(public_key: str, signature: str, timestamp: str, body: bytes) -> bool:
     try:
         from nacl.signing import VerifyKey
-        from nacl.exceptions import BadSignatureError
         vk = VerifyKey(bytes.fromhex(public_key))
         vk.verify(timestamp.encode() + body, bytes.fromhex(signature))
         return True

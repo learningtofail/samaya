@@ -4,7 +4,6 @@ delivery job's independent per-target success/failure, and cancellation.
 """
 from datetime import datetime, timedelta, timezone
 
-import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker

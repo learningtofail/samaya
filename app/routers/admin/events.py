@@ -434,7 +434,8 @@ async def export_events_csv(
         writer.writerow(_BULK_EVENT_COLUMNS)
         yield buf.getvalue()
         for e in events:
-            buf.seek(0); buf.truncate(0)
+            buf.seek(0)
+            buf.truncate(0)
             writer.writerow([
                 e.name, e.interval_days, e.start_time_utc.strftime("%H:%M"),
                 str(e.duration_hours), e.discord_channel, e.description,
