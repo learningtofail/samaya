@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.29.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.30.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -1240,3 +1240,18 @@ Both dropdowns are built from the same `calendarMenuHtml()` so the two locations
 
 - Any server-side change — the underlying `/ics/events.ics` feed itself is unchanged; this is a client-side presentation fix only.
 - A native in-app "Add to Calendar" prompt (e.g. detecting the visitor's platform and only showing the one relevant option) — showing all four and letting the visitor pick was judged simpler and more robust than platform-sniffing, which is unreliable and would still need a fallback anyway.
+
+## 56. Grouped Announcement Rows in the Combined View
+
+**Status:** Implemented.
+
+**Problem.** `GET /api/events` (the combined, all-alliances view) intentionally returns one row per `(announcement, target tenant)` — a kingdom-wide announcement sent to every alliance is genuinely that many independent Discord posts, mirroring `PostLog`'s own per-tenant fan-out for events (see §37's addendum and `routers/events.py`'s own comments). Unlike a kingdom-wide *event*, which is a single `Occurrence` row and only ever shows once, an announcement with several targets rendered as several back-to-back cards with identical titles, times and bodies, distinguished only by a small alliance badge — in practice this read as accidental duplication (reported against `https://ks138.taraka.dev/events`, the "All Alliances" view).
+
+**Fix.** Client-side only, in `events.html`. `groupCombinedAnnouncements()` runs once on the fetched rows (right after `loadEvents()`'s `fetch(API_URL)`, before either the list or the calendar view renders from `EVENTS_DATA`) and collapses every announcement row sharing the same `id` — an announcement's own `Announcement.id` is identical across all of its `AnnouncementTarget` fan-out rows in the combined payload — into a single card carrying a `targets: [{tenant_name, tenant_slug, tenant_color, notification_channel_name}, ...]` array. `tenantBadge()` renders one badge per entry in `targets` when present, instead of the single `tenant_name`/`tenant_slug`/`tenant_color` every other row still carries directly. The Discord preview modal (`openDiscordPreview`) adds a note when a grouped announcement has more than one target, naming every alliance it actually went to and clarifying that the preview's `{alliance_name}` substitution uses only the first one — each alliance's real post resolves its own name/channel independently at delivery time (§27), so a single client-side preview can't show all of them simultaneously.
+
+Only the combined view is affected (`COMBINED_MODE` gate, same as `tenantBadge()`'s existing one) — a single alliance's own `/t/{slug}/events` page only ever sees its own targets, one row per announcement already, nothing to group.
+
+### Out of Scope
+
+- Any change to the API response shape or the per-tenant fan-out data model itself — `GET /api/events` still returns one row per target; grouping is purely a presentation step in the client.
+- Per-alliance detail inside the grouped card (e.g. showing each alliance's own delivery status individually) — the card shows one shared `post_status`/badge from whichever target row happened to be first; a target-by-target breakdown would need real UI work this pass didn't scope in.

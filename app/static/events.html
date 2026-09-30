@@ -810,6 +810,13 @@ function scopeBadge(scope) {
   return `<span class="pf-v6-c-label pf-m-purple pf-m-filled" title="Every alliance in this Kingdom plays this together"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">🌐 Kingdom-wide</span></span></span>`;
 }
 
+function _oneTenantBadge(name, slug, color) {
+  const alliance = ALLIANCES.find(a => a.slug === slug);
+  const icon = alliance && alliance.icon_image_data
+    ? `<img class="samaya-tenant-icon" src="${escapeHtml(alliance.icon_image_data)}" alt="">` : '';
+  return `<span class="pf-v6-c-label pf-m-filled pf-m-custom" style="--pf-v6-c-label--m-custom--BackgroundColor:${escapeHtml(color || '#6a6e73')};--pf-v6-c-label--m-custom--Color:#fff"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${icon}${escapeHtml(name)}</span></span></span>`;
+}
+
 function tenantBadge(ev) {
   // Only shown in combined mode — on a single alliance's own page every
   // event is obviously that alliance's, so the badge would be noise.
@@ -819,12 +826,41 @@ function tenantBadge(ev) {
   // base --pf-v6-c-label--BackgroundColor/Color variables from
   // --pf-v6-c-label--m-custom--BackgroundColor/Color, which is exactly
   // what an inline style below can override with an arbitrary hex.
-  if (!COMBINED_MODE || !ev.tenant_name) return '';
-  const color = escapeHtml(ev.tenant_color || '#6a6e73');
-  const alliance = ALLIANCES.find(a => a.slug === ev.tenant_slug);
-  const icon = alliance && alliance.icon_image_data
-    ? `<img class="samaya-tenant-icon" src="${escapeHtml(alliance.icon_image_data)}" alt="">` : '';
-  return `<span class="pf-v6-c-label pf-m-filled pf-m-custom" style="--pf-v6-c-label--m-custom--BackgroundColor:${color};--pf-v6-c-label--m-custom--Color:#fff"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${icon}${escapeHtml(ev.tenant_name)}</span></span></span>`;
+  if (!COMBINED_MODE) return '';
+  // A multi-target announcement (groupCombinedAnnouncements below) carries
+  // one badge per alliance it was actually sent to, instead of the single
+  // tenant_name/tenant_slug/tenant_color every other row has.
+  if (ev.targets && ev.targets.length) {
+    return ev.targets.map(t => _oneTenantBadge(t.tenant_name, t.tenant_slug, t.tenant_color)).join('');
+  }
+  if (!ev.tenant_name) return '';
+  return _oneTenantBadge(ev.tenant_name, ev.tenant_slug, ev.tenant_color);
+}
+
+// Spec §54 addendum — the combined /api/events view intentionally returns
+// one row per (announcement, target tenant): a kingdom-wide announcement
+// sent to 3 alliances is 3 independent Discord posts (see routers/events.py's
+// own comment on this). Left ungrouped, that reads as accidental duplicate
+// cards with identical titles/times. This collapses those rows back into
+// one card per announcement, carrying every target alliance's badge, right
+// after the fetch — so both the list view and the calendar view (which both
+// read from EVENTS_DATA) get the fix for free. Events never need this: a
+// kingdom-wide Event is already a single Occurrence row, not a fan-out.
+function groupCombinedAnnouncements(events) {
+  if (!COMBINED_MODE) return events;
+  const grouped = [];
+  const indexByAnnouncementId = new Map();
+  events.forEach(ev => {
+    if (ev.kind !== 'announcement') { grouped.push(ev); return; }
+    const target = { tenant_name: ev.tenant_name, tenant_slug: ev.tenant_slug, tenant_color: ev.tenant_color, notification_channel_name: ev.notification_channel_name };
+    if (indexByAnnouncementId.has(ev.id)) {
+      grouped[indexByAnnouncementId.get(ev.id)].targets.push(target);
+      return;
+    }
+    indexByAnnouncementId.set(ev.id, grouped.length);
+    grouped.push({ ...ev, targets: [target] });
+  });
+  return grouped;
 }
 
 function weekLabel(dateStr) {
@@ -913,7 +949,7 @@ async function loadEvents() {
   try {
     const res    = await fetch(API_URL);
     const events = await res.json();
-    EVENTS_DATA = events;
+    EVENTS_DATA = groupCombinedAnnouncements(events);
 
     if (!events.length) {
       content.innerHTML = emptyState(
@@ -924,7 +960,7 @@ async function loadEvents() {
       const today = new Date().toISOString().slice(0, 10);
 
       const groups = new Map();
-      events.forEach(ev => {
+      EVENTS_DATA.forEach(ev => {
         const label = weekLabel(ev.occurrence_date);
         if (!groups.has(label)) groups.set(label, []);
         groups.get(label).push(ev);
@@ -1210,6 +1246,10 @@ function openDiscordPreview(ev) {
   const html = renderDiscordMarkdownPreview(resolved);
 
   if (isAnnouncement) {
+    const multiTarget = ev.targets && ev.targets.length > 1;
+    const sentToNote = multiTarget
+      ? `<p class="pf-v6-u-font-size-sm" style="color:var(--pf-t--global--text--color--subtle);margin-top:8px">Sent independently to ${ev.targets.map(t => escapeHtml(t.tenant_name)).join(', ')} — preview shown using ${escapeHtml(ev.targets[0].tenant_name)}'s own name; each alliance's actual post fills in its own name/channel.</p>`
+      : '';
     pane.innerHTML = `
       <div class="discord-preview-msg">
         <div class="discord-preview-avatar">S</div>
@@ -1220,7 +1260,7 @@ function openDiscordPreview(ev) {
           </div>
           <div class="discord-preview-text">${html}</div>
         </div>
-      </div>`;
+      </div>${sentToNote}`;
   } else {
     const eventStart = new Date(scheduledFor.getTime() + eventOffsetMinutes * 60000);
     pane.innerHTML = `
