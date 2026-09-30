@@ -1,8 +1,11 @@
 """Public, unauthenticated surface for the community feedback board (spec
 §40-43): submitting feedback/event-requests/announcement-requests/error
 reports, listing the public board, anonymous upvoting, and serving the
-standalone /feedback page — same trust level and same "no shared JS,
-own inline <script>" pattern as routers/events.py's events.html (§22).
+standalone /feedback page — same trust level as routers/events.py's
+events.html, and (since Phase 3 audit remediation moved feedback.html's
+former inline <style>/<script> into standalone feedback.css/feedback.js)
+the same "own external static assets, no shared JS/CSS with admin.html or
+events.html" pattern too (§22).
 
 Kept as its own router (not folded into routers/events.py) because the
 concern is genuinely different — a write-heavy, anonymous-submission
@@ -18,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
+from services.static_assets import bust_static_cache
 from models.db import Announcement, Occurrence, Tenant, Ticket, TicketVote
 from services.sessions import SECRET_KEY
 
@@ -226,5 +230,13 @@ async def vote_ticket(ticket_id: int, x_voter_id: str = Header(default=""), db: 
 
 @router.get("/feedback", response_class=HTMLResponse)
 async def feedback_page():
+    # bust_static_cache() rewrites /static/... references with
+    # ?v=STATIC_ASSET_VERSION — needed now that this page loads its own
+    # external feedback.css/feedback.js (Phase 3 audit remediation; before
+    # that, everything here was inline, so this page never needed it, same
+    # reasoning as events.py's own two HTML-serving endpoints before spec
+    # §62). Cloudflare edge-caches /static/*.css/*.js for hours regardless
+    # of origin freshness (spec §23), so without this a redeploy could
+    # silently keep serving a stale feedback.css/feedback.js.
     with open("/app/static/feedback.html") as f:
-        return HTMLResponse(f.read())
+        return HTMLResponse(bust_static_cache(f.read()))

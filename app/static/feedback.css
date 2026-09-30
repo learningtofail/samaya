@@ -1,0 +1,45 @@
+/* Spec §40-43 — the public feedback/request/error-report board. Standalone
+   page, no shared JS/CSS with admin.html or events.html (§22's precedent),
+   built with the same plain PatternFly + emoji-icon convention as
+   events.html rather than a third design language.
+   Phase 3 audit remediation: extracted out of feedback.html's own inline
+   <style> block into this file — no rule content changed. */
+body { background: var(--pf-t--global--background--color--secondary--default); }
+.pf-v6-c-masthead { display: flex !important; align-items: center !important; flex-wrap: wrap; gap: var(--pf-t--global--spacer--md); background-color: #151515 !important; }
+.header-link { color: var(--pf-t--global--text--color--inverse); font-size: var(--pf-t--global--font--size--body--sm); text-decoration: none; white-space: nowrap; padding: 4px 8px; border-radius: 4px; }
+.header-link:hover { background: rgba(255,255,255,.1); text-decoration: underline; }
+.ticket-row { display: flex; align-items: flex-start; gap: var(--pf-t--global--spacer--md); }
+.vote-btn {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-width: 3.5rem; padding: 8px 4px; border-radius: 8px; border: 1px solid var(--pf-t--global--border--color--default);
+  background: var(--pf-t--global--background--color--primary--default); cursor: pointer; flex-shrink: 0;
+  font-size: var(--pf-t--global--font--size--body--sm);
+}
+.vote-btn:hover { background: var(--pf-t--global--background--color--secondary--default); }
+.vote-btn.voted { border-color: var(--pf-t--global--color--brand--default); background: color-mix(in srgb, var(--pf-t--global--color--brand--default) 12%, transparent); }
+.vote-btn .vote-count { font-size: var(--pf-t--global--font--size--heading--sm); font-weight: 700; }
+.ticket-body { flex: 1; min-width: 0; }
+.ticket-meta { display: flex; flex-wrap: wrap; gap: var(--pf-t--global--spacer--sm); align-items: center; margin-top: 4px; }
+.samaya-modal-close {
+  background: none; border: none; font-size: 1.75rem; line-height: 1; cursor: pointer;
+  color: var(--pf-t--global--text--color--subtle); min-width: 44px; min-height: 44px;
+  display: flex; align-items: center; justify-content: center; border-radius: 6px;
+}
+.samaya-modal-close:hover { color: var(--pf-t--global--text--color--regular); background: var(--pf-t--global--background--color--secondary--default); }
+.samaya-modal-close:focus-visible { outline: 2px solid var(--pf-t--global--color--brand--default); outline-offset: 1px; }
+.pf-v6-c-backdrop { display: none; }
+.pf-v6-c-backdrop.open { display: block; }
+.about-page summary { cursor: pointer; font-size: var(--pf-t--global--font--size--body--sm); color: var(--pf-t--global--text--color--subtle); }
+.about-page div { font-size: var(--pf-t--global--font--size--body--sm); color: var(--pf-t--global--text--color--subtle); margin-top: 8px; }
+.empty-state { padding: 32px; text-align: center; color: var(--pf-t--global--text--color--subtle); }
+
+/* ── Utility classes replacing feedback.html's inline style="..." attributes
+   (Phase 3 audit remediation) ── */
+.samaya-header-bar { padding: 12px 20px; }
+.samaya-header-brand { color: #fff; font-weight: 700; font-size: var(--pf-t--global--font--size--heading--sm); }
+.samaya-header-content-end { margin-inline-start: auto; }
+.samaya-page-container { max-width: 900px; margin: 0 auto; padding: 20px; }
+.samaya-intro-text { margin: 0 0 12px; }
+.samaya-intro-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.samaya-subtle-text { color: var(--pf-t--global--text--color--subtle); }
+.samaya-ticket-description { white-space: pre-wrap; }

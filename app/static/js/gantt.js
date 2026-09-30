@@ -11,10 +11,10 @@ function renderGantt(occs) {
 
   const leadWrap = document.getElementById('ganttLeadershipWrap');
   if (leadership.length) {
-    leadWrap.style.display = 'block';
+    leadWrap.classList.remove('hidden');
     buildGanttGrid(leadership, 'ganttWrapLeadership', 'ganttLegendLeadership', 'No leadership occurrences in this window.');
   } else {
-    leadWrap.style.display = 'none';
+    leadWrap.classList.add('hidden');
     document.getElementById('ganttWrapLeadership').innerHTML = '';
     document.getElementById('ganttLegendLeadership').innerHTML = '';
   }
@@ -33,12 +33,12 @@ function renderGantt(occs) {
 function renderAnnouncementGantt(announcements) {
   const wrap = document.getElementById('ganttAnnouncementsWrap');
   if (!announcements.length) {
-    wrap.style.display = 'none';
+    wrap.classList.add('hidden');
     document.getElementById('ganttWrapAnnouncements').innerHTML = '';
     document.getElementById('ganttLegendAnnouncements').innerHTML = '';
     return;
   }
-  wrap.style.display = 'block';
+  wrap.classList.remove('hidden');
   const mapped = announcements.map(a => ({
     event_name: a.title,
     occurrence_date: a.scheduled_for.slice(0, 10),

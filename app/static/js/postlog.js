@@ -75,3 +75,8 @@ function renderPostLogTable(allLogs) {
     }).join('');
 }
 
+
+// Wire this view's filter/export controls — replaces their oninput/onclick
+// attributes (Phase 3 audit remediation).
+document.getElementById('postLogFilterInput')?.addEventListener('input', () => filterPostLogTable());
+document.getElementById('btnExportPostLogCsv')?.addEventListener('click', () => exportPostLogCsv());

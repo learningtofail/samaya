@@ -388,12 +388,14 @@ function openTemplateModal(source) {
   document.querySelector('#templateModalTitle .pf-v6-c-modal-box__title-text').textContent =
     source ? 'Edit Template' : 'New Template';
   document.getElementById('templateModal').classList.add('open');
+  focusModal(document.getElementById('templateModal'));
   refreshPreviewTenantOptions('tPreviewTenant', null);
   renderTemplatePreview();
 }
 
 function closeTemplateModal() {
   document.getElementById('templateModal').classList.remove('open');
+  unfocusModal();
 }
 
 function editTemplate(id) {
@@ -578,7 +580,7 @@ function updateAnnouncementCharCount() {
 
 function toggleAnnouncementRecurringNote() {
   const on = document.getElementById('aRecurring').checked;
-  document.getElementById('aIntervalGroup').style.display = on ? '' : 'none';
+  document.getElementById('aIntervalGroup').classList.toggle('hidden', !on);
   if (!on) document.getElementById('aIntervalDays').value = '';
 }
 
@@ -691,7 +693,7 @@ function openAnnouncementModal(source, isEdit) {
   }
   document.getElementById('aRecurring').checked = !!(source && source.recurring);
   document.getElementById('aIntervalDays').value = (source && source.interval_days) ? source.interval_days : '';
-  document.getElementById('aIntervalGroup').style.display = (source && source.recurring) ? '' : 'none';
+  document.getElementById('aIntervalGroup').classList.toggle('hidden', !(source && source.recurring));
   document.getElementById('aLeadershipOnly').checked = !!(source && source.leadership_only);
   document.getElementById('aEventOffsetMinutes').value = (source && source.event_offset_minutes) ? source.event_offset_minutes : 0;
   // Spec §38.3/§49 — an announcement is owned by one alliance, or (like
@@ -713,11 +715,13 @@ function openAnnouncementModal(source, isEdit) {
   document.querySelector('#announcementModalTitle .pf-v6-c-modal-box__title-text').textContent =
     isEdit ? 'Edit Announcement' : (source ? 'Duplicate Announcement' : 'New Announcement');
   document.getElementById('announcementModal').classList.add('open');
+  focusModal(document.getElementById('announcementModal'));
   renderAnnouncementPreview();
 }
 
 function closeAnnouncementModal() {
   document.getElementById('announcementModal').classList.remove('open');
+  unfocusModal();
 }
 
 function duplicateAnnouncement(id) {
@@ -856,3 +860,29 @@ async function deleteAnnouncement(id) {
     loadAnnouncements();
   } catch (e) { toast(e.message, true); }
 }
+
+// Wire the Announcement and Template modals' markdown toolbars once at
+// load (see common.js's wireMarkdownToolbar) — same reasoning as events.js's
+// own call for the Event modal's toolbar.
+wireMarkdownToolbar('aBodyToolbar');
+wireMarkdownToolbar('tBodyToolbar');
+
+// Wire the Announcements view and its Announcement/Template modals' own
+// controls — replaces their onclick/onchange/oninput attributes (Phase 3
+// audit remediation).
+document.getElementById('btnOpenTemplateModal')?.addEventListener('click', () => openTemplateModal());
+document.getElementById('btnOpenAnnouncementModal')?.addEventListener('click', () => openAnnouncementModal());
+document.getElementById('aBody')?.addEventListener('input', () => updateAnnouncementCharCount());
+document.getElementById('aPreviewTenant')?.addEventListener('change', () => renderAnnouncementPreview());
+document.getElementById('aScheduledDate')?.addEventListener('change', () => renderAnnouncementPreview());
+document.getElementById('aScheduledTime')?.addEventListener('input', () => renderAnnouncementPreview());
+document.getElementById('aEventOffsetMinutes')?.addEventListener('input', () => renderAnnouncementPreview());
+document.getElementById('aRecurring')?.addEventListener('change', () => toggleAnnouncementRecurringNote());
+document.getElementById('btnAddAnnouncementTarget')?.addEventListener('click', () => addAnnouncementTargetRow());
+document.getElementById('btnAddAllAllianceTargets')?.addEventListener('click', () => addAllAllianceTargets());
+document.getElementById('btnSaveAnnouncement')?.addEventListener('click', () => saveAnnouncement());
+document.getElementById('btnSaveAsTemplate')?.addEventListener('click', () => saveCurrentAsTemplate());
+document.getElementById('tBody')?.addEventListener('input', () => renderTemplatePreview());
+document.getElementById('tPreviewTenant')?.addEventListener('change', () => renderTemplatePreview());
+document.getElementById('tEventOffsetMinutes')?.addEventListener('input', () => renderTemplatePreview());
+document.getElementById('btnSaveTemplate')?.addEventListener('click', () => saveTemplate());

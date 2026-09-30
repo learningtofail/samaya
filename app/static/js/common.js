@@ -26,6 +26,114 @@ document.addEventListener('keydown', (e) => {
   if (fnName && typeof window[fnName] === 'function') window[fnName]();
 });
 
+// A click directly on the backdrop (not on the modal box itself) closes
+// the same way the X button/Escape already do, via the same data-close-fn
+// attribute — one delegated listener per backdrop, registered once here
+// since every modal backdrop already exists in the static markup.
+document.querySelectorAll('.pf-v6-c-backdrop').forEach((backdrop) => {
+  backdrop.addEventListener('click', (e) => {
+    if (e.target !== backdrop) return;
+    const fnName = backdrop.dataset.closeFn;
+    if (fnName && typeof window[fnName] === 'function') window[fnName]();
+  });
+});
+
+// Every modal's own X button and its footer Cancel/Close button both just
+// call that same modal's close function — admin.html now marks each with
+// a plain data-modal-dismiss attribute instead of its own
+// onclick="close*Modal()" (Phase 3 audit remediation), and this one
+// delegated listener reads the ancestor backdrop's data-close-fn (the same
+// attribute the Escape-key and backdrop-click handlers above already use)
+// rather than needing its own hardcoded function name.
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-modal-dismiss]');
+  if (!btn) return;
+  const backdrop = btn.closest('.pf-v6-c-backdrop');
+  const fnName = backdrop && backdrop.dataset.closeFn;
+  if (fnName && typeof window[fnName] === 'function') window[fnName]();
+});
+
+// Tab bar (spec §17) — each tab button carries a plain data-view attribute
+// instead of its own onclick="showView('x',this)" (Phase 3 audit
+// remediation); one delegated listener here calls the same showView(id,
+// btn) every tab used to call directly, since the tab bar itself (unlike
+// each tab's own content) is shared shell chrome, not any one view's
+// concern.
+document.querySelector('.pf-v6-c-tabs__list')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.pf-v6-c-tabs__link[data-view]');
+  if (btn) showView(btn.dataset.view, btn);
+});
+
+// Header clock link opens the time zone modal — replaces its own
+// onclick="openTimezoneModal();return false;" (Phase 3 audit remediation).
+document.getElementById('headerClock')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  openTimezoneModal(false);
+});
+
+// ── Modal focus management (ported from events-public.js's openModal/
+// closeModal, spec §62) ──────────────────────────────────────────
+// Same "remember what had focus, move focus into the modal, restore it on
+// close" pattern the public events page already uses, adapted to this
+// page's own .open-class modal convention (see the Escape listener above)
+// rather than switching every modal over to events-public.js's own
+// hidden-attribute one. Each view's own open*Modal()/close*Modal()
+// function still owns showing/hiding and populating its modal — these two
+// helpers only own focus, called right after classList.add('open') and
+// right before/after classList.remove('open') respectively.
+let _modalReturnFocus = null;
+
+function focusModal(modalEl) {
+  if (!modalEl) return;
+  _modalReturnFocus = document.activeElement;
+  const focusable = modalEl.querySelector('select, textarea, input, button:not(.samaya-modal-close)');
+  if (focusable) focusable.focus();
+}
+
+function unfocusModal() {
+  if (_modalReturnFocus && typeof _modalReturnFocus.focus === 'function') _modalReturnFocus.focus();
+  _modalReturnFocus = null;
+}
+
+// ── Markdown toolbar (spec §28) — shared by the Event/Announcement/Template
+// modals' Description/Body fields (mDescription/aBody/tBody), replacing the
+// per-button onclick="wrapSelection(...)" attributes admin.html used to
+// carry (Phase 3 audit remediation: no inline event handlers). One
+// delegated click/change listener per toolbar instead of one onclick per
+// button — wired once, at script-load time, from whichever view file owns
+// that toolbar's modal (events.js for the Event modal's, announcements.js
+// for the Announcement/Template modals' two) via wireMarkdownToolbar(id)
+// below. The actual commands (wrapSelection/prefixSelectedLines/
+// insertCodeBlock/insertRoleMention) still live in announcements.js,
+// unchanged — this only replaces how each button's click reaches them.
+const MD_TOOLBAR_COMMANDS = {
+  bold:      (target) => wrapSelection(target, '**', '**', 'bold'),
+  italic:    (target) => wrapSelection(target, '*', '*', 'italic'),
+  underline: (target) => wrapSelection(target, '__', '__', 'underline'),
+  strike:    (target) => wrapSelection(target, '~~', '~~', 'strike'),
+  spoiler:   (target) => wrapSelection(target, '||', '||', 'spoiler'),
+  heading:   (target) => prefixSelectedLines(target, '# '),
+  quote:     (target) => prefixSelectedLines(target, '> '),
+  code:      (target) => wrapSelection(target, '`', '`', 'code'),
+  codeblock: (target) => insertCodeBlock(target),
+};
+
+function wireMarkdownToolbar(toolbarId) {
+  const toolbar = document.getElementById(toolbarId);
+  if (!toolbar) return;
+  const target = toolbar.dataset.target;
+  toolbar.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-md-cmd]');
+    if (!btn) return;
+    if (btn.dataset.mdCmd === 'emoji') { toggleEmojiPicker(btn, target); return; }
+    const fn = MD_TOOLBAR_COMMANDS[btn.dataset.mdCmd];
+    if (fn) fn(target);
+  });
+  toolbar.addEventListener('change', (e) => {
+    if (e.target.matches('select[data-role-mention]')) insertRoleMention(e.target.id, target);
+  });
+}
+
 async function loadMe() {
   ME = await api('GET', '/api/me', null, /*skipTenantHeader=*/true);
   return ME;
@@ -156,8 +264,8 @@ function parseOwningTenantScopeValue(value) {
 function applyRoleVisibility() {
   const accessItem = document.getElementById('accessTabItem');
   const auditItem = document.getElementById('auditTabItem');
-  if (accessItem) accessItem.style.display = isSuperadmin() ? '' : 'none';
-  if (auditItem)  auditItem.style.display = isSuperadmin() ? '' : 'none';
+  if (accessItem) accessItem.classList.toggle('hidden', !isSuperadmin());
+  if (auditItem)  auditItem.classList.toggle('hidden', !isSuperadmin());
 }
 
 // ── HTML escaping ────────────────────────────────────────────
@@ -292,6 +400,7 @@ function openTimezoneModal(firstVisit) {
     + options.map(tz => `<option value="${tz}" ${tz === current ? 'selected' : ''}>${tz}</option>`).join('')
     + `</select>`;
   document.getElementById('timezoneModal').classList.add('open');
+  focusModal(document.getElementById('timezoneModal'));
 }
 
 // Called once from init.js after the page is otherwise ready — a stored
@@ -310,6 +419,7 @@ function closeTimezoneModal() {
   // maybeShowFirstVisitTzModal above, which only checks presence).
   if (!localStorage.getItem('samaya_display_tz')) setDisplayTz(getDisplayTz());
   document.getElementById('timezoneModal').classList.remove('open');
+  unfocusModal();
 }
 
 function selectTimezone(tz) {
@@ -512,6 +622,7 @@ async function openDiscordPreview(kind, item) {
   if (!modal || !pane) return;
   pane.innerHTML = '<p style="color:var(--muted)">Loading preview…</p>';
   modal.classList.add('open');
+  focusModal(modal);
 
   let tenantSlug, title, rawBody, scheduledFor, eventOffsetMinutes, coverImage, channelLabel, durationHours;
   const isAnnouncement = kind === 'announcement';
@@ -588,6 +699,7 @@ async function openDiscordPreview(kind, item) {
 
 function closeDiscordPreviewModal() {
   document.getElementById('discordPreviewModal').classList.remove('open');
+  unfocusModal();
 }
 
 // ── Notification Targets column (spec §49) ─────────────────────────

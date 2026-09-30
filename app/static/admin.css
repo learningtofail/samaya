@@ -125,3 +125,250 @@
      the visible page instead of wrapping to its own line. One global rule
      fixes every occurrence at once rather than patching each view. */
   .pf-v6-l-flex.pf-m-justify-content-space-between { flex-wrap: wrap; row-gap: 8px; }
+
+  /* Visible keyboard-focus ring for every interactive element (buttons,
+     links, inputs, selects, textareas) — same approach as events.css's
+     own :focus-visible rule (the public page this admin console shares no
+     CSS with, per CLAUDE.md's §22 note, but the same accessibility bar
+     applies to both). --focus-ring reuses PatternFly's own brand-color
+     token when present so the ring matches the rest of the PatternFly
+     shell, falling back to a plain blue otherwise. .samaya-modal-close
+     already had its own :focus-visible rule above; this supersedes it
+     with the same token for consistency. */
+  :root { --focus-ring: var(--pf-t--global--color--brand--default, #06c); }
+  a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible,
+  textarea:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--focus-ring); outline-offset: 2px;
+  }
+
+  /* Respect a reduced-motion preference by disabling/shortening every
+     transition and animation this file defines (nav underline, hover
+     opacity fades, the toast fade-in, Gantt cell hover) — same convention
+     as events.css's own prefers-reduced-motion block. */
+  @media (prefers-reduced-motion: reduce) {
+    nav button, button.btn, .gantt-cell, .toast {
+      transition-duration: 0.001ms !important;
+    }
+  }
+
+  /* ── Shell overrides, moved out of admin.html's own inline <style> block
+     (Phase 3 audit remediation) — the individual views below still use
+     admin.css's own classes (.card, .btn, .view, etc.) for now; this is a
+     transitional state while the PatternFly conversion moves through the
+     admin UI one view at a time. Only the page/masthead/tabs shell is
+     PatternFly so far. (body's own margin is already zeroed by the
+     `* { margin: 0; padding: 0; }` reset above, so that redundant rule
+     from the inline block was dropped here.) ── */
+  .pf-v6-c-masthead { display: flex !important; align-items: center !important; flex-wrap: nowrap !important; gap: var(--pf-t--global--spacer--md); background-color: #151515 !important; }
+  .pf-v6-c-masthead__main { flex: 1 1 auto !important; min-width: 0 !important; overflow: hidden !important; display: flex !important; align-items: center !important; gap: var(--pf-t--global--spacer--md); }
+  .pf-v6-c-masthead__content { flex: 0 0 auto !important; display: flex !important; align-items: center !important; gap: var(--pf-t--global--spacer--sm); }
+  #headerTitle { color: var(--pf-t--global--text--color--inverse); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--pf-t--global--font--size--heading--md); }
+  #headerStatus { color: var(--pf-t--global--text--color--inverse); opacity: .7; font-size: var(--pf-t--global--font--size--body--sm); white-space: nowrap; }
+  @media (max-width: 900px) { #headerStatus { display: none; } }
+  /* pf-m-secondary's default Color/BorderColor tokens are tuned for a
+     light background — on the masthead's dark background (#151515) they
+     render as low-contrast dark-blue-on-near-black. Override the same
+     CSS custom properties the button already reads (PatternFly's own
+     token-override mechanism, same trick events.html's tenantBadge()
+     uses for pf-m-custom) rather than fighting specificity with a
+     one-off color rule. */
+  .pf-v6-c-masthead .pf-v6-c-button.pf-m-secondary {
+    --pf-v6-c-button--m-secondary--Color: var(--pf-t--global--text--color--inverse);
+    --pf-v6-c-button--m-secondary--BorderColor: var(--pf-t--global--text--color--inverse);
+    --pf-v6-c-button--m-secondary--hover--Color: var(--pf-t--global--text--color--inverse);
+    --pf-v6-c-button--m-secondary--hover--BorderColor: var(--pf-t--global--text--color--inverse);
+  }
+  @media (max-width: 700px) {
+    .pf-v6-c-masthead { flex-wrap: wrap !important; row-gap: var(--pf-t--global--spacer--sm); }
+    .pf-v6-c-masthead__content { flex: 1 1 100% !important; }
+  }
+  /* Generic hide utility (Phase 3 audit remediation) — replaces every
+     admin.html element that used to carry a literal style="display:none"
+     attribute; JS toggles visibility with classList.add/remove/toggle
+     ('hidden') now instead of writing to .style.display directly (see
+     common.js's applyRoleVisibility(), events.js's toggleLeadershipNote()/
+     setCoverImagePreview(), etc.) so there's exactly one mechanism, not an
+     inline style and a class fighting over the same element. !important
+     mirrors the old inline-style-selector rule this replaces (below),
+     which also needed !important to reliably hide a .pf-v6-c-tabs__item
+     over PatternFly's own display:flex. */
+  .hidden { display: none !important; }
+  /* PatternFly's backdrop has no built-in show/hide state — it assumes
+     a JS framework conditionally mounts/unmounts it. This app instead
+     toggles a plain .open class (events.js openEventModal/closeModal),
+     so match that mechanism explicitly rather than switch the existing
+     JS to inline styles. */
+  #eventModal { display: none; }
+  #eventModal.open { display: block; }
+  #announcementModal { display: none; }
+  #announcementModal.open { display: block; }
+  #templateModal { display: none; }
+  #templateModal.open { display: block; }
+
+  /* Composer: markdown toolbar, Discord-style preview, emoji picker (spec §28) */
+  .md-toolbar { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+  .md-toolbar button {
+    background: var(--pf-t--global--background--color--secondary--default, #f0f0f0);
+    border: 1px solid var(--pf-t--global--border--color--default, #ccc);
+    border-radius: 4px; padding: 3px 9px; font-size: 0.85em; cursor: pointer; line-height: 1.4;
+  }
+  .md-toolbar button:hover { background: var(--pf-t--global--background--color--secondary--hover, #e2e2e2); }
+
+  .target-row-invalid .target-channel,
+  .target-row-invalid .target-channel-fallback {
+    border-color: #dc2626; box-shadow: 0 0 0 1px #dc2626;
+  }
+
+  .discord-preview-pane { min-height: 40px; }
+  .discord-preview-msg {
+    display: flex; gap: 12px; align-items: flex-start;
+    background: #313338; color: #dbdee1; border-radius: 8px; padding: 12px 14px;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .discord-preview-avatar {
+    flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
+    background: #5865f2; color: #fff; display: flex; align-items: center; justify-content: center;
+    font-weight: 600;
+  }
+  .discord-preview-body { min-width: 0; flex: 1; }
+  .discord-preview-header { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
+  .discord-preview-name { color: #fff; font-weight: 600; font-size: 0.95em; }
+  .discord-preview-bot-tag {
+    background: #5865f2; color: #fff; font-size: 0.62em; font-weight: 700;
+    border-radius: 3px; padding: 1px 4px; letter-spacing: 0.02em;
+  }
+  .discord-preview-text { font-size: 0.92em; line-height: 1.45; word-wrap: break-word; white-space: normal; }
+  .discord-preview-text .preview-mention { background: rgba(88,101,242,0.3); color: #c9cdfb; border-radius: 3px; padding: 0 2px; }
+  .discord-preview-text .preview-spoiler { background: #1e1f22; color: transparent; border-radius: 3px; padding: 0 2px; cursor: pointer; }
+  .discord-preview-text .preview-spoiler.revealed { background: #4a4c53; color: inherit; }
+  .discord-preview-text .preview-quote { border-left: 4px solid #4e5058; padding-left: 8px; margin: 4px 0; color: #b5bac1; }
+  .discord-preview-text .preview-inline-code { background: #2b2d31; border-radius: 3px; padding: 1px 4px; font-family: monospace; }
+  .discord-preview-text .preview-codeblock { background: #2b2d31; border-radius: 4px; padding: 8px; font-family: monospace; overflow-x: auto; margin: 4px 0; }
+  .discord-preview-text .preview-h { margin: 4px 0; color: #fff; }
+  .discord-preview-note { color: var(--muted); font-size: 0.8em; margin-top: 4px; }
+
+  /* Spec §46 — the click-to-preview modal's Scheduled-Event-shaped look
+     (Dashboard/Schedule/Events rows), distinct from the plain message
+     bubble above since that's not what an Event actually renders as. */
+  #discordPreviewModal { display: none; }
+  #discordPreviewModal.open { display: block; }
+  .discord-preview-event {
+    background: #313338; color: #dbdee1; border-radius: 8px; overflow: hidden;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .discord-preview-event-cover { display: block; width: 100%; max-height: 220px; object-fit: cover; }
+  .discord-preview-event-body { padding: 14px 16px; }
+  .discord-preview-event-title { font-size: 1.1em; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  .discord-preview-event-time { font-size: 0.88em; margin-bottom: 4px; }
+  .discord-preview-event-meta { font-size: 0.85em; color: #949ba4; margin-bottom: 8px; }
+  .discord-preview-event-desc { margin-bottom: 12px; }
+  .discord-preview-event-interested {
+    background: transparent; border: 1px solid #4e5058; color: #dbdee1;
+    border-radius: 4px; padding: 6px 14px; font-size: 0.85em; cursor: default;
+  }
+  .samaya-row-clickable { cursor: pointer; }
+  .samaya-row-clickable:hover { background: var(--pf-t--global--background--color--secondary--hover, #f0f0f0) !important; }
+
+  .emoji-picker {
+    display: none; position: absolute; z-index: 1200; background: var(--surface, #fff);
+    border: 1px solid var(--pf-t--global--border--color--default, #ccc); border-radius: 6px;
+    padding: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.25); max-width: 260px; max-height: 260px; overflow-y: auto;
+  }
+  .emoji-picker.open { display: block; }
+  .emoji-picker-heading { font-size: 0.75em; color: var(--muted); margin: 6px 0 2px; }
+  .emoji-picker-heading:first-child { margin-top: 0; }
+  .emoji-picker-grid { display: flex; flex-wrap: wrap; gap: 2px; }
+  .emoji-picker-item { background: none; border: none; font-size: 1.2em; cursor: pointer; padding: 3px; border-radius: 4px; }
+  .emoji-picker-item:hover { background: rgba(0,0,0,0.08); }
+  #tenantModal { display: none; }
+  #tenantModal.open { display: block; }
+  #timezoneModal { display: none; }
+  #timezoneModal.open { display: block; }
+  /* Header's alliance/time-zone controls (spec §24) — plain text links
+     rather than <select>s, each opening a modal with the actual option
+     list. Underline-on-hover only, so they read as "current state,
+     clickable" rather than a generic nav link. */
+  .header-link { color: var(--pf-t--global--text--color--inverse); font-size: var(--pf-t--global--font--size--body--sm); text-decoration: none; white-space: nowrap; padding: 4px 8px; border-radius: 4px; }
+  .header-link:hover { background: rgba(255,255,255,.1); text-decoration: underline; }
+  /* Page's own internal layout is CSS grid with template areas for
+     header/sidebar/main — since this app has no sidebar, a bare
+     .pf-v6-c-tabs div as a direct child got auto-placed into whatever
+     grid slot the browser's implicit grid flow assumed (looked like a
+     sidebar column), instead of spanning full width as a horizontal tab
+     bar. Forcing an explicit stacked layout instead of chasing the exact
+     grid-template-areas value. */
+  .pf-v6-c-page { display: flex !important; flex-direction: column !important; min-height: 100vh; }
+  /* The masthead and tabs must never shrink — without flex-shrink:0 they're
+     treated like any other flex child, so once page content (e.g. a long
+     Discord channel list on Config) pushed the page taller than the
+     viewport, the browser started shrinking the whole flex column to fit
+     rather than letting the page grow and scroll normally, squeezing the
+     tab bar down to ~18px and clipping it. Protecting their height and
+     letting main-container flow/scroll normally (not force-fit into
+     whatever space is left) fixes it. */
+  .pf-v6-c-masthead { flex-shrink: 0 !important; }
+  .pf-v6-c-tabs { width: 100%; flex-shrink: 0 !important; overflow: visible !important; }
+  /* PatternFly's default .pf-v6-c-page__main-container carries a
+     "page chrome inset" margin on BOTH inline-start and inline-end (same
+     token, symmetric by design — meant for the gap around a floating
+     card layout). Forcing width:100% above without zeroing that margin
+     made it look asymmetric: the start-side margin renders as a visible
+     gap, while the same margin on the end side pushes the container past
+     the viewport edge, where PatternFly's own overflow-x:hidden on this
+     element silently clips it — so one side shows a gap and the other
+     doesn't, even though the value is identical on both. Zero it here
+     instead of fighting the token. */
+  .pf-v6-c-page__main-container { flex: 1 1 auto !important; display: flex !important; flex-direction: column !important; align-self: stretch !important; width: 100% !important; margin: 0 !important; overflow: visible !important; height: auto !important; }
+  .pf-v6-c-page__main { flex: 1 1 auto !important; width: 100% !important; overflow: visible !important; height: auto !important; }
+
+  /* ── Utility classes replacing admin.html's inline style="..." attributes
+     (Phase 3 audit remediation) — one class per distinct inline style value
+     that used to appear there, named for what it does rather than what it
+     contains where a reasonable name existed, otherwise for its layout
+     shape (e.g. samaya-flex-gap-8). Grouped roughly by how they were used:
+     generic single-property utilities first, then the more specific
+     multi-property ones. ── */
+  .m-0 { margin: 0; }
+  .samaya-mt-12 { margin-top: 12px; }
+  .samaya-muted { color: var(--muted); }
+  .samaya-subtle-text { color: var(--pf-t--global--text--color--subtle); }
+  .samaya-filter-label { color: var(--muted); font-size: 0.85em; }
+  .samaya-loading-cell { color: var(--muted); padding: 20px; }
+  .samaya-muted-pad-1rem { color: var(--muted); padding: 1rem; }
+  .samaya-audit-label { color: var(--muted); font-size: 0.9em; }
+  .samaya-suffix-muted { color: var(--muted); font-size: 0.6em; font-weight: normal; }
+  .samaya-tz-intro { color: var(--muted); margin: 0 0 12px; }
+  .samaya-w-170 { max-width: 170px; }
+  .samaya-w-180 { max-width: 180px; }
+  .samaya-w-180-auto { max-width: 180px; margin-left: auto; }
+  .samaya-w-200 { max-width: 200px; }
+  .samaya-w-220 { max-width: 220px; }
+  .samaya-w-240 { max-width: 240px; }
+  .samaya-w-260 { max-width: 260px; }
+  .samaya-gap-12 { gap: 12px; }
+  .samaya-flex-gap-4 { display: flex; gap: 4px; }
+  .samaya-flex-gap-8 { display: flex; align-items: center; gap: 8px; }
+  .samaya-preview-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .samaya-icon-upload-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .samaya-target-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+  .samaya-legend-row { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 10px; }
+  .samaya-gantt-legend-wrap { margin-top: 12px; margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 10px; }
+  .samaya-section-divider { border-top: 2px solid var(--border); margin-bottom: 16px; }
+  .samaya-platform-section { margin-top: 32px; padding-top: 24px; border-top: 2px solid var(--border); }
+  .samaya-bg2 { background: var(--bg2); }
+  .samaya-section-header-blue { background: var(--bg2); padding: 8px 10px; border-radius: 4px; }
+  .samaya-section-header-slate { background: var(--bg3); padding: 8px 10px; border-radius: 4px; }
+  .samaya-section-header-amber { margin: 0; background: var(--amber); padding: 6px 10px; border-radius: 4px; }
+  .samaya-modal-scroll { max-height: 90vh; overflow-y: auto; }
+  .samaya-preview-result { margin-top: 8px; font-size: var(--fs-sm); color: var(--muted); }
+  .samaya-tabs-bar { background: var(--pf-t--global--background--color--primary--default); border-block-end: 1px solid var(--pf-t--global--border--color--default); }
+  .samaya-clickable { cursor: pointer; }
+  /* Paired with .hidden (added/removed via classList) rather than replacing
+     it — these three carry the non-display parts of what used to be a
+     combined "display:none;<other rules>" inline style; the display:none
+     part is .hidden's job (see it above), toggled at runtime instead of
+     baked into a single-purpose class. */
+  .samaya-badge-inline { display: inline-flex; margin-inline-start: 4px; }
+  .samaya-icon-preview { width: 64px; height: 64px; border-radius: 8px; object-fit: cover; }
+  .samaya-cover-preview { max-width: 280px; max-height: 120px; border-radius: 6px; object-fit: cover; }
+  .samaya-leadership-note { font-size: var(--fs-xs); color: var(--muted); margin-top: 6px; padding: 8px; background: var(--bg2); border-radius: 4px; }

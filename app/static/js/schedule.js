@@ -32,11 +32,11 @@ function renderScheduleAnnouncements(items) {
   const wrap = document.getElementById('schedAnnouncementsWrap');
   const tbody = document.getElementById('schedAnnouncementsBody');
   if (!items.length) {
-    wrap.style.display = 'none';
+    wrap.classList.add('hidden');
     tbody.innerHTML = '';
     return;
   }
-  wrap.style.display = 'block';
+  wrap.classList.remove('hidden');
 
   function targetsHtml(a) {
     return a.targets.map(t => {
@@ -79,8 +79,8 @@ function renderScheduleAnnouncements(items) {
 // Persisted so returning to the tab keeps whichever layout was last picked.
 function setScheduleLayout(layout) {
   localStorage.setItem('samaya_schedule_layout', layout);
-  document.getElementById('scheduleTableView').style.display = layout === 'table' ? '' : 'none';
-  document.getElementById('scheduleGanttView').style.display = layout === 'gantt' ? '' : 'none';
+  document.getElementById('scheduleTableView').classList.toggle('hidden', layout !== 'table');
+  document.getElementById('scheduleGanttView').classList.toggle('hidden', layout !== 'gantt');
   document.getElementById('scheduleLayoutTableBtn').className = 'pf-v6-c-button pf-m-small ' + (layout === 'table' ? 'pf-m-primary' : 'pf-m-secondary');
   document.getElementById('scheduleLayoutGanttBtn').className = 'pf-v6-c-button pf-m-small ' + (layout === 'gantt' ? 'pf-m-primary' : 'pf-m-secondary');
 }
@@ -101,7 +101,7 @@ function renderSchedule() {
   const leadWrap = document.getElementById('schedLeadershipWrap');
   if (!occurrenceData.length) {
     tbody.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="9" style="color:var(--muted);padding:20px">No occurrences. Run "Regenerate Now" from the Dashboard.</td></tr>';
-    leadWrap.style.display = 'none';
+    leadWrap.classList.add('hidden');
     return;
   }
 
@@ -148,10 +148,10 @@ function renderSchedule() {
     : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="9" style="color:var(--muted);padding:20px">No occurrences in this window.</td></tr>';
 
   if (leadership.length) {
-    leadWrap.style.display = 'block';
+    leadWrap.classList.remove('hidden');
     tbodyLead.innerHTML = leadership.map(o => buildRow(o, 'Leadership')).join('');
   } else {
-    leadWrap.style.display = 'none';
+    leadWrap.classList.add('hidden');
     tbodyLead.innerHTML = '';
   }
 }
@@ -195,3 +195,11 @@ async function postSelected(scope) {
   loadSchedule();
 }
 
+
+// Wire this view's layout toggle/refresh/bulk-post controls — replaces
+// their onclick attributes (Phase 3 audit remediation).
+document.getElementById('scheduleLayoutTableBtn')?.addEventListener('click', () => setScheduleLayout('table'));
+document.getElementById('scheduleLayoutGanttBtn')?.addEventListener('click', () => setScheduleLayout('gantt'));
+document.getElementById('btnScheduleRefresh')?.addEventListener('click', () => loadSchedule());
+document.getElementById('btnPostSelectedAlliance')?.addEventListener('click', () => postSelected('Alliance'));
+document.getElementById('btnPostSelectedLeadership')?.addEventListener('click', () => postSelected('Leadership'));

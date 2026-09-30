@@ -143,3 +143,7 @@ function copyInviteLink(link) {
     toast(link);
   }
 }
+
+// Wire this view's "+ Invite Coordinator" button — replaces its onclick
+// attribute (Phase 3 audit remediation).
+document.getElementById('btnCreateInvite')?.addEventListener('click', () => createInvite());

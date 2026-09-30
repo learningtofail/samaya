@@ -160,3 +160,16 @@ async function triggerRegen() {
   if (okCount) toast(`Regeneration complete for ${okCount} alliance${okCount === 1 ? '' : 's'}`);
   loadDashboard();
 }
+
+// Sync-issue banner (spec §31.2's precursor) — clicking it jumps to the
+// Sync tab, replacing its own onclick="showView('sync', ...)" attribute
+// (Phase 3 audit remediation). Lives here rather than sync.js since the
+// banner itself is part of the Dashboard view.
+document.getElementById('syncSummaryCard')?.addEventListener('click', () => {
+  showView('sync', document.querySelector('#syncTabItem .pf-v6-c-tabs__link'));
+});
+
+// Wire this view's own action buttons — replaces their onclick attributes
+// (Phase 3 audit remediation).
+document.getElementById('btnRegenerateNow')?.addEventListener('click', () => triggerRegen());
+document.getElementById('btnDashboardRefresh')?.addEventListener('click', () => loadDashboard());

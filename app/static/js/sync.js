@@ -190,12 +190,12 @@ function updateSyncBadge(issueCount) {
   var countEl = document.getElementById('syncIssueCount');
   if (issueCount > 0) {
     badgeText.textContent = issueCount;
-    badge.style.display = 'inline-flex';
-    card.style.display = 'block';
+    badge.classList.remove('hidden');
+    card.classList.remove('hidden');
     countEl.textContent = issueCount;
   } else {
-    badge.style.display = 'none';
-    card.style.display = 'none';
+    badge.classList.add('hidden');
+    card.classList.add('hidden');
   }
 }
 
@@ -235,3 +235,7 @@ async function syncAcknowledge(btn) {
     loadSync();
   } catch(e) { toast(e.message, true); }
 }
+
+// Wire this view's "Run Sync Check" button — replaces its onclick
+// attribute (Phase 3 audit remediation).
+document.getElementById('btnRunSyncCheck')?.addEventListener('click', () => loadSync());

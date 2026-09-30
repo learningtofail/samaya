@@ -7,164 +7,6 @@
 <link rel="stylesheet" href="/static/vendor/patternfly/patternfly.min.css">
 <link rel="stylesheet" href="/static/vendor/patternfly/patternfly-addons.css">
 <link rel="stylesheet" href="/static/admin.css">
-<style>
-  /* Shell-only overrides — the individual views below still use admin.css's
-     own classes (.card, .btn, .view, etc.) for now; this is a transitional
-     state while the PatternFly conversion moves through the admin UI one
-     view at a time. Only the page/masthead/tabs shell is PatternFly so far. */
-  body { margin: 0; }
-  .pf-v6-c-masthead { display: flex !important; align-items: center !important; flex-wrap: nowrap !important; gap: var(--pf-t--global--spacer--md); background-color: #151515 !important; }
-  .pf-v6-c-masthead__main { flex: 1 1 auto !important; min-width: 0 !important; overflow: hidden !important; display: flex !important; align-items: center !important; gap: var(--pf-t--global--spacer--md); }
-  .pf-v6-c-masthead__content { flex: 0 0 auto !important; display: flex !important; align-items: center !important; gap: var(--pf-t--global--spacer--sm); }
-  #headerTitle { color: var(--pf-t--global--text--color--inverse); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--pf-t--global--font--size--heading--md); }
-  #headerStatus { color: var(--pf-t--global--text--color--inverse); opacity: .7; font-size: var(--pf-t--global--font--size--body--sm); white-space: nowrap; }
-  @media (max-width: 900px) { #headerStatus { display: none; } }
-  /* pf-m-secondary's default Color/BorderColor tokens are tuned for a
-     light background — on the masthead's dark background (#151515) they
-     render as low-contrast dark-blue-on-near-black. Override the same
-     CSS custom properties the button already reads (PatternFly's own
-     token-override mechanism, same trick events.html's tenantBadge()
-     uses for pf-m-custom) rather than fighting specificity with a
-     one-off color rule. */
-  .pf-v6-c-masthead .pf-v6-c-button.pf-m-secondary {
-    --pf-v6-c-button--m-secondary--Color: var(--pf-t--global--text--color--inverse);
-    --pf-v6-c-button--m-secondary--BorderColor: var(--pf-t--global--text--color--inverse);
-    --pf-v6-c-button--m-secondary--hover--Color: var(--pf-t--global--text--color--inverse);
-    --pf-v6-c-button--m-secondary--hover--BorderColor: var(--pf-t--global--text--color--inverse);
-  }
-  @media (max-width: 700px) {
-    .pf-v6-c-masthead { flex-wrap: wrap !important; row-gap: var(--pf-t--global--spacer--sm); }
-    .pf-v6-c-masthead__content { flex: 1 1 100% !important; }
-  }
-  .pf-v6-c-tabs__item[style*="display: none"] { display: none !important; }
-  /* PatternFly's backdrop has no built-in show/hide state — it assumes
-     a JS framework conditionally mounts/unmounts it. This app instead
-     toggles a plain .open class (events.js openEventModal/closeModal),
-     so match that mechanism explicitly rather than switch the existing
-     JS to inline styles. */
-  #eventModal { display: none; }
-  #eventModal.open { display: block; }
-  #announcementModal { display: none; }
-  #announcementModal.open { display: block; }
-  #templateModal { display: none; }
-  #templateModal.open { display: block; }
-
-  /* Composer: markdown toolbar, Discord-style preview, emoji picker (spec §28) */
-  .md-toolbar { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
-  .md-toolbar button {
-    background: var(--pf-t--global--background--color--secondary--default, #f0f0f0);
-    border: 1px solid var(--pf-t--global--border--color--default, #ccc);
-    border-radius: 4px; padding: 3px 9px; font-size: 0.85em; cursor: pointer; line-height: 1.4;
-  }
-  .md-toolbar button:hover { background: var(--pf-t--global--background--color--secondary--hover, #e2e2e2); }
-
-  .target-row-invalid .target-channel,
-  .target-row-invalid .target-channel-fallback {
-    border-color: #dc2626; box-shadow: 0 0 0 1px #dc2626;
-  }
-
-  .discord-preview-pane { min-height: 40px; }
-  .discord-preview-msg {
-    display: flex; gap: 12px; align-items: flex-start;
-    background: #313338; color: #dbdee1; border-radius: 8px; padding: 12px 14px;
-    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  }
-  .discord-preview-avatar {
-    flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
-    background: #5865f2; color: #fff; display: flex; align-items: center; justify-content: center;
-    font-weight: 600;
-  }
-  .discord-preview-body { min-width: 0; flex: 1; }
-  .discord-preview-header { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
-  .discord-preview-name { color: #fff; font-weight: 600; font-size: 0.95em; }
-  .discord-preview-bot-tag {
-    background: #5865f2; color: #fff; font-size: 0.62em; font-weight: 700;
-    border-radius: 3px; padding: 1px 4px; letter-spacing: 0.02em;
-  }
-  .discord-preview-text { font-size: 0.92em; line-height: 1.45; word-wrap: break-word; white-space: normal; }
-  .discord-preview-text .preview-mention { background: rgba(88,101,242,0.3); color: #c9cdfb; border-radius: 3px; padding: 0 2px; }
-  .discord-preview-text .preview-spoiler { background: #1e1f22; color: transparent; border-radius: 3px; padding: 0 2px; cursor: pointer; }
-  .discord-preview-text .preview-spoiler.revealed { background: #4a4c53; color: inherit; }
-  .discord-preview-text .preview-quote { border-left: 4px solid #4e5058; padding-left: 8px; margin: 4px 0; color: #b5bac1; }
-  .discord-preview-text .preview-inline-code { background: #2b2d31; border-radius: 3px; padding: 1px 4px; font-family: monospace; }
-  .discord-preview-text .preview-codeblock { background: #2b2d31; border-radius: 4px; padding: 8px; font-family: monospace; overflow-x: auto; margin: 4px 0; }
-  .discord-preview-text .preview-h { margin: 4px 0; color: #fff; }
-  .discord-preview-note { color: var(--muted); font-size: 0.8em; margin-top: 4px; }
-
-  /* Spec §46 — the click-to-preview modal's Scheduled-Event-shaped look
-     (Dashboard/Schedule/Events rows), distinct from the plain message
-     bubble above since that's not what an Event actually renders as. */
-  #discordPreviewModal { display: none; }
-  #discordPreviewModal.open { display: block; }
-  .discord-preview-event {
-    background: #313338; color: #dbdee1; border-radius: 8px; overflow: hidden;
-    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  }
-  .discord-preview-event-cover { display: block; width: 100%; max-height: 220px; object-fit: cover; }
-  .discord-preview-event-body { padding: 14px 16px; }
-  .discord-preview-event-title { font-size: 1.1em; font-weight: 700; color: #fff; margin-bottom: 4px; }
-  .discord-preview-event-time { font-size: 0.88em; margin-bottom: 4px; }
-  .discord-preview-event-meta { font-size: 0.85em; color: #949ba4; margin-bottom: 8px; }
-  .discord-preview-event-desc { margin-bottom: 12px; }
-  .discord-preview-event-interested {
-    background: transparent; border: 1px solid #4e5058; color: #dbdee1;
-    border-radius: 4px; padding: 6px 14px; font-size: 0.85em; cursor: default;
-  }
-  .samaya-row-clickable { cursor: pointer; }
-  .samaya-row-clickable:hover { background: var(--pf-t--global--background--color--secondary--hover, #f0f0f0) !important; }
-
-  .emoji-picker {
-    display: none; position: absolute; z-index: 1200; background: var(--surface, #fff);
-    border: 1px solid var(--pf-t--global--border--color--default, #ccc); border-radius: 6px;
-    padding: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.25); max-width: 260px; max-height: 260px; overflow-y: auto;
-  }
-  .emoji-picker.open { display: block; }
-  .emoji-picker-heading { font-size: 0.75em; color: var(--muted); margin: 6px 0 2px; }
-  .emoji-picker-heading:first-child { margin-top: 0; }
-  .emoji-picker-grid { display: flex; flex-wrap: wrap; gap: 2px; }
-  .emoji-picker-item { background: none; border: none; font-size: 1.2em; cursor: pointer; padding: 3px; border-radius: 4px; }
-  .emoji-picker-item:hover { background: rgba(0,0,0,0.08); }
-  #tenantModal { display: none; }
-  #tenantModal.open { display: block; }
-  #timezoneModal { display: none; }
-  #timezoneModal.open { display: block; }
-  /* Header's alliance/time-zone controls (spec §24) — plain text links
-     rather than <select>s, each opening a modal with the actual option
-     list. Underline-on-hover only, so they read as "current state,
-     clickable" rather than a generic nav link. */
-  .header-link { color: var(--pf-t--global--text--color--inverse); font-size: var(--pf-t--global--font--size--body--sm); text-decoration: none; white-space: nowrap; padding: 4px 8px; border-radius: 4px; }
-  .header-link:hover { background: rgba(255,255,255,.1); text-decoration: underline; }
-  /* Page's own internal layout is CSS grid with template areas for
-     header/sidebar/main — since this app has no sidebar, a bare
-     .pf-v6-c-tabs div as a direct child got auto-placed into whatever
-     grid slot the browser's implicit grid flow assumed (looked like a
-     sidebar column), instead of spanning full width as a horizontal tab
-     bar. Forcing an explicit stacked layout instead of chasing the exact
-     grid-template-areas value. */
-  .pf-v6-c-page { display: flex !important; flex-direction: column !important; min-height: 100vh; }
-  /* The masthead and tabs must never shrink — without flex-shrink:0 they're
-     treated like any other flex child, so once page content (e.g. a long
-     Discord channel list on Config) pushed the page taller than the
-     viewport, the browser started shrinking the whole flex column to fit
-     rather than letting the page grow and scroll normally, squeezing the
-     tab bar down to ~18px and clipping it. Protecting their height and
-     letting main-container flow/scroll normally (not force-fit into
-     whatever space is left) fixes it. */
-  .pf-v6-c-masthead { flex-shrink: 0 !important; }
-  .pf-v6-c-tabs { width: 100%; flex-shrink: 0 !important; overflow: visible !important; }
-  /* PatternFly's default .pf-v6-c-page__main-container carries a
-     "page chrome inset" margin on BOTH inline-start and inline-end (same
-     token, symmetric by design — meant for the gap around a floating
-     card layout). Forcing width:100% above without zeroing that margin
-     made it look asymmetric: the start-side margin renders as a visible
-     gap, while the same margin on the end side pushes the container past
-     the viewport edge, where PatternFly's own overflow-x:hidden on this
-     element silently clips it — so one side shows a gap and the other
-     doesn't, even though the value is identical on both. Zero it here
-     instead of fighting the token. */
-  .pf-v6-c-page__main-container { flex: 1 1 auto !important; display: flex !important; flex-direction: column !important; align-self: stretch !important; width: 100% !important; margin: 0 !important; overflow: visible !important; height: auto !important; }
-  .pf-v6-c-page__main { flex: 1 1 auto !important; width: 100% !important; overflow: visible !important; height: auto !important; }
-</style>
 </head>
 <body>
 
@@ -176,28 +18,28 @@
       <span id="headerStatus">Kingshot Alliance Event Scheduler</span>
     </div>
     <div class="pf-v6-c-masthead__content">
-      <a href="#" id="headerClock" class="header-link" onclick="openTimezoneModal();return false;" title="Current UTC time and your local time — click to change your time zone">Loading…</a>
-      <form method="post" action="/auth/logout" style="margin:0">
+      <a href="#" id="headerClock" class="header-link" title="Current UTC time and your local time — click to change your time zone">Loading…</a>
+      <form class="m-0" method="post" action="/auth/logout">
         <button type="submit" class="pf-v6-c-button pf-m-secondary pf-m-small">Log out</button>
       </form>
     </div>
   </header>
 
-  <div class="pf-v6-c-tabs" style="background:var(--pf-t--global--background--color--primary--default);border-block-end:1px solid var(--pf-t--global--border--color--default)">
+  <div class="pf-v6-c-tabs samaya-tabs-bar">
     <ul class="pf-v6-c-tabs__list">
       <!-- Tab order (spec §17): content/scheduling tabs first (what a
            coordinator actually manages day to day), then per-tenant setup
            and permissions, with superadmin-only Platform last. -->
-      <li class="pf-v6-c-tabs__item pf-m-current"><button class="pf-v6-c-tabs__link" onclick="showView('dashboard',this)"><span class="pf-v6-c-tabs__item-text">Dashboard</span></button></li>
-      <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('events',this)"><span class="pf-v6-c-tabs__item-text">Events</span></button></li>
-      <li class="pf-v6-c-tabs__item" id="announcementsTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('announcements',this)"><span class="pf-v6-c-tabs__item-text">Announcements</span></button></li>
-      <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('schedule',this)"><span class="pf-v6-c-tabs__item-text">Schedule</span></button></li>
-      <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" onclick="showView('postlog',this)"><span class="pf-v6-c-tabs__item-text">Post Log</span></button></li>
-      <li class="pf-v6-c-tabs__item" id="syncTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('sync',this)"><span class="pf-v6-c-tabs__item-text">Sync <span id="syncBadge" class="pf-v6-c-label pf-m-red pf-m-filled pf-m-compact" style="display:none;margin-inline-start:4px"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text" id="syncBadgeText">0</span></span></span></span></button></li>
-      <li class="pf-v6-c-tabs__item" id="configTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('config',this)"><span class="pf-v6-c-tabs__item-text">Config</span></button></li>
-      <li class="pf-v6-c-tabs__item" id="ticketsTabItem"><button class="pf-v6-c-tabs__link" onclick="showView('tickets',this)" title="Community feedback, event/announcement requests, and error reports from the public /feedback board"><span class="pf-v6-c-tabs__item-text">Tickets</span></button></li>
-      <li class="pf-v6-c-tabs__item" id="accessTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('access',this)" title="Superadmin: manage who has access, and the platform's kingdoms/alliances/servers/users"><span class="pf-v6-c-tabs__item-text">Access &amp; Platform</span></button></li>
-      <li class="pf-v6-c-tabs__item" id="auditTabItem" style="display:none"><button class="pf-v6-c-tabs__link" onclick="showView('audit',this)" title="Superadmin-only: who changed what, and when"><span class="pf-v6-c-tabs__item-text">Audit Log</span></button></li>
+      <li class="pf-v6-c-tabs__item pf-m-current"><button class="pf-v6-c-tabs__link" data-view="dashboard"><span class="pf-v6-c-tabs__item-text">Dashboard</span></button></li>
+      <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" data-view="events"><span class="pf-v6-c-tabs__item-text">Events</span></button></li>
+      <li class="pf-v6-c-tabs__item" id="announcementsTabItem"><button class="pf-v6-c-tabs__link" data-view="announcements"><span class="pf-v6-c-tabs__item-text">Announcements</span></button></li>
+      <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" data-view="schedule"><span class="pf-v6-c-tabs__item-text">Schedule</span></button></li>
+      <li class="pf-v6-c-tabs__item"><button class="pf-v6-c-tabs__link" data-view="postlog"><span class="pf-v6-c-tabs__item-text">Post Log</span></button></li>
+      <li class="pf-v6-c-tabs__item" id="syncTabItem"><button class="pf-v6-c-tabs__link" data-view="sync"><span class="pf-v6-c-tabs__item-text">Sync <span id="syncBadge" class="pf-v6-c-label pf-m-red pf-m-filled pf-m-compact hidden samaya-badge-inline"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text" id="syncBadgeText">0</span></span></span></span></button></li>
+      <li class="pf-v6-c-tabs__item" id="configTabItem"><button class="pf-v6-c-tabs__link" data-view="config"><span class="pf-v6-c-tabs__item-text">Config</span></button></li>
+      <li class="pf-v6-c-tabs__item" id="ticketsTabItem"><button class="pf-v6-c-tabs__link" data-view="tickets" title="Community feedback, event/announcement requests, and error reports from the public /feedback board"><span class="pf-v6-c-tabs__item-text">Tickets</span></button></li>
+      <li class="pf-v6-c-tabs__item hidden" id="accessTabItem"><button class="pf-v6-c-tabs__link" data-view="access" title="Superadmin: manage who has access, and the platform's kingdoms/alliances/servers/users"><span class="pf-v6-c-tabs__item-text">Access &amp; Platform</span></button></li>
+      <li class="pf-v6-c-tabs__item hidden" id="auditTabItem"><button class="pf-v6-c-tabs__link" data-view="audit" title="Superadmin-only: who changed what, and when"><span class="pf-v6-c-tabs__item-text">Audit Log</span></button></li>
     </ul>
   </div>
 
@@ -208,36 +50,36 @@
 <!-- DASHBOARD -->
 <div id="v-dashboard" class="view active">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-md">
-    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Dashboard</h2>
-    <div style="display:flex;align-items:center;gap:8px">
-      <label for="dashboardFilter" style="color:var(--muted);font-size:0.85em">Alliance:</label>
-      <select class="pf-v6-c-form-control pf-m-small" id="dashboardFilter" style="max-width:200px"></select>
+    <h2 class="pf-v6-c-title pf-m-lg m-0">Dashboard</h2>
+    <div class="samaya-flex-gap-8">
+      <label class="samaya-filter-label" for="dashboardFilter">Alliance:</label>
+      <select class="pf-v6-c-form-control pf-m-small samaya-w-200" id="dashboardFilter"></select>
     </div>
   </div>
 
   <div class="pf-v6-c-card pf-v6-u-mb-md">
-    <div class="pf-v6-c-card__body" id="st-alliances"><p style="color:var(--muted)">Loading…</p></div>
+    <div class="pf-v6-c-card__body" id="st-alliances"><p class="samaya-muted">Loading…</p></div>
   </div>
 
-  <div id="syncSummaryCard" class="pf-v6-c-alert pf-m-warning pf-m-inline pf-v6-u-mb-md" style="display:none;cursor:pointer" onclick="showView('sync', document.querySelector('#syncTabItem .pf-v6-c-tabs__link'))">
+  <div id="syncSummaryCard" class="pf-v6-c-alert pf-m-warning pf-m-inline pf-v6-u-mb-md hidden samaya-clickable">
     <div class="pf-v6-c-alert__icon">⚠</div>
     <p class="pf-v6-c-alert__title"><strong id="syncIssueCount">0</strong> sync issue(s) detected — click to review in Sync tab</p>
   </div>
 
   <div class="pf-v6-u-mb-md">
-    <button class="pf-v6-c-button pf-m-primary" onclick="triggerRegen()" title="Immediately regenerate the 28-day occurrence window. Use after adding or editing events — normally runs automatically at UTC 00:00.">↻ Regenerate Now</button>
-    <button class="pf-v6-c-button pf-m-secondary" onclick="loadDashboard()" title="Reload dashboard status from the API.">Refresh</button>
+    <button class="pf-v6-c-button pf-m-primary" id="btnRegenerateNow" title="Immediately regenerate the 28-day occurrence window. Use after adding or editing events — normally runs automatically at UTC 00:00.">↻ Regenerate Now</button>
+    <button class="pf-v6-c-button pf-m-secondary" id="btnDashboardRefresh" title="Reload dashboard status from the API.">Refresh</button>
   </div>
 
   <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-sm">Today's Events</h2>
-  <div id="todayEvents"><p style="color:var(--muted)">Loading…</p></div>
+  <div id="todayEvents"><p class="samaya-muted">Loading…</p></div>
 
   <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-sm pf-v6-u-mt-md">Upcoming (Next 48h)</h2>
-  <div id="upcomingEvents"><p style="color:var(--muted)">Loading…</p></div>
+  <div id="upcomingEvents"><p class="samaya-muted">Loading…</p></div>
 
-  <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-sm pf-v6-u-mt-md">Delivery Health <span style="color:var(--muted);font-size:0.6em;font-weight:normal">(last 7 days)</span></h2>
+  <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-sm pf-v6-u-mt-md">Delivery Health <span class="samaya-suffix-muted">(last 7 days)</span></h2>
   <div class="pf-v6-c-card">
-    <div class="pf-v6-c-card__body" id="deliveryHealth"><p style="color:var(--muted)">Loading…</p></div>
+    <div class="pf-v6-c-card__body" id="deliveryHealth"><p class="samaya-muted">Loading…</p></div>
   </div>
 
   <details class="about-page">
@@ -263,30 +105,30 @@
 
 <!-- EVENTS -->
 <div id="v-events" class="view">
-  <div class="pf-v6-l-flex pf-m-align-items-center pf-v6-u-mb-sm" style="gap:12px">
-    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Event Definitions</h2>
-    <button class="pf-v6-c-button pf-m-primary" onclick="openEventModal()" title="Create a new recurring event definition. Check &quot;Leadership Only&quot; inside to make it a channel-notification-only event.">+ Add Event</button>
-    <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="exportEventsCsv()" title="Download this alliance's own alliance-scope events as CSV">Export CSV</button>
-    <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="document.getElementById('eventsImportFile').click()" title="Bulk-create alliance-scope events from a CSV in the same column format as Export CSV">Import CSV</button>
-    <input type="file" id="eventsImportFile" accept=".csv" style="display:none" onchange="importEventsCsv(this.files[0])">
-    <select class="pf-v6-c-form-control pf-m-small" id="eventsFilter" style="max-width:180px;margin-left:auto"></select>
-    <input class="pf-v6-c-form-control pf-m-small" id="eventsFilterInput" placeholder="Filter by name or alliance…" style="max-width:240px">
+  <div class="pf-v6-l-flex pf-m-align-items-center pf-v6-u-mb-sm samaya-gap-12">
+    <h2 class="pf-v6-c-title pf-m-lg m-0">Event Definitions</h2>
+    <button class="pf-v6-c-button pf-m-primary" id="btnAddEvent" title="Create a new recurring event definition. Check &quot;Leadership Only&quot; inside to make it a channel-notification-only event.">+ Add Event</button>
+    <button class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnExportEventsCsv" title="Download this alliance's own alliance-scope events as CSV">Export CSV</button>
+    <button class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnImportEventsCsv" title="Bulk-create alliance-scope events from a CSV in the same column format as Export CSV">Import CSV</button>
+    <input class="hidden" type="file" id="eventsImportFile" accept=".csv">
+    <select class="pf-v6-c-form-control pf-m-small samaya-w-180-auto" id="eventsFilter"></select>
+    <input class="pf-v6-c-form-control pf-m-small samaya-w-240" id="eventsFilterInput" placeholder="Filter by name or alliance…">
   </div>
-  <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs" style="background:var(--bg2);padding:8px 10px;border-radius:4px">🛡️ Alliance Events</h2>
+  <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs samaya-section-header-blue">🛡️ Alliance Events</h2>
   <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg" id="eventsTable">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
       <th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Alliance</th><th class="pf-v6-c-table__th">Interval</th><th class="pf-v6-c-table__th">Schedule Start</th>
       <th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Notification Targets</th><th class="pf-v6-c-table__th">Actions</th>
     </tr></thead>
-    <tbody id="eventsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody id="eventsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="7">Loading…</td></tr></tbody>
   </table>
-  <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs" style="background:var(--bg3);padding:8px 10px;border-radius:4px">👑 Leadership Notifications</h2>
+  <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs samaya-section-header-slate">👑 Leadership Notifications</h2>
   <table class="pf-v6-c-table pf-m-grid-md" id="eventsTableLeadership">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
       <th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Alliance</th><th class="pf-v6-c-table__th">Interval</th><th class="pf-v6-c-table__th">Schedule Start</th>
       <th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Notification Targets</th><th class="pf-v6-c-table__th">Actions</th>
     </tr></thead>
-    <tbody id="eventsBodyLeadership"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody id="eventsBodyLeadership"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="7">Loading…</td></tr></tbody>
   </table>
 
   <details class="about-page">
@@ -311,36 +153,36 @@
 <!-- SCHEDULE (spec §38-followup: Gantt merged in as a second layout, not a separate tab) -->
 <div id="v-schedule" class="view">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">28-Day Schedule</h2>
-    <div style="display:flex;align-items:center;gap:8px">
-      <label for="scheduleFilter" style="color:var(--muted);font-size:0.85em">Alliance:</label>
-      <select class="pf-v6-c-form-control pf-m-small" id="scheduleFilter" style="max-width:180px"></select>
-      <div style="display:flex;gap:4px" role="group" aria-label="Layout">
-        <button class="pf-v6-c-button pf-m-primary pf-m-small" id="scheduleLayoutTableBtn" onclick="setScheduleLayout('table')" title="Show occurrences as a sortable table with post/cancel actions.">☰ Table</button>
-        <button class="pf-v6-c-button pf-m-secondary pf-m-small" id="scheduleLayoutGanttBtn" onclick="setScheduleLayout('gantt')" title="Show occurrences as a 28-day visual timeline.">📊 Timeline</button>
+    <h2 class="pf-v6-c-title pf-m-lg m-0">28-Day Schedule</h2>
+    <div class="samaya-flex-gap-8">
+      <label class="samaya-filter-label" for="scheduleFilter">Alliance:</label>
+      <select class="pf-v6-c-form-control pf-m-small samaya-w-180" id="scheduleFilter"></select>
+      <div class="samaya-flex-gap-4" role="group" aria-label="Layout">
+        <button class="pf-v6-c-button pf-m-primary pf-m-small" id="scheduleLayoutTableBtn" title="Show occurrences as a sortable table with post/cancel actions.">☰ Table</button>
+        <button class="pf-v6-c-button pf-m-secondary pf-m-small" id="scheduleLayoutGanttBtn" title="Show occurrences as a 28-day visual timeline.">📊 Timeline</button>
       </div>
-      <button class="pf-v6-c-button pf-m-secondary" onclick="loadSchedule()" title="Reload the 28-day occurrence list from the database.">Refresh</button>
+      <button class="pf-v6-c-button pf-m-secondary" id="btnScheduleRefresh" title="Reload the 28-day occurrence list from the database.">Refresh</button>
     </div>
   </div>
 
   <div id="scheduleTableView">
     <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-      <h2 class="pf-v6-c-title pf-m-md" style="margin:0">🛡️ Alliance Events</h2>
-      <button class="pf-v6-c-button pf-m-primary" onclick="postSelected('Alliance')" title="Post all checked alliance occurrences to Discord Scheduled Events sequentially.">▶ Post Selected to Discord</button>
+      <h2 class="pf-v6-c-title pf-m-md m-0">🛡️ Alliance Events</h2>
+      <button class="pf-v6-c-button pf-m-primary" id="btnPostSelectedAlliance" title="Post all checked alliance occurrences to Discord Scheduled Events sequentially.">▶ Post Selected to Discord</button>
     </div>
     <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg" id="schedTable">
       <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
         <th class="pf-v6-c-table__th">Date</th><th class="pf-v6-c-table__th">Day</th><th class="pf-v6-c-table__th">Event</th><th class="pf-v6-c-table__th">Start (UTC)</th>
         <th class="pf-v6-c-table__th">Duration</th><th class="pf-v6-c-table__th">Channel</th><th class="pf-v6-c-table__th">Post?</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Actions</th>
       </tr></thead>
-      <tbody id="schedBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="9" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+      <tbody id="schedBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="9">Loading…</td></tr></tbody>
     </table>
-    <div id="schedLeadershipWrap" style="display:none">
+    <div class="hidden" id="schedLeadershipWrap">
       <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-        <h2 class="pf-v6-c-title pf-m-md" style="margin:0;background:var(--amber);padding:6px 10px;border-radius:4px">👑 Leadership Notifications</h2>
-        <button class="pf-v6-c-button pf-m-primary" onclick="postSelected('Leadership')" title="Send all checked leadership occurrences as channel notifications.">▶ Post Selected to Discord</button>
+        <h2 class="pf-v6-c-title pf-m-md samaya-section-header-amber">👑 Leadership Notifications</h2>
+        <button class="pf-v6-c-button pf-m-primary" id="btnPostSelectedLeadership" title="Send all checked leadership occurrences as channel notifications.">▶ Post Selected to Discord</button>
       </div>
-      <p class="pf-v6-u-font-size-sm pf-v6-u-mb-sm" style="color:var(--pf-t--global--text--color--subtle)">These events post to the leadership channel only — not visible on Discord Scheduled Events or the public calendar.</p>
+      <p class="pf-v6-u-font-size-sm pf-v6-u-mb-sm samaya-subtle-text">These events post to the leadership channel only — not visible on Discord Scheduled Events or the public calendar.</p>
       <table class="pf-v6-c-table pf-m-grid-md" id="schedTableLeadership">
         <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
           <th class="pf-v6-c-table__th">Date</th><th class="pf-v6-c-table__th">Day</th><th class="pf-v6-c-table__th">Event</th><th class="pf-v6-c-table__th">Start (UTC)</th>
@@ -356,8 +198,8 @@
          since an Announcement has no start/end time or post_to_discord
          toggle the way an Occurrence does — Edit/Cancel/Delete/Duplicate
          instead of Post/Cancel. -->
-    <div id="schedAnnouncementsWrap" style="display:none">
-      <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs" style="background:var(--bg2);padding:8px 10px;border-radius:4px">📢 Announcements</h2>
+    <div class="hidden" id="schedAnnouncementsWrap">
+      <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs samaya-section-header-blue">📢 Announcements</h2>
       <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg" id="schedAnnouncementsTable">
         <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
           <th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Alliance</th><th class="pf-v6-c-table__th">Interval</th><th class="pf-v6-c-table__th">Schedule Start</th>
@@ -368,17 +210,17 @@
     </div>
   </div>
 
-  <div id="scheduleGanttView" style="display:none">
+  <div class="hidden" id="scheduleGanttView">
     <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">🛡️ Alliance Events Timeline</h2>
     <div class="pf-v6-c-card gantt-wrap" id="ganttWrap">
-      <p style="color:var(--muted);padding:1rem">Loading…</p>
+      <p class="samaya-muted-pad-1rem">Loading…</p>
     </div>
-    <div id="ganttLegend" style="margin-top:12px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:10px"></div>
-    <div id="ganttLeadershipWrap" style="display:none">
-      <div style="border-top:2px solid var(--border);margin-bottom:16px"></div>
+    <div class="samaya-gantt-legend-wrap" id="ganttLegend"></div>
+    <div class="hidden" id="ganttLeadershipWrap">
+      <div class="samaya-section-divider"></div>
       <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">👑 Leadership Notifications Timeline</h2>
-      <div class="pf-v6-c-card gantt-wrap" id="ganttWrapLeadership" style="background:var(--bg2)"></div>
-      <div id="ganttLegendLeadership" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px"></div>
+      <div class="pf-v6-c-card gantt-wrap samaya-bg2" id="ganttWrapLeadership"></div>
+      <div class="samaya-legend-row" id="ganttLegendLeadership"></div>
     </div>
     <!-- Spec §49 — a separate timeline for Announcements, same reasoning
          as schedAnnouncementsWrap above (its own section, not merged into
@@ -386,11 +228,11 @@
          announcement — see renderAnnouncementGantt's own comment for why
          a recurring announcement isn't projected across the full window
          the way a recurring Event's occurrences are. -->
-    <div id="ganttAnnouncementsWrap" style="display:none">
-      <div style="border-top:2px solid var(--border);margin-bottom:16px"></div>
+    <div class="hidden" id="ganttAnnouncementsWrap">
+      <div class="samaya-section-divider"></div>
       <h2 class="pf-v6-c-title pf-m-md pf-v6-u-mb-xs">📢 Announcements Timeline</h2>
-      <div class="pf-v6-c-card gantt-wrap" id="ganttWrapAnnouncements" style="background:var(--bg2)"></div>
-      <div id="ganttLegendAnnouncements" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px"></div>
+      <div class="pf-v6-c-card gantt-wrap samaya-bg2" id="ganttWrapAnnouncements"></div>
+      <div class="samaya-legend-row" id="ganttLegendAnnouncements"></div>
     </div>
   </div>
 
@@ -416,10 +258,10 @@
 <!-- POST LOG -->
 <div id="v-postlog" class="view">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-md">
-    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Post Log</h2>
-    <select class="pf-v6-c-form-control pf-m-small" id="postlogFilter" style="max-width:180px"></select>
-    <input class="pf-v6-c-form-control pf-m-small" id="postLogFilterInput" placeholder="Filter by event, poster, or status…" style="max-width:260px" oninput="filterPostLogTable()">
-    <button onclick="exportPostLogCsv()" title="Download this filter's PostLog entries as a CSV file." class="pf-v6-c-button pf-m-secondary pf-m-small">⬇ Export CSV</button>
+    <h2 class="pf-v6-c-title pf-m-lg m-0">Post Log</h2>
+    <select class="pf-v6-c-form-control pf-m-small samaya-w-180" id="postlogFilter"></select>
+    <input class="pf-v6-c-form-control pf-m-small samaya-w-260" id="postLogFilterInput" placeholder="Filter by event, poster, or status…">
+    <button id="btnExportPostLogCsv" title="Download this filter's PostLog entries as a CSV file." class="pf-v6-c-button pf-m-secondary pf-m-small">⬇ Export CSV</button>
   </div>
   <table class="pf-v6-c-table pf-m-grid-md">
     <thead class="pf-v6-c-table__thead">
@@ -429,7 +271,7 @@
       </tr>
     </thead>
     <tbody class="pf-v6-c-table__tbody" id="logBody">
-      <tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">Loading…</td></tr>
+      <tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="7">Loading…</td></tr>
     </tbody>
   </table>
 
@@ -448,18 +290,18 @@
 <!-- CONFIG -->
 <div id="v-config" class="view">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Discord Configuration</h2>
-    <div style="display:flex;align-items:center;gap:8px">
-      <select class="pf-v6-c-form-control pf-m-small" id="configFilter" style="max-width:180px"></select>
-      <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="loadDiscordConfig()">↻ Refresh</button>
+    <h2 class="pf-v6-c-title pf-m-lg m-0">Discord Configuration</h2>
+    <div class="samaya-flex-gap-8">
+      <select class="pf-v6-c-form-control pf-m-small samaya-w-180" id="configFilter"></select>
+      <button class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnConfigRefresh">↻ Refresh</button>
     </div>
   </div>
-  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md samaya-subtle-text">
     A Discord server's own bot token/guild are set up by a superadmin on the Access &amp; Platform tab, not here.
     This is read-only, listing each server's own channels and roles for reference when filling in an event's
     or announcement's notification settings.
   </p>
-  <div id="discordConfigAccordion"><p style="color:var(--muted)">Loading…</p></div>
+  <div id="discordConfigAccordion"><p class="samaya-muted">Loading…</p></div>
 
   <details class="about-page">
     <summary>About this page</summary>
@@ -477,17 +319,17 @@
 <!-- SYNC -->
 <div id="v-sync" class="view">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Discord Sync</h2>
-    <div style="display:flex;align-items:center;gap:8px">
-      <select class="pf-v6-c-form-control pf-m-small" id="syncFilter" style="max-width:180px"></select>
-      <button class="pf-v6-c-button pf-m-primary" onclick="loadSync()" title="Fetch all current Discord scheduled events and compare against PostLog.">↻ Run Sync Check</button>
+    <h2 class="pf-v6-c-title pf-m-lg m-0">Discord Sync</h2>
+    <div class="samaya-flex-gap-8">
+      <select class="pf-v6-c-form-control pf-m-small samaya-w-180" id="syncFilter"></select>
+      <button class="pf-v6-c-button pf-m-primary" id="btnRunSyncCheck" title="Fetch all current Discord scheduled events and compare against PostLog.">↻ Run Sync Check</button>
     </div>
   </div>
-  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md samaya-subtle-text">
     Compares PostLog against live Discord events. Run manually whenever you suspect a mismatch.
     Field-level changes made directly in Discord are only visible here — they are not detected automatically.
   </p>
-  <div id="syncContent"><p style="color:var(--muted)">Click "Run Sync Check" to fetch current Discord events.</p></div>
+  <div id="syncContent"><p class="samaya-muted">Click "Run Sync Check" to fetch current Discord events.</p></div>
 
   <details class="about-page">
     <summary>About this page</summary>
@@ -511,32 +353,32 @@
 <!-- ACCESS & PLATFORM (spec §38.6 — merged) -->
 <div id="v-access" class="view">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Access</h2>
-    <div style="display:flex;align-items:center;gap:8px">
-      <label for="accessAllianceSelect" style="color:var(--muted);font-size:0.85em">Alliance:</label>
-      <select class="pf-v6-c-form-control pf-m-small" id="accessAllianceSelect" style="max-width:180px"></select>
-      <button class="pf-v6-c-button pf-m-primary" onclick="createInvite()">+ Invite Coordinator</button>
+    <h2 class="pf-v6-c-title pf-m-lg m-0">Access</h2>
+    <div class="samaya-flex-gap-8">
+      <label class="samaya-filter-label" for="accessAllianceSelect">Alliance:</label>
+      <select class="pf-v6-c-form-control pf-m-small samaya-w-180" id="accessAllianceSelect"></select>
+      <button class="pf-v6-c-button pf-m-primary" id="btnCreateInvite">+ Invite Coordinator</button>
     </div>
   </div>
 
   <h3 class="pf-v6-c-title pf-m-md pf-v6-u-mb-sm">Members</h3>
-  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md samaya-subtle-text">
     Everyone who currently has access to this tenant. Change a role or remove access outright — this acts
     immediately, unlike revoking an invite, which only stops a link that hasn't been claimed yet.
   </p>
   <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Role</th><th class="pf-v6-c-table__th"></th></tr></thead>
-    <tbody class="pf-v6-c-table__tbody" id="membersBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="3" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody class="pf-v6-c-table__tbody" id="membersBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="3">Loading…</td></tr></tbody>
   </table>
 
   <h3 class="pf-v6-c-title pf-m-md pf-v6-u-mb-sm">Invites</h3>
-  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md samaya-subtle-text">
     Anyone with a link below can claim it via Discord login. Share it in a DM or an officer channel — it's a
     single-use link, not a password.
   </p>
   <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Role</th><th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Expires</th><th class="pf-v6-c-table__th"></th></tr></thead>
-    <tbody class="pf-v6-c-table__tbody" id="invitesBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="4" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody class="pf-v6-c-table__tbody" id="invitesBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="4">Loading…</td></tr></tbody>
   </table>
 
   <details class="about-page">
@@ -551,63 +393,63 @@
   </details>
 
   <!-- Platform section (spec §38.6 — merged into Access, superadmin-only, shown by access.js's loadAccess() via loadPlatform()) -->
-  <div id="platformSection" style="margin-top:32px;padding-top:24px;border-top:2px solid var(--border)">
+  <div class="samaya-platform-section" id="platformSection">
   <h2 class="pf-v6-c-title pf-m-lg pf-v6-u-mb-md">Platform</h2>
 
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-    <h3 class="pf-v6-c-title pf-m-md" style="margin:0">Kingdoms &amp; Branding</h3>
-    <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="createKingdom()">+ New Kingdom</button>
+    <h3 class="pf-v6-c-title pf-m-md m-0">Kingdoms &amp; Branding</h3>
+    <button class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnCreateKingdom">+ New Kingdom</button>
   </div>
-  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-sm" style="color:var(--pf-t--global--text--color--subtle)">
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-sm samaya-subtle-text">
     Editing a kingdom also lets you set custom page titles shown across the public events pages and this admin
     console for that kingdom (spec §38.7) — leave either blank to use the built-in default.
   </p>
   <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Slug</th><th class="pf-v6-c-table__th"></th></tr></thead>
-    <tbody class="pf-v6-c-table__tbody" id="kingdomsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="3" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody class="pf-v6-c-table__tbody" id="kingdomsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="3">Loading…</td></tr></tbody>
   </table>
 
   <h3 class="pf-v6-c-title pf-m-md pf-v6-u-mb-sm">Kingdom Coordinators</h3>
-  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md samaya-subtle-text">
     Everyone who has claimed kingdom-coordinator access via a "+ Kingdom Coordinator Invite" link above, across
     every kingdom. Removing someone here only revokes kingdom-wide access — it does not touch their membership
     on any individual alliance (see the Access tab for that).
   </p>
   <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Discord Username</th><th class="pf-v6-c-table__th">Kingdom</th><th class="pf-v6-c-table__th"></th></tr></thead>
-    <tbody class="pf-v6-c-table__tbody" id="kingdomCoordinatorsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="3" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody class="pf-v6-c-table__tbody" id="kingdomCoordinatorsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="3">Loading…</td></tr></tbody>
   </table>
 
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-    <h3 class="pf-v6-c-title pf-m-md" style="margin:0">Discord Servers</h3>
-    <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="createDiscordServer()">+ New Discord Server</button>
+    <h3 class="pf-v6-c-title pf-m-md m-0">Discord Servers</h3>
+    <button class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnCreateDiscordServer">+ New Discord Server</button>
   </div>
-  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md samaya-subtle-text">
     A Discord guild this app posts to — infrastructure, not an alliance. Multiple alliances below can share one
     server (spec §25); they then share that server's single bot, and its credentials are edited here, not per-alliance.
   </p>
   <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Guild ID</th><th class="pf-v6-c-table__th">Bot</th><th class="pf-v6-c-table__th">Alliances</th><th class="pf-v6-c-table__th"></th></tr></thead>
-    <tbody class="pf-v6-c-table__tbody" id="discordServersBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="5" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody class="pf-v6-c-table__tbody" id="discordServersBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="5">Loading…</td></tr></tbody>
   </table>
 
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-    <h3 class="pf-v6-c-title pf-m-md" style="margin:0">Tenants (Alliances)</h3>
-    <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="createTenant()">+ New Tenant</button>
+    <h3 class="pf-v6-c-title pf-m-md m-0">Tenants (Alliances)</h3>
+    <button class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnCreateTenant">+ New Tenant</button>
   </div>
   <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Slug</th><th class="pf-v6-c-table__th">Kingdom</th><th class="pf-v6-c-table__th">Discord Server</th><th class="pf-v6-c-table__th"></th></tr></thead>
-    <tbody class="pf-v6-c-table__tbody" id="tenantsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="5" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody class="pf-v6-c-table__tbody" id="tenantsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="5">Loading…</td></tr></tbody>
   </table>
 
   <h3 class="pf-v6-c-title pf-m-md pf-v6-u-mb-sm">Users</h3>
-  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md samaya-subtle-text">
     Everyone who has ever logged in via Discord, platform-wide. Superadmin grants full access to every tenant
     and kingdom — grant it sparingly.
   </p>
   <table class="pf-v6-c-table pf-m-grid-md">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">Discord Username</th><th class="pf-v6-c-table__th">Superadmin</th><th class="pf-v6-c-table__th">Last Login</th><th class="pf-v6-c-table__th"></th></tr></thead>
-    <tbody class="pf-v6-c-table__tbody" id="usersBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="4" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody class="pf-v6-c-table__tbody" id="usersBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="4">Loading…</td></tr></tbody>
   </table>
 
   <details class="about-page">
@@ -632,16 +474,16 @@
 <!-- AUDIT LOG -->
 <div id="v-audit" class="view">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Audit Log</h2>
-    <span id="auditAllianceLabel" style="color:var(--muted);font-size:0.9em" title="Shares the Access tab's alliance selection"></span>
+    <h2 class="pf-v6-c-title pf-m-lg m-0">Audit Log</h2>
+    <span class="samaya-audit-label" id="auditAllianceLabel" title="Shares the Access tab's alliance selection"></span>
   </div>
-  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md samaya-subtle-text">
     Who changed what, and when, for the alliance currently selected on the Access tab. Append-only — nothing
     here can be edited or rolled back; it's a record, not an undo button.
   </p>
   <table class="pf-v6-c-table pf-m-grid-md">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th">When</th><th class="pf-v6-c-table__th">Who</th><th class="pf-v6-c-table__th">Action</th><th class="pf-v6-c-table__th">Table</th><th class="pf-v6-c-table__th">Details</th></tr></thead>
-    <tbody class="pf-v6-c-table__tbody" id="auditLogBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="5" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody class="pf-v6-c-table__tbody" id="auditLogBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="5">Loading…</td></tr></tbody>
   </table>
 
   <details class="about-page">
@@ -655,10 +497,10 @@
 <!-- TICKETS (spec §40-43) -->
 <div id="v-tickets" class="view">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Tickets</h2>
+    <h2 class="pf-v6-c-title pf-m-lg m-0">Tickets</h2>
     <a href="/feedback" target="_blank" class="pf-v6-c-button pf-m-secondary pf-m-small">View public board ↗</a>
   </div>
-  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md samaya-subtle-text">
     Every feedback item, event/announcement request, and error report submitted from the public
     <a href="/feedback" target="_blank">/feedback</a> board, kingdom-wide — not scoped to one alliance, since
     cross-alliance visibility is the point. Changing status here only updates what the public board shows;
@@ -674,7 +516,7 @@
       <th class="pf-v6-c-table__th">Contact</th>
       <th class="pf-v6-c-table__th">Status</th>
     </tr></thead>
-    <tbody class="pf-v6-c-table__tbody" id="ticketsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody class="pf-v6-c-table__tbody" id="ticketsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="7">Loading…</td></tr></tbody>
   </table>
 
   <details class="about-page">
@@ -691,29 +533,29 @@
 <!-- ANNOUNCEMENTS (spec §13) -->
 <div id="v-announcements" class="view">
   <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center pf-v6-u-mb-sm">
-    <h3 class="pf-v6-c-title pf-m-md" style="margin:0">Templates</h3>
-    <button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="openTemplateModal()" title="Save a reusable starting point for new announcements — supports placeholders like {alliance_name} and Discord's own dynamic timestamps.">+ New Template</button>
+    <h3 class="pf-v6-c-title pf-m-md m-0">Templates</h3>
+    <button class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnOpenTemplateModal" title="Save a reusable starting point for new announcements — supports placeholders like {alliance_name} and Discord's own dynamic timestamps.">+ New Template</button>
   </div>
-  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">Reusable, named starting points for new announcements — pick one below to pre-fill the New Announcement form, then edit and schedule as usual (spec §27).</p>
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md samaya-subtle-text">Reusable, named starting points for new announcements — pick one below to pre-fill the New Announcement form, then edit and schedule as usual (spec §27).</p>
   <table class="pf-v6-c-table pf-m-grid-md pf-v6-u-mb-lg" id="templatesTable">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
       <th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Title</th><th class="pf-v6-c-table__th">Event Offset</th><th class="pf-v6-c-table__th">Actions</th>
     </tr></thead>
-    <tbody id="templatesBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="4" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody id="templatesBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="4">Loading…</td></tr></tbody>
   </table>
 
-  <div class="pf-v6-l-flex pf-m-align-items-center pf-v6-u-mb-sm" style="gap:12px">
-    <h2 class="pf-v6-c-title pf-m-lg" style="margin:0">Announcements</h2>
-    <button class="pf-v6-c-button pf-m-primary" onclick="openAnnouncementModal()" title="Schedule a one-off channel message — no event or recurrence involved.">+ New Announcement</button>
-    <select class="pf-v6-c-form-control pf-m-small" id="announcementsFilter" style="max-width:180px;margin-left:auto"></select>
+  <div class="pf-v6-l-flex pf-m-align-items-center pf-v6-u-mb-sm samaya-gap-12">
+    <h2 class="pf-v6-c-title pf-m-lg m-0">Announcements</h2>
+    <button class="pf-v6-c-button pf-m-primary" id="btnOpenAnnouncementModal" title="Schedule a one-off channel message — no event or recurrence involved.">+ New Announcement</button>
+    <select class="pf-v6-c-form-control pf-m-small samaya-w-180-auto" id="announcementsFilter"></select>
   </div>
-  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md" style="color:var(--pf-t--global--text--color--subtle)">Plain channel posts with a title, a Markdown body, and a send time — not tied to any event definition. A still-scheduled announcement can be edited in place, or cancelled and deleted.</p>
+  <p class="pf-v6-u-font-size-sm pf-v6-u-mb-md samaya-subtle-text">Plain channel posts with a title, a Markdown body, and a send time — not tied to any event definition. A still-scheduled announcement can be edited in place, or cancelled and deleted.</p>
   <table class="pf-v6-c-table pf-m-grid-md" id="announcementsTable">
     <thead class="pf-v6-c-table__thead"><tr class="pf-v6-c-table__tr">
       <th class="pf-v6-c-table__th">Name</th><th class="pf-v6-c-table__th">Alliance</th><th class="pf-v6-c-table__th">Interval</th><th class="pf-v6-c-table__th">Schedule Start</th>
       <th class="pf-v6-c-table__th">Status</th><th class="pf-v6-c-table__th">Notification Targets</th><th class="pf-v6-c-table__th">Actions</th>
     </tr></thead>
-    <tbody id="announcementsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">Loading…</td></tr></tbody>
+    <tbody id="announcementsBody"><tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-loading-cell" colspan="7">Loading…</td></tr></tbody>
   </table>
 
   <details class="about-page">
@@ -743,10 +585,10 @@
 <!-- EVENT MODAL -->
 <div class="pf-v6-c-backdrop" id="eventModal" data-close-fn="closeModal">
   <div class="pf-v6-l-bullseye">
-    <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="modalTitle" style="max-height:90vh;overflow-y:auto">
+    <div class="pf-v6-c-modal-box pf-m-lg samaya-modal-scroll" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <header class="pf-v6-c-modal-box__header">
         <h2 class="pf-v6-c-modal-box__title" id="modalTitle"><span class="pf-v6-c-modal-box__title-text">Add Event</span></h2>
-        <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeModal()">&times;</button>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
         <input type="hidden" id="modalEventId">
@@ -774,7 +616,7 @@
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mStartTime"><span class="pf-v6-c-form__label-text">Start Time (UTC) HH:MM</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <input class="pf-v6-c-form-control" type="text" id="mStartTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric" oninput="renderEventDescriptionPreview()">
+                <input class="pf-v6-c-form-control" type="text" id="mStartTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric">
               </div>
             </div>
             <div class="pf-v6-c-form__group">
@@ -786,33 +628,33 @@
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mAnchor"><span class="pf-v6-c-form__label-text">Anchor Date (first occurrence)</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <input class="pf-v6-c-form-control" type="date" id="mAnchor" onchange="renderEventDescriptionPreview()">
+                <input class="pf-v6-c-form-control" type="date" id="mAnchor">
               </div>
             </div>
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mChannel"><span class="pf-v6-c-form__label-text">Discord Channel</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <select class="pf-v6-c-form-control" id="mChannel" style="display:none"></select>
-                <input class="pf-v6-c-form-control" type="text" id="mChannelFallback" placeholder="#alliance-war" style="display:none">
+                <select class="pf-v6-c-form-control hidden" id="mChannel"></select>
+                <input class="pf-v6-c-form-control hidden" type="text" id="mChannelFallback" placeholder="#alliance-war">
               </div>
             </div>
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mDescription"><span class="pf-v6-c-form__label-text">Description</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <div class="md-toolbar">
-                  <button type="button" title="Bold" onclick="wrapSelection('mDescription','**','**','bold')"><strong>B</strong></button>
-                  <button type="button" title="Italic" onclick="wrapSelection('mDescription','*','*','italic')"><em>I</em></button>
-                  <button type="button" title="Underline" onclick="wrapSelection('mDescription','__','__','underline')"><u>U</u></button>
-                  <button type="button" title="Strikethrough" onclick="wrapSelection('mDescription','~~','~~','strike')"><s>S</s></button>
-                  <button type="button" title="Spoiler" onclick="wrapSelection('mDescription','||','||','spoiler')">||•||</button>
-                  <button type="button" title="Heading" onclick="prefixSelectedLines('mDescription','# ')"><strong>H</strong></button>
-                  <button type="button" title="Quote" onclick="prefixSelectedLines('mDescription','&gt; ')">&gt; Quote</button>
-                  <button type="button" title="Inline code" onclick="wrapSelection('mDescription','`','`','code')">&lt;/&gt;</button>
-                  <button type="button" title="Code block" onclick="insertCodeBlock('mDescription')">{ }</button>
-                  <button type="button" class="emoji-picker-btn" title="Insert emoji" onclick="toggleEmojiPicker(this,'mDescription')">🙂</button>
-                  <select class="pf-v6-c-form-control pf-m-small" id="mRoleMention" style="max-width:170px" onchange="insertRoleMention('mRoleMention','mDescription')" title="Roles from the alliance chosen under Preview As"><option value="">Insert role mention…</option></select>
+                <div class="md-toolbar" id="mDescriptionToolbar" data-target="mDescription">
+                  <button type="button" title="Bold" data-md-cmd="bold"><strong>B</strong></button>
+                  <button type="button" title="Italic" data-md-cmd="italic"><em>I</em></button>
+                  <button type="button" title="Underline" data-md-cmd="underline"><u>U</u></button>
+                  <button type="button" title="Strikethrough" data-md-cmd="strike"><s>S</s></button>
+                  <button type="button" title="Spoiler" data-md-cmd="spoiler">||•||</button>
+                  <button type="button" title="Heading" data-md-cmd="heading"><strong>H</strong></button>
+                  <button type="button" title="Quote" data-md-cmd="quote">&gt; Quote</button>
+                  <button type="button" title="Inline code" data-md-cmd="code">&lt;/&gt;</button>
+                  <button type="button" title="Code block" data-md-cmd="codeblock">{ }</button>
+                  <button type="button" class="emoji-picker-btn" title="Insert emoji" data-md-cmd="emoji">🙂</button>
+                  <select class="pf-v6-c-form-control pf-m-small samaya-w-170" id="mRoleMention" data-role-mention title="Roles from the alliance chosen under Preview As"><option value="">Insert role mention…</option></select>
                 </div>
-                <textarea class="pf-v6-c-form-control" id="mDescription" rows="3" placeholder="Event description sent to Discord" oninput="renderEventDescriptionPreview()"></textarea>
+                <textarea class="pf-v6-c-form-control" id="mDescription" rows="3" placeholder="Event description sent to Discord"></textarea>
                 <div class="pf-v6-c-form__helper-text">
                   Placeholders, resolved when this event is posted: <code>{alliance_name}</code> <code>{kingdom_name}</code> <code>{send_time}</code> <code>{send_time_relative}</code> <code>{event_time}</code> <code>{event_time_relative}</code> (the last two are this occurrence's own start time). Appears in both the Discord Scheduled Event's own description and the pre-event ping.
                 </div>
@@ -821,9 +663,9 @@
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Preview</span></span></div>
               <div class="pf-v6-c-form__group-control">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-                  <label for="mPreviewTenant" style="color:var(--muted);font-size:0.85em">Preview as:</label>
-                  <select class="pf-v6-c-form-control pf-m-small" id="mPreviewTenant" style="max-width:220px" onchange="renderEventDescriptionPreview()"></select>
+                <div class="samaya-preview-row">
+                  <label class="samaya-filter-label" for="mPreviewTenant">Preview as:</label>
+                  <select class="pf-v6-c-form-control pf-m-small samaya-w-220" id="mPreviewTenant"></select>
                 </div>
                 <div id="mPreviewPane" class="discord-preview-pane"></div>
               </div>
@@ -832,10 +674,10 @@
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mCoverImageFile"><span class="pf-v6-c-form__label-text">Cover Image</span></label></div>
               <div class="pf-v6-c-form__group-control">
                 <input type="hidden" id="mCoverImageData" value="">
-                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                  <img id="mCoverImagePreview" style="display:none;max-width:280px;max-height:120px;border-radius:6px;object-fit:cover" alt="Cover image preview">
-                  <input type="file" id="mCoverImageFile" accept="image/png,image/jpeg,image/gif" onchange="handleCoverImageFile(this)">
-                  <button type="button" id="mCoverImageRemove" class="pf-v6-c-button pf-m-secondary pf-m-small" style="display:none" onclick="removeCoverImage()">Remove</button>
+                <div class="samaya-icon-upload-row">
+                  <img class="hidden samaya-cover-preview" id="mCoverImagePreview" alt="Cover image preview">
+                  <input type="file" id="mCoverImageFile" accept="image/png,image/jpeg,image/gif">
+                  <button type="button" id="mCoverImageRemove" class="pf-v6-c-button pf-m-secondary pf-m-small hidden">Remove</button>
                 </div>
                 <div class="pf-v6-c-form__helper-text">
                   Shown on the Discord Scheduled Event itself (PNG, JPEG, or GIF — Discord recommends a 16:9 image, up to a few MB). Optional; the event posts fine without one.
@@ -845,22 +687,22 @@
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mNotifChannel"><span class="pf-v6-c-form__label-text">Notification Channel</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <select class="pf-v6-c-form-control" id="mNotifChannel" style="display:none"></select>
-                <input class="pf-v6-c-form-control" type="text" id="mNotifChannelFallback" placeholder="Discord channel ID (digits only)" style="display:none">
+                <select class="pf-v6-c-form-control hidden" id="mNotifChannel"></select>
+                <input class="pf-v6-c-form-control hidden" type="text" id="mNotifChannelFallback" placeholder="Discord channel ID (digits only)">
               </div>
             </div>
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="mNotifRole"><span class="pf-v6-c-form__label-text">Notification Role</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <select class="pf-v6-c-form-control" id="mNotifRole" style="display:none"></select>
-                <input class="pf-v6-c-form-control" type="text" id="mNotifRoleFallback" placeholder="Discord role ID (digits only)" style="display:none">
+                <select class="pf-v6-c-form-control hidden" id="mNotifRole"></select>
+                <input class="pf-v6-c-form-control hidden" type="text" id="mNotifRoleFallback" placeholder="Discord role ID (digits only)">
               </div>
             </div>
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Extra Notification Targets</span></span></div>
               <div class="pf-v6-c-form__group-control">
-                <div id="mTargetsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
-                <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="addEventTargetRow()">+ Add Target</button>
+                <div class="samaya-target-list" id="mTargetsList"></div>
+                <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnAddEventTarget">+ Add Target</button>
               </div>
             </div>
             <div class="pf-v6-c-form__group">
@@ -872,24 +714,24 @@
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-control">
                 <span class="pf-v6-c-check">
-                  <input class="pf-v6-c-check__input" type="checkbox" id="mLeadershipOnly" onchange="toggleLeadershipNote()">
+                  <input class="pf-v6-c-check__input" type="checkbox" id="mLeadershipOnly">
                   <label class="pf-v6-c-check__label" for="mLeadershipOnly">Leadership Only (👑 — channel notification only, not posted to Discord Scheduled Events or public calendar)</label>
                 </span>
-                <div id="leadershipNote" style="display:none;font-size:var(--fs-xs);color:var(--muted);margin-top:6px;padding:8px;background:var(--bg2);border-radius:4px">
+                <div class="hidden samaya-leadership-note" id="leadershipNote">
                   This event still recurs normally and appears in the admin views, but it only sends a channel message to the notification channel — no Discord Scheduled Event is created and it will not appear on the public calendar.
                 </div>
               </div>
             </div>
           </div>
         </form>
-        <div style="margin-top:12px">
-          <button class="pf-v6-c-button pf-m-link pf-m-inline" onclick="previewOccurrences()">Preview next 10 occurrences</button>
-          <div id="previewResult" style="margin-top:8px;font-size:var(--fs-sm);color:var(--muted)"></div>
+        <div class="samaya-mt-12">
+          <button class="pf-v6-c-button pf-m-link pf-m-inline" id="btnPreviewOccurrences">Preview next 10 occurrences</button>
+          <div class="samaya-preview-result" id="previewResult"></div>
         </div>
       </div>
       <footer class="pf-v6-c-modal-box__footer">
-        <button class="pf-v6-c-button pf-m-primary" onclick="saveEvent()">Save</button>
-        <button class="pf-v6-c-button pf-m-link" onclick="closeModal()">Cancel</button>
+        <button class="pf-v6-c-button pf-m-primary" id="btnSaveEvent">Save</button>
+        <button class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
       </footer>
     </div>
   </div>
@@ -898,10 +740,10 @@
 <!-- ANNOUNCEMENT MODAL (spec §13) -->
 <div class="pf-v6-c-backdrop" id="announcementModal" data-close-fn="closeAnnouncementModal">
   <div class="pf-v6-l-bullseye">
-    <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="announcementModalTitle" style="max-height:90vh;overflow-y:auto">
+    <div class="pf-v6-c-modal-box pf-m-lg samaya-modal-scroll" role="dialog" aria-modal="true" aria-labelledby="announcementModalTitle">
       <header class="pf-v6-c-modal-box__header">
         <h2 class="pf-v6-c-modal-box__title" id="announcementModalTitle"><span class="pf-v6-c-modal-box__title-text">New Announcement</span></h2>
-        <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeAnnouncementModal()">&times;</button>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
         <input type="hidden" id="aAnnouncementId">
@@ -923,20 +765,20 @@
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aBody"><span class="pf-v6-c-form__label-text">Body (Markdown)</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <div class="md-toolbar">
-                  <button type="button" title="Bold" onclick="wrapSelection('aBody','**','**','bold')"><strong>B</strong></button>
-                  <button type="button" title="Italic" onclick="wrapSelection('aBody','*','*','italic')"><em>I</em></button>
-                  <button type="button" title="Underline" onclick="wrapSelection('aBody','__','__','underline')"><u>U</u></button>
-                  <button type="button" title="Strikethrough" onclick="wrapSelection('aBody','~~','~~','strike')"><s>S</s></button>
-                  <button type="button" title="Spoiler" onclick="wrapSelection('aBody','||','||','spoiler')">||•||</button>
-                  <button type="button" title="Heading" onclick="prefixSelectedLines('aBody','# ')"><strong>H</strong></button>
-                  <button type="button" title="Quote" onclick="prefixSelectedLines('aBody','&gt; ')">&gt; Quote</button>
-                  <button type="button" title="Inline code" onclick="wrapSelection('aBody','`','`','code')">&lt;/&gt;</button>
-                  <button type="button" title="Code block" onclick="insertCodeBlock('aBody')">{ }</button>
-                  <button type="button" class="emoji-picker-btn" title="Insert emoji" onclick="toggleEmojiPicker(this,'aBody')">🙂</button>
-                  <select class="pf-v6-c-form-control pf-m-small" id="aRoleMention" style="max-width:170px" onchange="insertRoleMention('aRoleMention','aBody')" title="Roles from the alliance chosen under Preview As"><option value="">Insert role mention…</option></select>
+                <div class="md-toolbar" id="aBodyToolbar" data-target="aBody">
+                  <button type="button" title="Bold" data-md-cmd="bold"><strong>B</strong></button>
+                  <button type="button" title="Italic" data-md-cmd="italic"><em>I</em></button>
+                  <button type="button" title="Underline" data-md-cmd="underline"><u>U</u></button>
+                  <button type="button" title="Strikethrough" data-md-cmd="strike"><s>S</s></button>
+                  <button type="button" title="Spoiler" data-md-cmd="spoiler">||•||</button>
+                  <button type="button" title="Heading" data-md-cmd="heading"><strong>H</strong></button>
+                  <button type="button" title="Quote" data-md-cmd="quote">&gt; Quote</button>
+                  <button type="button" title="Inline code" data-md-cmd="code">&lt;/&gt;</button>
+                  <button type="button" title="Code block" data-md-cmd="codeblock">{ }</button>
+                  <button type="button" class="emoji-picker-btn" title="Insert emoji" data-md-cmd="emoji">🙂</button>
+                  <select class="pf-v6-c-form-control pf-m-small samaya-w-170" id="aRoleMention" data-role-mention title="Roles from the alliance chosen under Preview As"><option value="">Insert role mention…</option></select>
                 </div>
-                <textarea class="pf-v6-c-form-control" id="aBody" rows="5" maxlength="2000" placeholder="Announcement text sent to Discord" oninput="updateAnnouncementCharCount()"></textarea>
+                <textarea class="pf-v6-c-form-control" id="aBody" rows="5" maxlength="2000" placeholder="Announcement text sent to Discord"></textarea>
                 <div class="pf-v6-c-form__helper-text">
                   <span id="aBodyCount">0</span> / 2000 characters (Discord's message limit) — Discord markdown works as usual (**bold**, *italic*, __underline__, ~~strikethrough~~, ||spoiler||, # heading, &gt; quote, ```code```).
                   Placeholders, resolved when each message is sent: <code>{alliance_name}</code> <code>{kingdom_name}</code> <code>{send_time}</code> <code>{send_time_relative}</code> <code>{event_time}</code> <code>{event_time_relative}</code> — the two <code>event_*</code> ones use the Event Offset field below.
@@ -946,9 +788,9 @@
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Preview</span></span></div>
               <div class="pf-v6-c-form__group-control">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-                  <label for="aPreviewTenant" style="color:var(--muted);font-size:0.85em">Preview as:</label>
-                  <select class="pf-v6-c-form-control pf-m-small" id="aPreviewTenant" style="max-width:220px" onchange="renderAnnouncementPreview()"></select>
+                <div class="samaya-preview-row">
+                  <label class="samaya-filter-label" for="aPreviewTenant">Preview as:</label>
+                  <select class="pf-v6-c-form-control pf-m-small samaya-w-220" id="aPreviewTenant"></select>
                 </div>
                 <div id="aPreviewPane" class="discord-preview-pane"></div>
               </div>
@@ -956,32 +798,32 @@
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aScheduledDate"><span class="pf-v6-c-form__label-text">Send Date (UTC)</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <input class="pf-v6-c-form-control" type="date" id="aScheduledDate" onchange="renderAnnouncementPreview()">
+                <input class="pf-v6-c-form-control" type="date" id="aScheduledDate">
               </div>
             </div>
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aScheduledTime"><span class="pf-v6-c-form__label-text">Send Time (UTC) HH:MM</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <input class="pf-v6-c-form-control" type="text" id="aScheduledTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric" oninput="renderAnnouncementPreview()">
+                <input class="pf-v6-c-form-control" type="text" id="aScheduledTime" placeholder="HH:MM (e.g. 19:00)" inputmode="numeric">
                 <div class="pf-v6-c-form__helper-text">24-hour clock, same as event start times.</div>
               </div>
             </div>
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aEventOffsetMinutes"><span class="pf-v6-c-form__label-text">Event Offset (minutes)</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <input class="pf-v6-c-form-control" type="number" id="aEventOffsetMinutes" value="0" placeholder="0" oninput="renderAnnouncementPreview()">
+                <input class="pf-v6-c-form-control" type="number" id="aEventOffsetMinutes" value="0" placeholder="0">
                 <div class="pf-v6-c-form__helper-text">Only matters if the body uses {event_time}/{event_time_relative} — how many minutes after Send Time the event itself happens. E.g. a reset warning sent 15 minutes early uses 15.</div>
               </div>
             </div>
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-control">
                 <span class="pf-v6-c-check">
-                  <input class="pf-v6-c-check__input" type="checkbox" id="aRecurring" onchange="toggleAnnouncementRecurringNote()">
+                  <input class="pf-v6-c-check__input" type="checkbox" id="aRecurring">
                   <label class="pf-v6-c-check__label" for="aRecurring">Recurring</label>
                 </span>
               </div>
             </div>
-            <div class="pf-v6-c-form__group" id="aIntervalGroup" style="display:none">
+            <div class="pf-v6-c-form__group hidden" id="aIntervalGroup">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="aIntervalDays"><span class="pf-v6-c-form__label-text">Repeat Every (days)</span></label></div>
               <div class="pf-v6-c-form__group-control">
                 <input class="pf-v6-c-form-control" type="number" id="aIntervalDays" min="1" placeholder="e.g. 7">
@@ -998,9 +840,9 @@
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Targets</span></span></div>
               <div class="pf-v6-c-form__group-control">
-                <div id="aTargetsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
-                <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="addAnnouncementTargetRow()">+ Add another target</button>
-                <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="addAllAllianceTargets()" title="Add one row per alliance that doesn't already have one">+ Add all alliances</button>
+                <div class="samaya-target-list" id="aTargetsList"></div>
+                <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnAddAnnouncementTarget">+ Add another target</button>
+                <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnAddAllAllianceTargets" title="Add one row per alliance that doesn't already have one">+ Add all alliances</button>
                 <div class="pf-v6-c-form__helper-text">One row per alliance you want this posted to, with that alliance's Discord channel chosen from its own server. New rows default to that alliance's last-used channel.</div>
               </div>
             </div>
@@ -1008,9 +850,9 @@
         </form>
       </div>
       <footer class="pf-v6-c-modal-box__footer">
-        <button class="pf-v6-c-button pf-m-primary" onclick="saveAnnouncement()">Save</button>
-        <button class="pf-v6-c-button pf-m-secondary" onclick="saveCurrentAsTemplate()" title="Save this title/body/leadership/event-offset as a reusable template — doesn't schedule anything.">Save as Template</button>
-        <button class="pf-v6-c-button pf-m-link" onclick="closeAnnouncementModal()">Cancel</button>
+        <button class="pf-v6-c-button pf-m-primary" id="btnSaveAnnouncement">Save</button>
+        <button class="pf-v6-c-button pf-m-secondary" id="btnSaveAsTemplate" title="Save this title/body/leadership/event-offset as a reusable template — doesn't schedule anything.">Save as Template</button>
+        <button class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
       </footer>
     </div>
   </div>
@@ -1019,10 +861,10 @@
 <!-- ANNOUNCEMENT TEMPLATE MODAL (spec §27) -->
 <div class="pf-v6-c-backdrop" id="templateModal" data-close-fn="closeTemplateModal">
   <div class="pf-v6-l-bullseye">
-    <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="templateModalTitle" style="max-height:90vh;overflow-y:auto">
+    <div class="pf-v6-c-modal-box pf-m-lg samaya-modal-scroll" role="dialog" aria-modal="true" aria-labelledby="templateModalTitle">
       <header class="pf-v6-c-modal-box__header">
         <h2 class="pf-v6-c-modal-box__title" id="templateModalTitle"><span class="pf-v6-c-modal-box__title-text">New Template</span></h2>
-        <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeTemplateModal()">&times;</button>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
         <input type="hidden" id="tTemplateId">
@@ -1043,20 +885,20 @@
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="tBody"><span class="pf-v6-c-form__label-text">Body (Markdown)</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <div class="md-toolbar">
-                  <button type="button" title="Bold" onclick="wrapSelection('tBody','**','**','bold')"><strong>B</strong></button>
-                  <button type="button" title="Italic" onclick="wrapSelection('tBody','*','*','italic')"><em>I</em></button>
-                  <button type="button" title="Underline" onclick="wrapSelection('tBody','__','__','underline')"><u>U</u></button>
-                  <button type="button" title="Strikethrough" onclick="wrapSelection('tBody','~~','~~','strike')"><s>S</s></button>
-                  <button type="button" title="Spoiler" onclick="wrapSelection('tBody','||','||','spoiler')">||•||</button>
-                  <button type="button" title="Heading" onclick="prefixSelectedLines('tBody','# ')"><strong>H</strong></button>
-                  <button type="button" title="Quote" onclick="prefixSelectedLines('tBody','&gt; ')">&gt; Quote</button>
-                  <button type="button" title="Inline code" onclick="wrapSelection('tBody','`','`','code')">&lt;/&gt;</button>
-                  <button type="button" title="Code block" onclick="insertCodeBlock('tBody')">{ }</button>
-                  <button type="button" class="emoji-picker-btn" title="Insert emoji" onclick="toggleEmojiPicker(this,'tBody')">🙂</button>
-                  <select class="pf-v6-c-form-control pf-m-small" id="tRoleMention" style="max-width:170px" onchange="insertRoleMention('tRoleMention','tBody')" title="Roles from the alliance chosen under Preview As"><option value="">Insert role mention…</option></select>
+                <div class="md-toolbar" id="tBodyToolbar" data-target="tBody">
+                  <button type="button" title="Bold" data-md-cmd="bold"><strong>B</strong></button>
+                  <button type="button" title="Italic" data-md-cmd="italic"><em>I</em></button>
+                  <button type="button" title="Underline" data-md-cmd="underline"><u>U</u></button>
+                  <button type="button" title="Strikethrough" data-md-cmd="strike"><s>S</s></button>
+                  <button type="button" title="Spoiler" data-md-cmd="spoiler">||•||</button>
+                  <button type="button" title="Heading" data-md-cmd="heading"><strong>H</strong></button>
+                  <button type="button" title="Quote" data-md-cmd="quote">&gt; Quote</button>
+                  <button type="button" title="Inline code" data-md-cmd="code">&lt;/&gt;</button>
+                  <button type="button" title="Code block" data-md-cmd="codeblock">{ }</button>
+                  <button type="button" class="emoji-picker-btn" title="Insert emoji" data-md-cmd="emoji">🙂</button>
+                  <select class="pf-v6-c-form-control pf-m-small samaya-w-170" id="tRoleMention" data-role-mention title="Roles from the alliance chosen under Preview As"><option value="">Insert role mention…</option></select>
                 </div>
-                <textarea class="pf-v6-c-form-control" id="tBody" rows="5" placeholder="⚠️ Daily reset in {event_time_relative} ({event_time})" oninput="renderTemplatePreview()"></textarea>
+                <textarea class="pf-v6-c-form-control" id="tBody" rows="5" placeholder="⚠️ Daily reset in {event_time_relative} ({event_time})"></textarea>
                 <div class="pf-v6-c-form__helper-text">
                   Same Discord markdown and placeholders as the announcement Body field — <code>{alliance_name}</code> <code>{kingdom_name}</code> <code>{send_time}</code> <code>{send_time_relative}</code> <code>{event_time}</code> <code>{event_time_relative}</code>. No 2000-character limit here since placeholders expand at send time.
                 </div>
@@ -1065,9 +907,9 @@
             <div class="pf-v6-c-form__group full">
               <div class="pf-v6-c-form__group-label"><span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Preview</span></span></div>
               <div class="pf-v6-c-form__group-control">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-                  <label for="tPreviewTenant" style="color:var(--muted);font-size:0.85em">Preview as:</label>
-                  <select class="pf-v6-c-form-control pf-m-small" id="tPreviewTenant" style="max-width:220px" onchange="renderTemplatePreview()"></select>
+                <div class="samaya-preview-row">
+                  <label class="samaya-filter-label" for="tPreviewTenant">Preview as:</label>
+                  <select class="pf-v6-c-form-control pf-m-small samaya-w-220" id="tPreviewTenant"></select>
                 </div>
                 <div id="tPreviewPane" class="discord-preview-pane"></div>
               </div>
@@ -1075,7 +917,7 @@
             <div class="pf-v6-c-form__group">
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="tEventOffsetMinutes"><span class="pf-v6-c-form__label-text">Event Offset (minutes)</span></label></div>
               <div class="pf-v6-c-form__group-control">
-                <input class="pf-v6-c-form-control" type="number" id="tEventOffsetMinutes" value="0" placeholder="0" oninput="renderTemplatePreview()">
+                <input class="pf-v6-c-form-control" type="number" id="tEventOffsetMinutes" value="0" placeholder="0">
                 <div class="pf-v6-c-form__helper-text">E.g. 15 for a warning sent 15 minutes before the event.</div>
               </div>
             </div>
@@ -1091,8 +933,8 @@
         </form>
       </div>
       <footer class="pf-v6-c-modal-box__footer">
-        <button class="pf-v6-c-button pf-m-primary" onclick="saveTemplate()">Save</button>
-        <button class="pf-v6-c-button pf-m-link" onclick="closeTemplateModal()">Cancel</button>
+        <button class="pf-v6-c-button pf-m-primary" id="btnSaveTemplate">Save</button>
+        <button class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
       </footer>
     </div>
   </div>
@@ -1106,7 +948,7 @@
     <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="tenantModalTitle">
       <header class="pf-v6-c-modal-box__header">
         <h2 class="pf-v6-c-modal-box__title" id="tenantModalTitle"><span class="pf-v6-c-modal-box__title-text">New Tenant</span></h2>
-        <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeTenantModal()">&times;</button>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
         <input type="hidden" id="tnId">
@@ -1140,10 +982,10 @@
               <div class="pf-v6-c-form__group-label"><label class="pf-v6-c-form__label" for="tnIconFile"><span class="pf-v6-c-form__label-text">Icon (1:1)</span></label></div>
               <div class="pf-v6-c-form__group-control">
                 <input type="hidden" id="tnIconData" value="">
-                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                  <img id="tnIconPreview" style="display:none;width:64px;height:64px;border-radius:8px;object-fit:cover" alt="Alliance icon preview">
-                  <input type="file" id="tnIconFile" accept="image/png,image/jpeg,image/gif" onchange="handleTenantIconFile(this)">
-                  <button type="button" id="tnIconRemove" class="pf-v6-c-button pf-m-secondary pf-m-small" style="display:none" onclick="removeTenantIcon()">Remove</button>
+                <div class="samaya-icon-upload-row">
+                  <img class="hidden samaya-icon-preview" id="tnIconPreview" alt="Alliance icon preview">
+                  <input type="file" id="tnIconFile" accept="image/png,image/jpeg,image/gif">
+                  <button type="button" id="tnIconRemove" class="pf-v6-c-button pf-m-secondary pf-m-small hidden">Remove</button>
                 </div>
                 <div class="pf-v6-c-form__helper-text">Square image shown in place of the generic alliance icon everywhere this alliance appears (badges, switchers, roster). Optional.</div>
               </div>
@@ -1152,8 +994,8 @@
         </form>
       </div>
       <footer class="pf-v6-c-modal-box__footer">
-        <button class="pf-v6-c-button pf-m-primary" onclick="saveTenantModal()">Save</button>
-        <button class="pf-v6-c-button pf-m-link" onclick="closeTenantModal()">Cancel</button>
+        <button class="pf-v6-c-button pf-m-primary" id="btnSaveTenantModal">Save</button>
+        <button class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
       </footer>
     </div>
   </div>
@@ -1165,14 +1007,14 @@
     <div class="pf-v6-c-modal-box pf-m-sm" role="dialog" aria-modal="true" aria-labelledby="timezoneModalTitle">
       <header class="pf-v6-c-modal-box__header">
         <h2 class="pf-v6-c-modal-box__title" id="timezoneModalTitle"><span class="pf-v6-c-modal-box__title-text">Time Zone</span></h2>
-        <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeTimezoneModal()">&times;</button>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
-        <p class="pf-v6-u-font-size-sm" id="timezoneModalIntro" style="color:var(--muted);margin:0 0 12px">Controls the local half of every time shown alongside UTC across the admin UI — the header clock, and every dual-time display in Dashboard, Schedule, Gantt, Post Log, and Announcements.</p>
+        <p class="pf-v6-u-font-size-sm samaya-tz-intro" id="timezoneModalIntro">Controls the local half of every time shown alongside UTC across the admin UI — the header clock, and every dual-time display in Dashboard, Schedule, Gantt, Post Log, and Announcements.</p>
         <div id="timezoneModalList"></div>
       </div>
       <footer class="pf-v6-c-modal-box__footer">
-        <button class="pf-v6-c-button pf-m-primary" onclick="closeTimezoneModal()">Close</button>
+        <button class="pf-v6-c-button pf-m-primary" data-modal-dismiss>Close</button>
       </footer>
     </div>
   </div>
@@ -1184,13 +1026,13 @@
     <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="discordPreviewModalTitle">
       <header class="pf-v6-c-modal-box__header">
         <h2 class="pf-v6-c-modal-box__title" id="discordPreviewModalTitle"><span class="pf-v6-c-modal-box__title-text">Discord Preview</span></h2>
-        <button type="button" class="samaya-modal-close" aria-label="Close" onclick="closeDiscordPreviewModal()">&times;</button>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
         <div id="discordPreviewModalBody"></div>
       </div>
       <footer class="pf-v6-c-modal-box__footer">
-        <button class="pf-v6-c-button pf-m-primary" onclick="closeDiscordPreviewModal()">Close</button>
+        <button class="pf-v6-c-button pf-m-primary" data-modal-dismiss>Close</button>
       </footer>
     </div>
   </div>

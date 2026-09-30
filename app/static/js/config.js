@@ -66,3 +66,7 @@ function renderDiscordConfigAccordion(servers) {
     </details>`;
   }).join('');
 }
+
+// Wire this view's refresh button — replaces its onclick attribute
+// (Phase 3 audit remediation).
+document.getElementById('btnConfigRefresh')?.addEventListener('click', () => loadDiscordConfig());

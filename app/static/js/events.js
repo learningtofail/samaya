@@ -226,6 +226,7 @@ function openEventModal(event) {
   (event?.targets || []).forEach(t => addEventTargetRow(tenantSlugFor(t.tenant_id), t.notification_channel_id, t.notification_role_id));
 
   document.getElementById('eventModal').classList.add('open');
+  focusModal(document.getElementById('eventModal'));
   refreshPreviewTenantOptions('mPreviewTenant', null);
   renderEventDescriptionPreview();
 }
@@ -248,7 +249,7 @@ function duplicateEvent(event) {
 
 function toggleLeadershipNote() {
   const checked = document.getElementById('mLeadershipOnly').checked;
-  document.getElementById('leadershipNote').style.display = checked ? 'block' : 'none';
+  document.getElementById('leadershipNote').classList.toggle('hidden', !checked);
 }
 
 // ── Time formatting ─────────────────────────────────────────
@@ -337,9 +338,9 @@ async function populateDiscordFields(event, tenantSlug) {
   [chanSelect, notifChanSelect, roleSelect].forEach(s => {
     s.innerHTML = '<option>Loading…</option>';
     s.disabled = true;
-    s.style.display = '';
+    s.classList.remove('hidden');
   });
-  [chanFallback, notifChanFallback, roleFallback].forEach(f => f.style.display = 'none');
+  [chanFallback, notifChanFallback, roleFallback].forEach(f => f.classList.add('hidden'));
 
   try {
     const [channels, roles] = await Promise.all([
@@ -353,10 +354,10 @@ async function populateDiscordFields(event, tenantSlug) {
 
     [chanSelect, notifChanSelect, roleSelect].forEach(s => s.disabled = false);
   } catch (e) {
-    [chanSelect, notifChanSelect, roleSelect].forEach(s => s.style.display = 'none');
-    chanFallback.style.display = '';
-    notifChanFallback.style.display = '';
-    roleFallback.style.display = '';
+    [chanSelect, notifChanSelect, roleSelect].forEach(s => s.classList.add('hidden'));
+    chanFallback.classList.remove('hidden');
+    notifChanFallback.classList.remove('hidden');
+    roleFallback.classList.remove('hidden');
     chanFallback.value = event?.discord_channel || '';
     notifChanFallback.value = event?.notification_channel_id || '';
     roleFallback.value = event?.notification_role_id || '';
@@ -459,7 +460,7 @@ function fillSelect(selectEl, options, currentValue) {
 function fieldValue(selectId, fallbackId) {
   const sel = document.getElementById(selectId);
   const fb = document.getElementById(fallbackId);
-  return sel.style.display !== 'none' ? sel.value : fb.value;
+  return !sel.classList.contains('hidden') ? sel.value : fb.value;
 }
 
 // Event cover image (spec §33) — read client-side as a data URI via
@@ -476,12 +477,12 @@ function setCoverImagePreview(dataUri) {
   const removeBtn = document.getElementById('mCoverImageRemove');
   if (dataUri) {
     img.src = dataUri;
-    img.style.display = '';
-    removeBtn.style.display = '';
+    img.classList.remove('hidden');
+    removeBtn.classList.remove('hidden');
   } else {
-    img.style.display = 'none';
+    img.classList.add('hidden');
     img.src = '';
-    removeBtn.style.display = 'none';
+    removeBtn.classList.add('hidden');
   }
 }
 
@@ -506,6 +507,7 @@ function removeCoverImage() {
 
 function closeModal() {
   document.getElementById('eventModal').classList.remove('open');
+  unfocusModal();
 }
 
 async function saveEvent() {
@@ -618,3 +620,27 @@ async function previewOccurrences() {
   }
 }
 
+
+// Wire the Event modal's markdown toolbar once at load (see common.js's
+// wireMarkdownToolbar) — the modal itself is hidden until openEventModal()
+// shows it, but its markup (and this toolbar) exist in the static page
+// from the start, so this can run immediately rather than waiting for a
+// first open.
+wireMarkdownToolbar('mDescriptionToolbar');
+
+// Wire the Events view/modal's own controls — replaces their onclick/
+// onchange/oninput attributes (Phase 3 audit remediation).
+document.getElementById('btnAddEvent')?.addEventListener('click', () => openEventModal());
+document.getElementById('btnExportEventsCsv')?.addEventListener('click', () => exportEventsCsv());
+document.getElementById('btnImportEventsCsv')?.addEventListener('click', () => document.getElementById('eventsImportFile').click());
+document.getElementById('eventsImportFile')?.addEventListener('change', function () { importEventsCsv(this.files[0]); });
+document.getElementById('mStartTime')?.addEventListener('input', () => renderEventDescriptionPreview());
+document.getElementById('mAnchor')?.addEventListener('change', () => renderEventDescriptionPreview());
+document.getElementById('mDescription')?.addEventListener('input', () => renderEventDescriptionPreview());
+document.getElementById('mPreviewTenant')?.addEventListener('change', () => renderEventDescriptionPreview());
+document.getElementById('mCoverImageFile')?.addEventListener('change', function () { handleCoverImageFile(this); });
+document.getElementById('mCoverImageRemove')?.addEventListener('click', () => removeCoverImage());
+document.getElementById('mLeadershipOnly')?.addEventListener('change', () => toggleLeadershipNote());
+document.getElementById('btnAddEventTarget')?.addEventListener('click', () => addEventTargetRow());
+document.getElementById('btnPreviewOccurrences')?.addEventListener('click', () => previewOccurrences());
+document.getElementById('btnSaveEvent')?.addEventListener('click', () => saveEvent());

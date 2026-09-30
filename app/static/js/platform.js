@@ -276,10 +276,12 @@ function openTenantModal(t, kingdoms) {
   setTenantIconPreview(t ? (t.icon_image_data || '') : '');
   document.getElementById('tnIconFile').value = '';
   document.getElementById('tenantModal').classList.add('open');
+  focusModal(document.getElementById('tenantModal'));
 }
 
 function closeTenantModal() {
   document.getElementById('tenantModal').classList.remove('open');
+  unfocusModal();
 }
 
 function setTenantIconPreview(dataUri) {
@@ -288,12 +290,12 @@ function setTenantIconPreview(dataUri) {
   const removeBtn = document.getElementById('tnIconRemove');
   if (dataUri) {
     img.src = dataUri;
-    img.style.display = '';
-    removeBtn.style.display = '';
+    img.classList.remove('hidden');
+    removeBtn.classList.remove('hidden');
   } else {
-    img.style.display = 'none';
+    img.classList.add('hidden');
     img.src = '';
-    removeBtn.style.display = 'none';
+    removeBtn.classList.add('hidden');
   }
 }
 
@@ -353,3 +355,12 @@ async function createKingdomInvite(kingdomId) {
     copyInviteLink(window.location.origin + '/invite/' + inv.token);
   } catch(e) { toast(e.message, true); }
 }
+
+// Wire this view's create buttons and the Tenant modal's icon controls —
+// replaces their onclick/onchange attributes (Phase 3 audit remediation).
+document.getElementById('btnCreateKingdom')?.addEventListener('click', () => createKingdom());
+document.getElementById('btnCreateDiscordServer')?.addEventListener('click', () => createDiscordServer());
+document.getElementById('btnCreateTenant')?.addEventListener('click', () => createTenant());
+document.getElementById('tnIconFile')?.addEventListener('change', function () { handleTenantIconFile(this); });
+document.getElementById('tnIconRemove')?.addEventListener('click', () => removeTenantIcon());
+document.getElementById('btnSaveTenantModal')?.addEventListener('click', () => saveTenantModal());
