@@ -860,6 +860,15 @@ function groupCombinedAnnouncements(events) {
     indexByAnnouncementId.set(ev.id, grouped.length);
     grouped.push({ ...ev, targets: [target] });
   });
+  // Deterministic badge order — the query behind this has no ORDER BY on
+  // the tenant side, so same-timestamp announcements can come back with
+  // their targets in a different order per row otherwise, which reads as
+  // the badges randomly shuffling between otherwise-identical cards.
+  grouped.forEach(ev => {
+    if (ev.targets && ev.targets.length > 1) {
+      ev.targets.sort((a, b) => a.tenant_name.localeCompare(b.tenant_name));
+    }
+  });
   return grouped;
 }
 
