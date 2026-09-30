@@ -252,43 +252,13 @@ In `scheduler/announcements.py`'s per-minute job, when a due announcement has `r
 ### 13.6 Out of Scope
 
 - Draft/save-without-scheduling workflow. Not needed: creation always goes straight to `status="scheduled"`, and the `draft` value in the schema stays unused.
-- Editing a scheduled announcement's body/time/recurrence before it fires. Not needed: cancel-and-recreate is the intended workflow, matching the API's cancel-only surface (no update endpoint).
+- Editing a scheduled announcement's body/time/recurrence before it fires. Not needed: cancel-and-recreate is the intended workflow, matching the API's cancel-only surface (no update endpoint). (Built in §49 — `PATCH /api/announcements/{id}` now supports in-place editing while `status == "scheduled"`.)
 - Rich Discord embeds (the API sends plain markdown text via the same `send_channel_message` path used for occurrence pings).
 - Gating `leadership_only` behind a permission check (e.g. restricting it to owners or kingdom coordinators). It is a display/categorization flag only, same as it is for events.
 
 ## 14. Admin UI — Combined Multi-Tenant View
 
-**Status:** Implemented and deployed. Fixed a real friction: a user with access to more than one tenant (e.g. NSR and MOD) must currently select one tenant in the `tenantPicker` and every admin view reloads scoped to just that tenant (`onTenantChange()` in `common.js`) — managing both alliances means repeatedly switching the picker. Public-facing pages are unaffected by this section and keep their existing per-tenant scoping (`/t/{tenant_slug}/events`, `/t/{tenant_slug}/ics/events.ics`); that separation stays, since different alliances' members should keep seeing their own calendar. This mirrors, on the admin side, the reasoning already documented for the public bare `/events`/`/api/events` route: "some members want one shared view rather than switching between alliance pages."
-
-### 14.1 Approach
-
-Add a **combined** mode alongside per-tenant selection, not instead of it — a coordinator who owns only one tenant sees no change, and Config/Access/Platform stay single-tenant by necessity (each is tied to one tenant's own Discord bot, guild, and invite grants, which don't have a meaningful "combined" form).
-
-- `tenantPicker` gets one additional option, **"All my alliances"**, alongside the existing per-tenant entries — selectable only when the user has access to more than one tenant.
-- Selecting it sets a combined-mode flag (alongside the existing `getCurrentTenantSlug()`/`setCurrentTenantSlug()` pair) rather than a real tenant slug, since no `X-Tenant-Slug` header value can mean "several."
-
-### 14.2 Views affected
-
-| View | Combined mode behavior |
-|---|---|
-| Dashboard | Aggregate counts/upcoming items across all accessible tenants |
-| Events | List shows every tenant's `event_definitions`, each row tagged with tenant name/color (same `tenant_color` pattern the public combined `/api/events` already returns) |
-| Schedule / Gantt | Occurrences from all accessible tenants on one timeline, color-coded by tenant |
-| PostLog | Combined list/CSV export across tenants, each row still carrying its own `tenant_id` |
-| Config, Access, Platform, Announcements | **No change** — these stay scoped to one explicitly-selected tenant; "All my alliances" is not selectable while one of these views is open, and switching to one of them while in combined mode requires picking a specific tenant first. Announcements is included here (not just Config/Access/Platform) because an announcement is authored by exactly one tenant (`owning_tenant_id`) even when it targets several — the same single-owner shape as an event definition's `owning_tenant_id`, and its list/cancel endpoints were built single-tenant since §13 predates this section |
-
-### 14.3 API changes required
-
-Existing admin list endpoints (`GET /admin/api/events`, `/api/schedule`, `/api/post-log`, etc.) resolve the tenant from `get_current_tenant` (a single `X-Tenant-Slug` header, §5.4/§9). This needs a second mode, not a breaking change to the existing one:
-
-- A reserved header value (e.g. `X-Tenant-Slug: *`) or a separate `all=true` query flag signals combined mode.
-- The dependency resolves to "every tenant this user holds `UserTenant` access to" (or every tenant, for a superadmin) instead of one `Tenant` row, and each affected router adds the tenant's `id`/`name`/`color` to its response rows, matching the shape `routers/events.py`'s public combined endpoint already uses.
-- **Write endpoints are unaffected and stay single-tenant.** Creating or editing an event, occurrence action, or announcement still requires one explicit owning tenant — combined mode is a read/list convenience, not a way to bulk-create across alliances. The Add Event form's owning-tenant selection (currently implicit, taken from `X-Tenant-Slug`) needs an explicit tenant dropdown when the picker is in combined mode, since there's no longer a single ambient tenant to default to.
-
-### 14.4 Explicitly out of scope
-
-- Merging NSR and MOD into a single `Tenant` row. Rejected: it would collapse their independent Discord guild/bot config, independent `UserTenant` grants, independent `PostLog`/audit isolation, and the kingdom-wide fan-out model (§3) that depends on tenants being distinct rows in the same Kingdom. Combined *viewing* solves the stated problem without that cost.
-- Bulk-create/bulk-edit actions across multiple tenants in one submission — each write still targets one tenant, per §14.3.
+**Superseded by §38.** This section's design (a `tenantPicker` "All my alliances" option, a single global combined-mode flag alongside `getCurrentTenantSlug()`/`setCurrentTenantSlug()`, and Config/Access/Platform/Announcements staying single-tenant-only) was the first version of cross-alliance viewing. §38 replaced it outright: the header tenant picker was removed entirely, every combined-capable tab gained its own independent per-tab alliance filter (`getTabFilter`/`setTabFilter`, `COMBINED_SLUG = '*'`), and Announcements became combined-capable too (via `get_current_tenants` and its own `announcementsFilter`). See §38 for the current model; §14.4's rejection of merging tenants into one row, and its "writes stay single-tenant" principle, both still hold under §38's design.
 
 ## 15. Time Zone Display — Header Control (Admin) and Public Events Page
 
@@ -316,11 +286,11 @@ Every place an event, occurrence, or announcement time is shown — Dashboard, S
 
 ### 15.3 Header Control (Admin)
 
-Originally a `<select>` dropdown carrying a visible **"🕐 Time zone:"** label. Superseded by §24: the header now shows a live UTC/local clock as a clickable text link, and the same IANA zone list this section originally specced for the dropdown moved into the Time Zone modal §24 opens instead — the underlying zone list, default-to-detected behavior, and `localStorage` key are all unchanged from 15.1, only the control's shape changed.
+The header shows a live UTC/local clock as a clickable text link, opening a Time Zone modal listing the same IANA zones — see §24 for the control's actual shape. The zone list, default-to-detected behavior, and `localStorage` key are as specified in 15.1.
 
 ### 15.4 Public Events Page
 
-**Superseded by §26.2**: originally specced as a `<select>` dropdown in the page's own masthead; the header clock/modal pattern replaced it, matching the admin header's §24 shape rather than a labeled dropdown. The underlying behavior — detect-by-default, override via the shared `samaya_display_tz` `localStorage` key, dual-format display per 15.2 — is unchanged, only the control's shape moved. See §26.2 for the current implementation.
+See §62 for the public events page's current time zone control (a `timezoneModal` opened from the header clock button). The underlying behavior — detect-by-default, override via the shared `samaya_display_tz` `localStorage` key, dual-format display per 15.2 — is unchanged from this section's original intent.
 
 ### 15.5 Gantt Exception
 
@@ -334,20 +304,19 @@ Gantt's day cells (`static/js/gantt.js`) are small, fixed-width grid cells with 
 
 ## 17. Admin UI — Tab Order
 
-**Status:** Implemented and deployed. The tab bar is reordered so the tabs a coordinator actually works in day to day come first, and the tabs that configure or administer the system come last:
+**Status:** Implemented and deployed, then further reshaped by later sections. The tab bar is ordered so the tabs a coordinator actually works in day to day come first, and the tabs that configure or administer the system come last. The order this section originally specified was:
 
 `Dashboard → Events → Announcements → Schedule → Gantt → Post Log → Sync → Config → Access → Platform`
 
-Rationale: Events and Announcements are grouped adjacently since both are content a coordinator creates and schedules (and, per §20, share the same target-validation logic and a similar per-tenant-dropdown target-row UI). Schedule/Gantt/Post Log follow as the "what's actually happening" occurrence-tracking group. Sync (Discord↔PostLog reconciliation) and Config (per-tenant Discord channel/role reference) come next as tenant-level admin. Access (owner-only invite management) and Platform (superadmin-only Kingdom/Tenant CRUD) are last, since they're the least-frequently-used and highest-privilege tabs. No functional change — `showView()`/`applyRoleVisibility()` in `common.js` look up tabs by `id`, not position, so reordering the `<li>` markup in `admin.html` was the only change needed.
+That list is superseded in two ways by later sections: Gantt is no longer its own tab — it became a second layout inside the Schedule tab (§38.3, "Gantt shares Schedule's own filter... since it's a second layout over the same occurrence window"), and Access/Platform merged into one "Access & Platform" tab (§38.6), with Tickets (§43) and Audit Log (§31.1) added afterward. The current tab order is:
+
+`Dashboard → Events → Announcements → Schedule (Table/Timeline toggle) → Post Log → Sync → Config → Tickets → Access & Platform → Audit Log`
+
+Rationale for the original grouping still holds for the tabs it covers: Events and Announcements are adjacent since both are coordinator-authored, scheduled content (§20's shared target-validation logic); Schedule/Post Log are the "what's actually happening" occurrence-tracking group; Sync/Config are tenant-level admin; Access & Platform and Audit Log are last, being the least-frequently-used, highest-privilege (superadmin-only, §38.6) tabs. No functional change from reordering alone — `showView()`/`applyRoleVisibility()` in `common.js` look up tabs by `id`, not position.
 
 ## 18. Platform — Tenant Editing
 
-**Status:** Implemented and deployed. The backend has supported editing a Tenant's `name`, `slug`, `guild_id`, `bot_token`, `public_key`, and `color` since Phase 4 (`PATCH /api/tenants/{id}` in `routers/admin/tenants.py`), but the Platform tab's UI only ever exposed *creating* a tenant (`createTenant()`) — the table's action column was rendered but left empty. Fixed by wiring up the existing endpoint:
-
-- An **Edit** button on each row of the Tenants table (Platform tab, superadmin-only) opens a sequence of `prompt()` dialogs pre-filled with that tenant's current `name`/`slug`/`guild_id`, matching this file's existing `prompt()`-based convention for platform actions (`createKingdom`/`createTenant` already work this way — no modal dialog was introduced for consistency with the rest of this view).
-- Pressing Cancel on any individual field leaves that field unchanged rather than aborting the whole edit, since re-entering every other field just to fix one is unnecessary friction.
-- `bot_token` can't be pre-filled (it's write-only — the API never returns an existing token, same reasoning `createTenant` already follows for a brand-new one). Its prompt explains the two states: leave blank to keep the current token (or the platform-bot fallback) unchanged, or type `CLEAR` to remove an existing token and fall back to the shared platform bot, or paste a new token to set one.
-- Only fields that actually changed are sent in the `PATCH` body — an edit where every prompt is cancelled or left at its current value sends nothing and shows "No changes made" rather than an empty successful request.
+**Superseded.** This section's `prompt()`-chain editor (pre-filled `name`/`slug`/`guild_id` prompts, a `bot_token` prompt with a `CLEAR` keyword) no longer exists in either shape it once had: §25 moved `guild_id`/`bot_token`/`public_key` off `Tenant` entirely onto `DiscordServer` (so a Tenant edit was never going to prompt for a bot token again), and §38.7 replaced the whole prompt-chain mechanism with a real **Tenant** modal (`platform.js`'s `openTenantModal()`/`saveTenantModal()`) — needed once the modal also had to handle a file-picker upload for the tenant's icon. See §25 for where bot credentials live now and §38.7 for the current Tenant create/edit UI.
 
 ## 19. Config — Server Name Column
 
@@ -355,8 +324,9 @@ Rationale: Events and Announcements are grouped adjacently since both are conten
 
 - `services/discord_api.get_guild_info(token, guild_id)` — calls `GET /guilds/{guild_id}`, returning the guild's own Discord display name (distinct from `Tenant.name`, which is the alliance's name in our system, not the Discord server's).
 - `GET /admin/api/discord/guild` (`routers/admin/discord_config.py`) — exposes it, scoped to the current tenant the same way `/api/discord/channels`/`/api/discord/roles` already are.
-- The Channels table gains a **Server** column between Name and ID, populated from this new endpoint. Since Config is single-tenant (§14.2), the same guild name repeats on every row — that's expected, not a bug; the point is showing *which* server, not varying it per row.
-- If the guild-info fetch fails (502 — most commonly because the bot hasn't been invited to that guild yet, Discord returning 403), `config.js` shows an em dash in the Server column rather than failing the whole channel list, since the channel list itself may still load successfully or fail independently.
+- If the guild-info fetch fails (502 — most commonly because the bot hasn't been invited to that guild yet, Discord returning 403), the resolved server info is simply left out rather than failing the whole channel/role listing, since those can still load successfully or fail independently.
+
+**Admin UI superseded by §38.5.** The single-tenant Channels table with a Server column (described above as originally built) was replaced by a Discord Config tab that groups by `DiscordServer` instead of by Tenant — a `<details>` accordion section per server, since more than one alliance can share one server and a flat per-tenant table would repeat that server's identical channel/role list under each alliance's name. `get_guild_info`/`GET /api/discord/guild` (above) is still the function that resolves a server's display name; it's now called from `GET /api/discord/config-overview` (§38.5) rather than rendered as a per-row table column.
 
 ## 20. Events — Multi-Server Notification Targets
 
@@ -393,12 +363,12 @@ Rationale: Events and Announcements are grouped adjacently since both are conten
 - `PATCH /admin/api/members/{id}` — change a grant's role between `owner`/`coordinator`.
 - `DELETE /admin/api/members/{id}` — remove access outright (the person needs a fresh invite to get back in).
 - Guard: a tenant can't be left with zero owners — demoting or removing the *only* remaining owner is rejected with 400, since that would leave no one able to invite, edit tenant config, or manage access at all. Promote a second owner first.
-- Admin UI: the Access tab (owner-only) gains a **Members** table above the existing Invites table, with "Change role" and "Remove" buttons per row (`access.js`).
+- Admin UI: the Access tab gains a **Members** table above the existing Invites table, with "Change role" and "Remove" buttons per row (`access.js`). The Access tab itself was owner-only at the time this was written; §38.6 later made it (and Platform, merged into the same "Access & Platform" tab) superadmin-only in the UI, though the backend endpoints here are still gated by `require_tenant_owner`, unchanged.
 
 ### 21.2 Kingdom coordinators (UserKingdom grants)
 
 - `GET /admin/api/kingdom-coordinators?kingdom_id=` and `DELETE /admin/api/kingdom-coordinators/{id}` (`routers/admin/invites.py`, superadmin-only) — the standing-grant counterpart to the existing kingdom-invite endpoints, mirroring §21.1's tenant-member pattern.
-- Admin UI: a **Kingdom Coordinators** table in the Platform tab (`platform.js`'s `loadPlatformKingdomCoordinators()`), sitting between the Kingdoms and Tenants tables. Since the list endpoint is scoped to one kingdom at a time, the loader fans out one `GET /api/kingdom-coordinators` call per kingdom (from the already-loaded kingdom list) and flattens the results into one table with a Kingdom column, rather than adding a per-kingdom expandable row. Each row's **Remove** button calls `removeKingdomCoordinator()`, gated behind a `confirm()` naming the user and kingdom, matching §21.1's Members table and §21.4's Users table conventions.
+- Admin UI: a **Kingdom Coordinators** table in the Platform section (nested inside the "Access & Platform" tab since §38.6; `platform.js`'s `loadPlatformKingdomCoordinators()`), sitting between the Kingdoms and Tenants tables. Since the list endpoint is scoped to one kingdom at a time, the loader fans out one `GET /api/kingdom-coordinators` call per kingdom (from the already-loaded kingdom list) and flattens the results into one table with a Kingdom column, rather than adding a per-kingdom expandable row. Each row's **Remove** button calls `removeKingdomCoordinator()`, gated behind a `confirm()` naming the user and kingdom, matching §21.1's Members table and §21.4's Users table conventions.
 
 ### 21.3 Kingdom editing
 
@@ -410,7 +380,7 @@ Rationale: Events and Announcements are grouped adjacently since both are conten
 - New `routers/admin/users.py` (superadmin-only): `GET /api/users` lists every `User` row platform-wide (Discord username, superadmin flag, last login); `PATCH /api/users/{id}` toggles `is_superadmin`.
 - Kept separate from `invites.py` deliberately — this edits the `User` row itself, not a per-tenant/per-kingdom grant, and its effect crosses every tenant/kingdom boundary at once rather than being scoped to one.
 - Guard: a superadmin cannot revoke their own superadmin flag (400) — since the very next request would fail `require_superadmin` with no UI path back in short of direct database access. Another superadmin can still demote them.
-- Admin UI: a **Users** table in the Platform tab (`platform.js`), each row showing Discord username, a Superadmin label when set, last login, and a "Make superadmin"/"Revoke superadmin" button — gated behind a `confirm()` describing the scope of what's being granted, since it's the single highest-privilege action in the system. The current user's own row shows `(you)` instead of a revoke button rather than letting them hit the server-side guard.
+- Admin UI: a **Users** table in the Platform section (nested inside "Access & Platform" since §38.6; `platform.js`), each row showing Discord username, a Superadmin label when set, last login, and a "Make superadmin"/"Revoke superadmin" button — gated behind a `confirm()` describing the scope of what's being granted, since it's the single highest-privilege action in the system. The current user's own row shows `(you)` instead of a revoke button rather than letting them hit the server-side guard.
 
 ### 21.5 What's still out of scope
 
@@ -492,7 +462,7 @@ The pattern `tenant.bot_token or PLATFORM_BOT_TOKEN` / `tenant.guild_id` is repe
 ### 25.3 Admin UI Changes
 
 - **Platform tab**: a new **Discord Servers** table (superadmin-only, same tier as Kingdoms/Tenants/Users today) — create/edit a server's `name`/`guild_id`/`bot_token`, listing which tenants currently reference it (read-only membership list; reassigning a tenant to a different server happens via editing the *tenant*, not the server, to keep "who owns this relationship" unambiguous).
-- **Tenant create/edit** (`createTenant()`/`editTenant()` in `platform.js`): the inline "Discord guild (server) ID" and "Bot token" prompts are replaced with a single "Discord Server" selection — pick an existing server from the list, or create a new one inline (same flow `createTenant()` already uses for picking a Kingdom). `has_own_bot_token` in `_tenant_dict()` is retired along with the field it described; the Tenant row no longer has an opinion on bot credentials at all.
+- **Tenant create/edit** (`createTenant()`/`editTenant()` in `platform.js`): the inline "Discord guild (server) ID" and "Bot token" prompts are replaced with a single "Discord Server" selection — pick an existing server from the list, or create a new one inline (same flow `createTenant()` already uses for picking a Kingdom). `has_own_bot_token` in `_tenant_dict()` is retired along with the field it described; the Tenant row no longer has an opinion on bot credentials at all. **The `prompt()`-chain mechanism itself is superseded by §38.7**, which replaced Tenant create/edit with a real modal (`openTenantModal()`/`saveTenantModal()`) — the Discord Server `<select>` described here is still exactly how a server is picked, just inside that modal instead of a prompt.
 - **Config tab** (§19): unchanged in appearance — still shows that tenant's server's channels/roles/Server-name column — since it already reads through `get_discord_config`, which becomes the one place that changes underneath it.
 
 ### 25.4 Out of Scope
@@ -519,18 +489,11 @@ The masthead's Log Out button uses PatternFly's `pf-m-secondary` button variant,
 
 ### 26.2 Public Events Page — Header Parity with Admin
 
-`static/events.html`'s header is brought to the same shape as admin's §24.1 header, rather than the `<select>` dropdown §15.4 originally specced:
-
-- The time zone `<select>` is replaced with the same `#headerClock` text-link-plus-modal pattern as admin: a live `🕐 HH:MM UTC` / `🕐 HH:MM UTC · HH:MM (Zone/Name)` clock (`formatHeaderClock()`, ticking every 30s via `startHeaderClock()`), opening a `#timezoneModal` listing the same IANA zone set as a button list. Selecting one calls `selectTimezone()`, which persists to the same shared `samaya_display_tz` `localStorage` key (§15.4) and reloads the event list — a preference set in the admin area still carries over automatically in the same browser.
-- Both pages now use visually and behaviorally identical time controls; the only difference is that `events.html` has no shared JS with `admin.html` (per its established standalone-file convention — §22), so the clock/modal logic is a duplicate implementation of the same behavior, not a shared import.
+**Superseded by §62.** This section's `#headerClock`/`#timezoneModal` text-link-plus-modal pattern (mirroring admin's §24.1 shape) was itself replaced by §62's full redesign of `events.html`. The time-zone control's underlying behavior — a clickable clock opening a time-zone-picker modal, persisting to the shared `samaya_display_tz` `localStorage` key — is carried forward (see §62's `clockBtn`/`timezoneModal`), just restyled and reimplemented in the new `events.css`/`events-public.js` rather than as admin-header-matching PatternFly markup.
 
 ### 26.3 Public Events Page — Alliance Switcher
 
-Previously, moving between the combined `/events` view and a specific alliance's `/t/{slug}/events` page required knowing or being given the target URL directly — there was no in-page way to discover or switch between alliances.
-
-- New public, unauthenticated endpoint **`GET /api/alliances`** (`routers/events.py`) returns every tenant's public-page identity — `{name, slug, color}` — sorted by name. This exposes nothing not already public: a tenant's name/slug/color already appear in the combined `/api/events` payload's tenant badge and are reachable by guessing/following a `/t/{slug}/events` link; this endpoint just makes the existing roster listable without already knowing one.
-- `events.html`'s header gains an `#allianceLink` text link (showing the current alliance's name, or "— All Alliances —" in combined mode, followed by "▾"), opening an `#allianceModal` listing every alliance from `GET /api/alliances` plus the combined option, each as a plain link to its `/t/{slug}/events` (or bare `/events`) page — a full navigation, not an AJAX swap, since each destination is its own page with its own event set.
-- Both new modals (`#allianceModal`, `#timezoneModal`) follow the same per-ID `display:none`/`.open{display:block}` convention as every other modal in this app (§24.1), not a new mechanism.
+**Superseded by §62.** The `GET /api/alliances` endpoint this section added is unchanged and still backs the public page's alliance list. The `#allianceLink`-plus-modal UI this section built for switching alliances is gone: §62 replaced it with alliance filter chips (click-to-filter toggles in combined view; plain links to other alliances' pages on a single-alliance page) — see §62 for the current mechanism.
 
 ### 26.4 Out of Scope
 
@@ -565,8 +528,8 @@ Previously, moving between the combined `/events` view and a specific alliance's
 ### 27.3 Out of Scope
 
 - Kingdom-wide or platform-wide shared templates — a template stays scoped to the tenant that created it, same as Announcements themselves; two alliances wanting the identical "Daily Reset Warning" text each create their own copy. Revisiting this is a natural companion to §25's `DiscordServer` sharing model if it comes up again, but isn't part of this change.
-- A live preview of the rendered message (showing what `{event_time}` will actually look like) before saving — the admin list already shows the literal template text, same as it always has for a `body_markdown` field; a true preview would need to fabricate a fake target/kingdom, which risks being misleading rather than clarifying.
-- Placeholders anywhere outside Announcement/AnnouncementTemplate bodies — Event names/descriptions, the pre-event Discord ping (§15's `announce_msg` in `occurrences.py`), and Announcement *titles* are all still literal text with no substitution. Titles in particular are admin-list-only and never posted to Discord, so there's no viewer-facing reason to resolve placeholders in them.
+- A live preview of the rendered message (showing what `{event_time}` will actually look like) before saving — the admin list already shows the literal template text, same as it always has for a `body_markdown` field; a true preview would need to fabricate a fake target/kingdom, which risks being misleading rather than clarifying. (Built in §28 — the composer's live preview uses the modal's own real target rows instead of a fabricated one, which removed this objection.)
+- Placeholders in Event *names* or Announcement *titles* — both remain literal text with no substitution; titles/names are admin-list-only and never posted to Discord, so there's no viewer-facing reason to resolve placeholders in them. (Event *descriptions* and the pre-event Discord ping's own extra line did gain the same six placeholders, in §32 — only names/titles are still out of scope.)
 - Any new markdown *capability* beyond what Discord already supports — this section documents existing Discord markdown for the admin's benefit and adds timestamp placeholders, but doesn't add formatting Discord itself can't render.
 
 ## 28. Announcement Composer — Markdown Toolbar, Live Preview, and Emoji Picker
@@ -596,7 +559,7 @@ Previously, moving between the combined `/events` view and a specific alliance's
 - Resolving `<@&ROLE_ID>`/`<#CHANNEL_ID>` mentions server-side, anywhere — this remains an admin-preview-only convenience; the literal Discord markup is still what's stored and sent, and Discord's own client does the real resolution for the actual reader, same as before this section.
 - A picker or preview for a server's custom (uploaded) emoji — deliberately scoped to Discord's default Unicode set only, per the user's request; custom emoji would need a per-guild fetch and image rendering this app has no other use for.
 - Making the preview byte-for-byte identical to Discord's actual rendered output — it's an approximation for drafting purposes (most visible in the timestamp placeholders, which Discord renders in each *viewer's* own locale/zone, not the admin's), not a pixel-accurate Discord client reimplementation.
-- Any preview or toolbar support in the pre-event Discord ping (`occurrences.py`'s `announce_msg`) or Event name/description fields — matching §27.3's existing scope boundary; only Announcement and AnnouncementTemplate bodies get the composer.
+- Any preview or toolbar support in the pre-event Discord ping's own fixed surrounding text (`occurrences.py`'s `announce_msg`) — only the Event's own `description` field (and Announcement/Template bodies) are user-authored text; the ping's generated structure around it is not. (The Event *description* field did gain the full composer — toolbar, live preview, emoji picker — in §34; this bullet now covers only the ping's own fixed text.)
 
 ## 29. Coordinator Quality-of-Life Improvements
 
@@ -656,7 +619,7 @@ Previously, moving between the combined `/events` view and a specific alliance's
 
 - New **`GET /admin/api/audit-log`** (`routers/admin/audit_log.py`), owner-only (`require_tenant_owner` — same tier as `/api/members`, since an audit trail of who-changed-what is an owner-level concern by the same reasoning member management already is). Tenant-scoped by `AuditLog.tenant_id`; a superadmin-only global action logged with `tenant_id=None` (e.g. removing a kingdom-coordinator grant) is invisible here by design — this endpoint has no "platform-wide" mode, matching every other tenant-scoped list in this app. Returns each row's timestamp, the acting user's Discord username (resolved via an outer join — a row with `user_id=None`, if one is ever written, shows `null` rather than 404ing or omitting the row), table name, row id, action, and the `before`/`after` JSON blobs parsed back into objects (they're stored as serialized text per `AuditLog`'s own docstring — §4).
 - No write/delete surface — `audit_log` was already documented as append-only and explicitly not a rollback mechanism (§22); this section only adds a way to read it, nothing that could mutate it.
-- **Admin UI**: a new **Audit Log** tab (owner-only visibility, same `applyRoleVisibility()` condition as Access), listing entries newest-first with a compact per-row diff (only the fields that actually changed between `before`/`after`, not the full raw JSON — a real diff viewer is more machinery than a first version needs).
+- **Admin UI**: a new **Audit Log** tab, listing entries newest-first with a compact per-row diff (only the fields that actually changed between `before`/`after`, not the full raw JSON — a real diff viewer is more machinery than a first version needs). Its UI visibility was owner-only at the time this was written; §38.6 later made it superadmin-only (the backend endpoint itself is still `require_tenant_owner`-gated, unchanged).
 
 ### 31.2 Delivery Health Card
 
@@ -676,7 +639,7 @@ Previously, moving between the combined `/events` view and a specific alliance's
 - Exporting the audit log (CSV, like Post Log's export) — the in-app viewer covers the stated need; add an export if it comes up for real.
 - Any retention/pruning policy for `audit_log` — it grows unbounded today and this section doesn't change that; a real gap if the table ever gets large enough to matter, but not part of this patch.
 - A finer-grained Delivery Health breakdown (per-alliance in combined mode, per-event-type, a trend chart over time) — the single current-tenant 7-day rollup answers "is anything on fire right now," which is what was asked for; a historical/trend view is a larger, separate feature.
-- Letting a `viewer` see the Access, Audit Log, Config, Sync, or Platform tabs — `applyRoleVisibility()`'s existing owner-only/superadmin-only gates are unchanged; a viewer's read access is scoped to the same views a coordinator already sees (Dashboard, Events, Announcements, Schedule, Gantt, Post Log), just without any of that content's write actions available.
+- Letting a `viewer` see the Access & Platform, Audit Log, Config, or Sync tabs — `applyRoleVisibility()` still hides these from a `viewer` (Access and Audit Log became superadmin-only rather than owner-only per §38.6, but a viewer was never in either tier); a viewer's read access is scoped to the same views a coordinator already sees (Dashboard, Events, Announcements, Schedule, Post Log), just without any of that content's write actions available.
 - A `viewer`-specific UI treatment (e.g. hiding Create/Edit/Delete buttons entirely rather than letting them 403) — out of scope for this pass; a viewer clicking a write action today gets the same 403 toast any permission failure produces, not a dedicated "you're read-only" affordance. Worth a follow-up UI pass if viewers turn out to be a commonly-used role in practice.
 
 ## 32. Bulk Event Import/Export, and Placeholder Support in the Pre-Event Ping
@@ -781,15 +744,11 @@ Previously, moving between the combined `/events` view and a specific alliance's
 
 ## 36. Public Events Page: Off-Center Layout Fix
 
-**Status:** Implemented, pending deployment. CSS-only — no migration, no backend change.
-
-**Problem.** The public `/t/{tenant_slug}/events` page rendered visibly off-center — a gap of gray page background on the left of the white content card, and a larger gap on the right — present whether or not the page had any events to show, so it wasn't a content-length artifact. This is the exact PatternFly page-layout quirk `admin.html` already worked around (see that file's own CSS comment, same root cause): `.pf-v6-c-page` is CSS grid with `header`/`sidebar`/`main` template areas, and with no sidebar element on the page, `.pf-v6-c-page__main-container`'s default "page chrome inset" margin — identical on both inline-start and inline-end — renders asymmetrically: a visible gap on the start side, while the same margin on the end side pushes the container past the viewport edge, where the element's own `overflow-x:hidden` silently clips it. One side shows the gap, the other doesn't, even though the underlying value is the same on both — that asymmetry is what read as "off-center." `events.html` uses the identical `.pf-v6-c-page` scaffold as `admin.html` but never received this fix when `admin.html` got it.
-
-**Fix.** Ported `admin.html`'s exact override into `events.html`'s `<style>` block: `.pf-v6-c-page { display: flex; flex-direction: column; min-height: 100vh; }` plus zeroing `.pf-v6-c-page__main-container`/`.pf-v6-c-page__main`'s margin and forcing `width: 100%`, in place of fighting PatternFly's grid-template-areas token directly. `admin.html`'s version also protects a tab bar (`.pf-v6-c-tabs`) from the same grid auto-placement issue; `events.html` has no tab bar, so only the `.pf-v6-c-page`/`__main-container`/`__main` rules were needed here.
+**Superseded by §62.** This was a PatternFly-specific CSS fix (`.pf-v6-c-page` grid-template-area quirk) for the old `events.html`. §62's redesign dropped PatternFly from the public events page entirely in favor of a standalone `events.css`, so the class this section patched no longer exists on that page and the underlying bug it fixed isn't applicable to the current layout. `admin.html` still uses PatternFly and still carries the equivalent fix for itself, unaffected by this.
 
 ### 36.1 Out of Scope
 
-- Auditing every other PatternFly component on either page for the same grid-auto-placement class of bug — this fix addresses the one reported symptom (the page-level container), not a general PatternFly-hardening pass.
+- Auditing every other PatternFly component on `admin.html` for the same grid-auto-placement class of bug — this fix addressed the one reported symptom (the page-level container) on the page that had it, not a general PatternFly-hardening pass. `events.html` no longer uses PatternFly at all (§62), so this bullet no longer applies there.
 
 ## 37. Public Events Page: Announcements and Notification Lead Time
 
@@ -806,7 +765,7 @@ Previously, moving between the combined `/events` view and a specific alliance's
   - **Scoping.** `/t/{tenant_slug}/api/events` includes an `Announcement` when it has an `AnnouncementTarget` row naming that tenant — the same targeting relationship the admin Announcements tab already uses to fan a post out to one or more Discord servers, so "is this announcement relevant to this alliance's page" already has an exact, existing answer with no new concept needed. The combined `/api/events` includes every tenant's announcement targets, one row per (announcement, target tenant) — mirroring PostLog's existing per-tenant fan-out semantics (an announcement sent to three Discord servers is three independent posts) rather than an event's single-row-per-kingdom-wide-Occurrence shape, since an Announcement has no equivalent "one Occurrence, several tenants" structure to begin with.
   - **Status/visibility filtering**, matching the existing event-row filters' spirit: `leadership_only == True` announcements are excluded (mirrors `EventDefinition.leadership_only`'s existing public-page exclusion exactly — both are the same "categorization flag, not a security boundary" per their own docstrings, but public visibility already treats it as "don't show this to the general public" either way). Only `status IN ('scheduled', 'posted')` are shown — `'draft'` isn't a real reachable state today (nothing in the admin UI creates one) and `'failed'`/`'cancelled'` have no useful "when will this happen" information left to display, unlike a cancelled *event*, which still shows (with a "Cancelled" badge) because its Occurrence still has a fixed, informative time slot. Windowed the same way events are: `scheduled_for` within `[today, today + WINDOW_DAYS]`.
   - **No Discord channel is shown on an announcement row.** Unlike `EventDefinition.discord_channel` (an admin-typed free-text display name), `AnnouncementTarget.discord_channel_id` stores only the raw numeric Discord snowflake — not something worth showing on an unauthenticated page with no bot-API access to resolve it to a human name.
-- **Visual distinction (client-side, `events.html`).** An announcement row gets a purple "📢 Announcement" label (`announcementKindBadge()`) next to its title and a purple left-border accent on its card (`.samaya-announcement-card`), and uses its own status badge vocabulary (`announcementStatusBadge()`: Scheduled/Announced/Failed/Cancelled) rather than reusing `statusBadge()`'s event-shaped one (pending/posted/active/completed/cancelled) — the two post-status vocabularies mean genuinely different things and were never meant to share a mapping. An announcement row also skips the ⏱ duration meta item, since `duration_hours` is `null` for it.
+- **Visual distinction (client-side).** An announcement row gets its own kind badge and visual accent distinct from an event row, and its own status vocabulary (Scheduled/Announced/Failed/Cancelled) rather than reusing an event's (pending/posted/active/completed/cancelled) — the two post-status vocabularies mean genuinely different things and were never meant to share a mapping. An announcement row also skips the duration meta item, since `duration_hours` is `null` for it. (The specific class/function names this originally shipped with — `announcementKindBadge()`, `.samaya-announcement-card`, etc. — belonged to the pre-§62 `events.html`; §62's redesign reimplemented this same distinction in `events-public.js`/`events.css`.)
 - **Notification lead time.** Event rows now carry `notify_minutes_before` (straight from `EventDefinition`, already used server-side by `scheduler/reminders.py` — nothing new stored, just newly serialized here) and announcement rows carry `event_offset_minutes` (from `Announcement`, already existing per §27). Both answer the same question — "how far ahead of the thing itself does a Discord notification go out" — through a single shared renderer, `notifyBadge(ev)`: for an event, "🔔 Reminder *N* min before"; for an announcement, "🔔 Sent *N* min before event". Renders nothing when the underlying value is unset or `0`, same as every other optional meta item already on this page (e.g. `discord_channel`), so the overwhelming majority of events (which have no reminder configured) and announcements with no referenced event (`event_offset_minutes = 0`, the default — meaning "the announcement's own send time *is* the moment being announced") are unaffected.
 
 ### 37.1 Out of Scope
@@ -888,16 +847,12 @@ A thin strip on `events.html` (`#lastActivityMarquee`), under the masthead's inf
 
 ## 39. Public Status/Kind Legend
 
-**Status:** Implemented.
-
-**Problem.** §37 gave events and announcements consistent kind badges (📅/📢) and a standardized six-value status vocabulary (§"Standardize the list of statuses" work), but a first-time visitor to the public events page had no way to learn what "Scheduled" vs. "Announced," or the gray/green/blue/red colors, actually mean without asking someone.
-
-**Implementation.** A legend card (`#statusLegend`, `renderLegend()` in `events.html`) is the first thing in `<main>` — above the "Subscribe to stay up to date" card, the last-activity marquee, and the event list itself, satisfying "at least above-the-fold, if not first on the page." It renders three rows explaining the 📅 Event / 📢 Announcement / 🌐 Kingdom-wide badges, followed by one row per entry in `STATUS_META` (now carrying a `desc` string alongside its `text`/`color`), each shown as the real `pfLabel()` pill next to a one-line plain-English explanation. Deliberately generated from `STATUS_META`/`eventKindBadge()`/`announcementKindBadge()`/`scopeBadge()` — the same functions the event rows below it call — rather than a second hand-written copy of the same six statuses, so the legend cannot drift out of sync with what the page actually shows.
+**Superseded by §62.** The always-visible legend card this section built (`#statusLegend`/`renderLegend()`, first thing in `<main>`, no dismiss control by design) is gone: §62's redesign replaced it with a collapsed-by-default "Key ▾" panel the visitor opens on demand. The underlying goal — explaining the kind badges and status vocabulary somewhere on the page — is still met by that panel; only the always-visible-card mechanism this section specified no longer exists.
 
 ### 39.1 Out of Scope
 
-- A dismiss/collapse control for returning visitors — the legend is short (nine rows, wraps to a few lines on mobile) and is not judged intrusive enough to warrant persisted collapsed state.
-- Per-alliance customization of the legend's wording — the status vocabulary is deliberately fixed and shared across every alliance (§"Standardize" work); a legend that could say different things for different alliances would undermine that.
+- A dismiss/collapse control for returning visitors — at the time, the legend was judged short enough not to need one. (Effectively superseded by §62, which made the legend a collapsed-by-default panel instead.)
+- Per-alliance customization of the legend's wording — still true: the status vocabulary remains fixed and shared across every alliance.
 
 ## 40. Feedback Form
 
@@ -1058,11 +1013,7 @@ Small, well-scoped ideas that have come up but are deliberately not built yet �
 
 ### 46.1 List/Calendar Toggle (public events page)
 
-`events.html` gained a "📋 List / 📆 Calendar" toggle (`setEventsView()`/`getEventsView()`, persisted in `localStorage` as `samaya_events_view`) sitting above the event list. **List remains the default view** for both new visitors and anyone who hasn't picked Calendar before.
-
-The calendar renders a standard month grid (Monday-first), built entirely client-side from the same `EVENTS_DATA` the list view already fetched — no new endpoint. Each event/announcement is bucketed onto a calendar day using `tzDateParts()`, which reads the day/month/year **in the visitor's selected display time zone** (§15.4's existing `samaya_display_tz`), not UTC — an event at 11 PM UTC can be "tomorrow" for a visitor several hours ahead, and the calendar places it on the day a viewer would actually expect to find it, the same reasoning `fmtDateTime()` already applies to the admin side's local-date handling. Switching time zones re-renders whichever view (list or calendar) is currently showing.
-
-A day cell shows up to three compact colored items (orange for events, purple for announcements, matching the existing kind-badge colors) plus a "+N more" when there are more; clicking an item opens the Discord preview (§46.2) directly, while clicking anywhere else on the day cell opens a day-detail panel below the grid listing that day's full cards. Prev/Today/Next navigate by month; since the underlying data is still the existing 28-day-forward window (`WINDOW_DAYS`, `routers/events.py`), a month outside that window simply renders empty rather than fetching anything new — full historical/future month browsing would need a materially different (paginated or unbounded) backend query, which is out of scope here.
+**Superseded by §62** for its implementation details (this section's `setEventsView()`/`getEventsView()`, orange/purple day-cell items) — §62's redesign kept the List/Calendar toggle and the `samaya_events_view` `localStorage` key (explicitly unchanged, per §62) but rewrote the calendar's rendering in the new `events-public.js`/`events.css`, including a selected-day detail panel below the grid that this section didn't have. The still-true parts: List remains the default view, the calendar buckets events onto days using the visitor's selected display time zone (not UTC), and it's still built from the same already-fetched event data with the same 28-day-forward window — no new endpoint.
 
 ### 46.2 "Preview as it would look on Discord"
 
@@ -1085,19 +1036,7 @@ Every row-level click handler (`handleRowPreviewClick`, `common.js`) ignores cli
 
 ## 47. Calendar View Legibility and Accessibility Pass
 
-**Status:** Implemented.
-
-**Problem.** Feedback on §46's calendar view, from real usage: calendar day-items were too small and low-contrast to read at a glance; the status/kind legend's flex-wrap layout left badges and descriptions raggedly aligned instead of scanning as tidy rows; the month/year calendar title was left-aligned and the same size as any other card heading, easy to miss; the Prev/Next month buttons were bare `◀`/`▶` glyphs giving no hint which month they'd land on; every modal's `×` close button and the plain-link-styled "Close" buttons on the Time Zone and Discord Preview modals were small, low-affordance targets; and the calendar's day cells and colored items had no keyboard path at all — a mouse was required to use the calendar.
-
-**Fix, all in `events.html` unless noted:**
-
-- **Legend (`renderLegend`)** — `.samaya-legend-kinds`/`.samaya-legend-statuses` switched from `display:flex;flex-wrap:wrap` to a fixed 3-column CSS grid (`repeat(3, minmax(0,1fr))`), collapsing to one column under 700px. Every badge+description row now lines up into clean columns instead of wrapping wherever space ran out.
-- **Calendar item legibility (`.cal-item`)** — font-size raised (0.72rem → 0.78rem, 0.62rem → 0.68rem on mobile), weight bumped to 600, and the event color darkened from `#c9590c` to `#a34a0a` — the original orange's white-text contrast ratio (~4.4:1) fell just under WCAG AA's 4.5:1 small-text threshold; the announcement purple (`#7d5260`, ~6.5:1) already cleared it and is unchanged. `.cal-cell` grew slightly (84px → 96px min-height, 56px → 64px on mobile) to fit the larger text.
-- **Calendar header** — restructured into a `.cal-header-row` 3-column grid (nav | title | balancing spacer) so `#calMonthLabel` (`.cal-month-label`) is centered against the whole card rather than the leftover space beside the nav buttons, and enlarged to the page's heading-lg token (heading-md on mobile). `calendarPrevMonth`/`calendarNextMonth`'s shared `renderCalendar()` now also sets the nav buttons' text to the adjacent month's abbreviated name (`◀ Aug` / `Oct ▶`) and a full `aria-label` (`"Previous month: August 2026"`) instead of the bare arrows carrying no month information.
-- **Modal close affordance** — `.samaya-modal-close` (`events.html` and, identically, `admin.css`) grew to a 44×44px minimum touch target (WCAG 2.5.5) with a larger glyph (1.3rem → 1.75rem) and an explicit `:focus-visible` outline. The Time Zone and Discord Preview modals' footer "Close" buttons changed from `pf-m-link` (styled as a bare text link) to `pf-m-primary` (solid blue, white text) in both `events.html` and `admin.html`, matching how every other confirming modal action in this app is styled; their "Cancel" siblings on other modals are unchanged, since cancelling is a different action from a simple close.
-- **Keyboard accessibility** — calendar day cells and colored items (previously plain `<div onclick>` with no keyboard path at all) gained `role="button"`, `tabindex="0"`, a descriptive `aria-label` (the day cell's names the date and item count; each item's names the event/announcement title), and an `onkeydown` handler treating Enter/Space as a click, matching the existing `role="button"` convention `buildEventCardHtml`'s list-view cards already used — those cards additionally gained the same Enter/Space `onkeydown` handler and an `aria-label`, since `tabindex`+`role="button"` alone doesn't give a `<div>` native button key handling.
-
-No backend changes; `STATIC_ASSET_VERSION` bumped (`routers/admin/ui.py`) since only static assets changed.
+**Superseded by §62.** This section's fixes were all CSS/markup changes to the old PatternFly-based `events.html` (`.cal-item`, `.samaya-legend-kinds`, `.samaya-modal-close`, `buildEventCardHtml`'s cards) — none of those classes or functions exist in the page §62 replaced it with. The goals this section addressed (legible calendar items, a scannable legend, larger touch targets, full keyboard access) carried forward as requirements into §62's rewrite, which built its own accessibility pass (skip link, focus rings, `aria-expanded`/`aria-pressed`, Escape-to-close, `prefers-reduced-motion`, 44px touch targets) from scratch rather than reusing this section's specific fixes.
 
 ## 48. Reserved
 
@@ -1215,11 +1154,7 @@ Both public endpoints now attach `notification_channel_name` to every row: `GET 
 
 ## 54. Legend Badge Truncation Fix
 
-**Status:** Implemented.
-
-**Problem.** The public events page's status/kind legend (§39, restyled into a 3-column grid by §47) was truncating badge text with an ellipsis — "Announcement" showed as "Announc…", "Failed" as "Fail…" — on narrower viewports. `.samaya-legend-kinds`/`.samaya-legend-statuses`'s `grid-template-columns: repeat(3, minmax(0, 1fr))` allows a column to shrink below its content's width, and PatternFly's `.pf-v6-c-label__text` truncates with an ellipsis once its flex parent (`.samaya-legend-item`, `display: flex`) is squeezed — exactly what happened once the row no longer had enough space for both the badge and its description at full width.
-
-**Fix.** `.samaya-legend-item > :first-child { flex-shrink: 0; }` (the badge is always the first child) stops the badge itself from ever being the thing that shrinks; the description text next to it (which already wraps onto multiple lines fine) absorbs the squeeze instead, along with `min-width: 0` on the row and the description span so the flex layout can actually give the description less width without it overflowing. No backend changes; `STATIC_ASSET_VERSION` bumped.
+**Superseded by §62.** This was a CSS fix (`.samaya-legend-item`, PatternFly's `.pf-v6-c-label__text`) for the always-visible legend §39 built, which §62's redesign replaced with a collapsible "Key" panel using entirely new markup/CSS — the classes this fix touched no longer exist on the page.
 
 ## 55. Lower-Friction "Add to Calendar"
 
@@ -1266,23 +1201,15 @@ Only the combined view is affected (`COMBINED_MODE` gate, same as `tenantBadge()
 
 ## 58. Removed the "Today" Card's Blue Outline
 
-**Status:** Implemented.
-
-**Problem.** Every event/announcement card starting today reused PatternFly's `.pf-m-selected` card modifier, which draws a full blue border. Nothing in the Legend explains this border, and on any day it's showing, every single card in the "Today" section gets outlined — it read as an unexplained highlight rather than a deliberate status.
-
-**Fix.** Replaced `.pf-m-selected` with a dedicated `.samaya-today-card` class (`events.html`) that applies a light background tint instead of a border, leaving the kind-color left-border accent (orange for events, purple for announcements, both already in the Legend) as the only stroke on any card.
+**Superseded by §62.** This was a fix to PatternFly's `.pf-m-selected` modifier on the old `events.html`'s cards, replaced with a `.samaya-today-card` tint class. §62's redesign dropped PatternFly and that card markup entirely in favor of its own styling (the calendar view's current-day cell uses an `is-today` class); today's items are simply no longer marked up the way this section's fix touched.
 
 ## 59. Calendar Month Grid Shows Adjacent-Month Days
 
-**Status:** Implemented.
-
-**Problem.** The calendar view's month grid (spec §46/§47) left the leading/trailing cells of a month's first and last week blank whenever the 1st didn't fall on a Monday or the last day didn't fall on a Sunday — e.g. September 2026 left Monday, August 31 blank before September 1, and four cells (October 1–4) blank after September 30.
-
-**Fix.** `renderCalendar()` (`events.html`) now computes the previous/next month's day count alongside the current month's, and fills every leading/trailing gap with that adjacent month's real day numbers via a shared `buildCalCell(year, month, day, isAdjacent)` helper (extracted from the render loop so the current-month and adjacent-month cells render identically otherwise). Adjacent-month cells get a `.cal-cell-adjacent` class (lowered opacity) to read as "not quite this month" while still showing any events that fall on them (relevant near the edges of the ~28-day fetch window) and remaining clickable — `openCalendarDay()` already keys off the absolute date string, not the currently-displayed month, so no change was needed there.
+**Superseded by §62** for its implementation (`renderCalendar()`, `buildCalCell()`, `.cal-cell-adjacent`, all on the pre-redesign `events.html`). The behavior itself carried forward: §62's calendar grid still fills leading/trailing weeks with the adjacent month's real days (rendered with an `is-adjacent` class) rather than leaving them blank, and clicking one still opens that day's detail in place rather than switching months (see Out of Scope below, still accurate).
 
 ### Out of Scope
 
-- Clicking an adjacent-month day switching the grid to that month — it opens the same day-detail panel in place instead, consistent with clicking any other day in the grid.
+- Clicking an adjacent-month day switching the grid to that month — it opens the same day-detail panel in place instead, consistent with clicking any other day in the grid. Still true under §62's rewrite.
 
 ## 60. Simplified "Add to Calendar" and Scope Clarification
 
