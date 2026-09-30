@@ -41,6 +41,9 @@ from sqlalchemy.orm import selectinload
 from models import AsyncSessionLocal
 from models.db import Occurrence, PostLog, Tenant
 from services.discord_api import get_guild_events
+from services.discord_posting import (
+    PLATFORM_BOT_TOKEN, _post_to_one_tenant, _resolve_post_targets, find_post_log,
+)
 from services.notifications import send_notification
 from services.time_utils import ensure_utc
 
@@ -96,9 +99,6 @@ async def _auto_post_one_target(session, occ, event, target: Tenant, guild_cache
     and recorded without a new API call), "flagged" (a same-named Discord
     event exists but doesn't match — occ.status_detail explains why), or
     "error" (posting failed, or no bot token configured)."""
-    from routers.admin.deps import PLATFORM_BOT_TOKEN, find_post_log
-    from routers.admin.occurrences import _post_to_one_tenant
-
     existing_log = await find_post_log(session, target.id, event.name, occ.occurrence_date)
     if existing_log:
         return "posted" if existing_log.status == "posted" else "error"
@@ -191,7 +191,6 @@ async def auto_post_upcoming_occurrences(session_factory=None):
                     skipped += 1
                     continue
 
-                from routers.admin.occurrences import _resolve_post_targets
                 targets = await _resolve_post_targets(session, event, owning)
 
                 any_posted = False

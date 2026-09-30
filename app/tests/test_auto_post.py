@@ -72,7 +72,7 @@ class TestAutoPostNothingOnDiscord:
             return "discord-evt-1", ""
 
         monkeypatch.setattr("scheduler.auto_post.get_guild_events", fake_get_guild_events)
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
 
         await _run_job(db_engine)
 
@@ -101,7 +101,7 @@ class TestAutoPostSyncsExistingDiscordEvent:
             return "should-not-be-used", ""
 
         monkeypatch.setattr("scheduler.auto_post.get_guild_events", fake_get_guild_events)
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
 
         await _run_job(db_engine)
 
@@ -134,7 +134,7 @@ class TestAutoPostFlagsConflict:
             return "should-not-be-used", ""
 
         monkeypatch.setattr("scheduler.auto_post.get_guild_events", fake_get_guild_events)
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
 
         await _run_job(db_engine)
 
@@ -242,7 +242,7 @@ class TestAutoPostKingdomWide:
             return f"discord-evt-{len(posted_guilds)}", ""
 
         monkeypatch.setattr("scheduler.auto_post.get_guild_events", fake_get_guild_events)
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
 
         await _run_job(db_engine)
 

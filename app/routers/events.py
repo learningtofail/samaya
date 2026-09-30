@@ -10,6 +10,7 @@ from sqlalchemy.orm import aliased
 from models import get_db
 from models.db import Announcement, AnnouncementTarget, EventDefinition, EventTarget, Kingdom, Occurrence, PostLog, Tenant
 from services.discord_api import get_guild_channels
+from services.discord_posting import PLATFORM_BOT_TOKEN, _resolve_notification
 from services.static_assets import bust_static_cache
 
 router = APIRouter()
@@ -30,7 +31,6 @@ _CHANNEL_CACHE_TTL_SECONDS = 300
 async def _resolve_channel_name(tenant: Tenant, channel_id: str) -> str | None:
     if not channel_id:
         return None
-    from routers.admin.deps import PLATFORM_BOT_TOKEN
     token = tenant.server.bot_token or PLATFORM_BOT_TOKEN
     if not token:
         return None
@@ -193,7 +193,6 @@ async def list_events(tenant_slug: str, db: AsyncSession = Depends(get_db)):
         )
         .order_by(Occurrence.occurrence_date, EventDefinition.name)
     )
-    from routers.admin.occurrences import _resolve_notification
 
     event_rows = []
     for occ, event in result.all():
@@ -315,7 +314,6 @@ async def list_events_all(db: AsyncSession = Depends(get_db)):
         )
         .order_by(Occurrence.occurrence_date, EventDefinition.name)
     )
-    from routers.admin.occurrences import _resolve_notification
 
     rows = []
     for occ, event, tenant in result.all():

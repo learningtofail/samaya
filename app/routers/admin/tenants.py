@@ -10,18 +10,33 @@ into) alliances they don't belong to.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from models import get_db
 from models.db import DiscordServer, Kingdom, Tenant, User, UserTenant
 from services.audit import log_change
+from services.db_errors import raise_friendly_integrity_error
 from services.discord_api import verify_token
 
 from .deps import get_current_user, require_superadmin
 from .schemas import DiscordServerIn, DiscordServerPatch, KingdomIn, KingdomPatch, TenantIn, TenantPatch
 
 router = APIRouter()
+
+# Every unique constraint below is an unnamed Column(unique=True) in
+# models/db.py, so Postgres named it itself using its own default
+# "<table>_<column>_key" convention (confirmed against the actual schema
+# via app/alembic/versions/6fc935931248_..., not guessed) rather than an
+# explicit `name=` this codebase chose. If a future migration ever renames
+# one of these, raise_friendly_integrity_error's lookup just misses and
+# falls back to its generic message — not a crash, just a less specific
+# error text — but it's worth knowing why these particular strings look
+# unlike this file's own explicit uq_* constraint names elsewhere.
+_KINGDOM_SLUG_TAKEN = {"kingdoms_slug_key": "A kingdom with that slug already exists"}
+_TENANT_SLUG_TAKEN = {"tenants_slug_key": "A tenant with that slug already exists"}
+_GUILD_ID_TAKEN = {"discord_servers_guild_id_key": "A Discord server with that guild ID already exists"}
 
 
 def _kingdom_dict(k: Kingdom) -> dict:
@@ -76,9 +91,9 @@ async def create_kingdom(
     try:
         await db.commit()
         await db.refresh(kingdom)
-    except Exception as e:
+    except IntegrityError as e:
         await db.rollback()
-        raise HTTPException(status_code=422, detail=f"Could not create kingdom: {e}")
+        raise_friendly_integrity_error(e, _KINGDOM_SLUG_TAKEN, fallback="Could not create kingdom")
     return _kingdom_dict(kingdom)
 
 
@@ -107,9 +122,9 @@ async def update_kingdom(
         )
         await db.commit()
         await db.refresh(kingdom)
-    except Exception as e:
+    except IntegrityError as e:
         await db.rollback()
-        raise HTTPException(status_code=422, detail=f"Could not update kingdom: {e}")
+        raise_friendly_integrity_error(e, _KINGDOM_SLUG_TAKEN, fallback="Could not update kingdom")
     return _kingdom_dict(kingdom)
 
 
@@ -145,9 +160,9 @@ async def create_tenant(
     db.add(tenant)
     try:
         await db.flush()
-    except Exception as e:
+    except IntegrityError as e:
         await db.rollback()
-        raise HTTPException(status_code=422, detail=f"Could not create tenant: {e}")
+        raise_friendly_integrity_error(e, _TENANT_SLUG_TAKEN, fallback="Could not create tenant")
 
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id,
@@ -189,7 +204,14 @@ async def update_tenant(
         table_name="tenants", row_id=tenant.id, action="update",
         after={"name": tenant.name, "slug": tenant.slug, "server_id": tenant.server_id},
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        # Not previously caught at all — a slug collision on PATCH used to
+        # surface as a bare 500 instead of the same clean 422 create_tenant
+        # already gave for the identical constraint.
+        raise_friendly_integrity_error(e, _TENANT_SLUG_TAKEN, fallback="Could not update tenant")
     # `tenant` was already fetched (with `.server` eager-loaded) at the top
     # of this function, so a plain re-select would return the same
     # identity-mapped object with its now-stale `.server` still attached —
@@ -231,9 +253,9 @@ async def create_discord_server(
     db.add(server)
     try:
         await db.flush()
-    except Exception as e:
+    except IntegrityError as e:
         await db.rollback()
-        raise HTTPException(status_code=422, detail=f"Could not create Discord server: {e}")
+        raise_friendly_integrity_error(e, _GUILD_ID_TAKEN, fallback="Could not create Discord server")
 
     # bot_token/public_key deliberately excluded from the log entry — a
     # secret has no business sitting in a table other people can read.
@@ -271,7 +293,14 @@ async def update_discord_server(
         table_name="discord_servers", row_id=server.id, action="update",
         after={"name": server.name, "guild_id": server.guild_id},
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        # Same previously-uncaught gap as update_tenant above — a guild_id
+        # collision on PATCH used to 500 instead of matching
+        # create_discord_server's clean 422.
+        raise_friendly_integrity_error(e, _GUILD_ID_TAKEN, fallback="Could not update Discord server")
     await db.refresh(server)
     names_result = await db.execute(select(Tenant.name).where(Tenant.server_id == server.id))
     return _server_dict(server, tenant_names=list(names_result.scalars().all()))

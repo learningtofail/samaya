@@ -17,11 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models import get_db
 from models.db import EventDefinition, PostLog, Tenant
 from services.discord_api import update_discord_event
+from services.discord_posting import PLATFORM_BOT_TOKEN, find_post_log
 
-from .deps import (
-    PLATFORM_BOT_TOKEN, find_post_log, get_current_tenant, get_current_tenants,
-    get_occurrence_with_event, require_not_viewer,
-)
+from .deps import get_current_tenant, get_current_tenants, get_occurrence_with_event, require_not_viewer
 
 router = APIRouter()
 

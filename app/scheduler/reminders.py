@@ -9,6 +9,7 @@ from sqlalchemy import select
 from models import AsyncSessionLocal
 from models.db import EventDefinition, EventTenantNotification, Occurrence, PostLog, Tenant
 from services.discord_api import send_channel_message
+from services.discord_posting import PLATFORM_BOT_TOKEN
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +24,11 @@ async def send_pre_event_reminders(session_factory=None):
     actually has a posted PostLog row and a notification channel
     configured — the owning tenant's bare notification_channel_id/role, or
     another tenant's EventTenantNotification override (see
-    routers/admin/occurrences.py._resolve_notification for the same logic
+    services/discord_posting.py's _resolve_notification for the same logic
     used at posting time).
 
     session_factory: see module docstring — defaults to AsyncSessionLocal.
     """
-    from routers.admin.deps import PLATFORM_BOT_TOKEN
-
     now = datetime.now(timezone.utc)
 
     async with (session_factory or AsyncSessionLocal)() as session:

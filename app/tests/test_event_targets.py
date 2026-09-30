@@ -144,8 +144,8 @@ class TestEventTargetsPosting:
         async def fake_send(token, channel, message):
             pinged.append(channel)
             return True, ""
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
-        monkeypatch.setattr("routers.admin.occurrences.send_channel_message", fake_send)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.send_channel_message", fake_send)
 
         r = await client.post(f"/admin/api/occurrences/{occ.id}/post")
         assert r.status_code == 200, r.text
@@ -188,7 +188,7 @@ class TestEventTargetsPosting:
 
         async def fake_create(**kwargs):
             return f"discord-event-{kwargs['guild_id']}", ""
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
 
         r = await client.post(f"/admin/api/occurrences/{occ.id}/post")
         assert r.status_code == 200, r.text
@@ -236,8 +236,8 @@ class TestEventTargetsPosting:
         async def fake_send(token, channel, message):
             sent[channel] = message
             return True, ""
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
-        monkeypatch.setattr("routers.admin.occurrences.send_channel_message", fake_send)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.send_channel_message", fake_send)
 
         r = await client.post(f"/admin/api/occurrences/{occ.id}/post")
         assert r.status_code == 200, r.text

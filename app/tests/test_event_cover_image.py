@@ -131,8 +131,8 @@ class TestCoverImagePassedToDiscord:
             return "discord-event-1", ""
         async def fake_send(token, channel, message):
             return True, ""
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
-        monkeypatch.setattr("routers.admin.occurrences.send_channel_message", fake_send)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.send_channel_message", fake_send)
 
         r = await client.post(f"/admin/api/occurrences/{occ.id}/post")
         assert r.status_code == 200, r.text
@@ -166,8 +166,8 @@ class TestCoverImagePassedToDiscord:
             return "discord-event-1", ""
         async def fake_send(token, channel, message):
             return True, ""
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
-        monkeypatch.setattr("routers.admin.occurrences.send_channel_message", fake_send)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.send_channel_message", fake_send)
 
         r = await client.post(f"/admin/api/occurrences/{occ.id}/post")
         assert r.status_code == 200, r.text

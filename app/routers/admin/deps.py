@@ -8,7 +8,6 @@ again) but now also checks the logged-in user actually has UserTenant
 access to it — the bridge period never enforced that, since the shared
 key implicitly trusted every holder with every tenant.
 """
-import os
 from dataclasses import dataclass
 
 from fastapi import Depends, Header, HTTPException, Request
@@ -16,12 +15,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
-from models.db import EventDefinition, Occurrence, PostLog, Tenant, User, UserTenant
+from models.db import EventDefinition, Occurrence, Tenant, User, UserTenant
+from services.discord_posting import PLATFORM_BOT_TOKEN
 from services.sessions import SESSION_COOKIE_NAME, read_session_token
 
-# Falls back to this when a Tenant's own bot_token is null — see
-# models.db.Tenant's docstring for why sharing one token is the default.
-PLATFORM_BOT_TOKEN = os.environ.get("PLATFORM_BOT_TOKEN", "")
+# PLATFORM_BOT_TOKEN moved to services/discord_posting.py (audit
+# remediation, Phase 2) — re-imported here since get_discord_config below
+# still needs it and this module isn't a natural place to define it (it's
+# not a FastAPI dependency, just a config constant most of this module's
+# actual callers care about for Discord posting reasons).
 
 
 async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)) -> User:
@@ -231,15 +233,5 @@ async def resolve_target_tenants(db: AsyncSession, user: User, target_slugs: lis
     return tenants_by_slug
 
 
-async def find_post_log(db: AsyncSession, tenant_id: int, event_name: str, occurrence_date) -> PostLog | None:
-    """Not a FastAPI dependency — callers need different behavior when no
-    row is found (some treat it as fine, some as a 404), so this stays a
-    plain helper rather than one more Depends with baked-in error handling."""
-    result = await db.execute(
-        select(PostLog).where(
-            PostLog.tenant_id == tenant_id,
-            PostLog.event_name == event_name,
-            PostLog.occurrence_date == occurrence_date,
-        )
-    )
-    return result.scalar_one_or_none()
+# find_post_log moved to services/discord_posting.py (audit remediation,
+# Phase 2) — see that module's docstring. Import it from there.

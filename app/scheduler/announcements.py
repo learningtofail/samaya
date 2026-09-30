@@ -10,6 +10,7 @@ from sqlalchemy import select
 from models import AsyncSessionLocal
 from models.db import Announcement, AnnouncementTarget, Tenant
 from services.discord_api import send_channel_message
+from services.discord_posting import PLATFORM_BOT_TOKEN
 from services.templates import render_placeholders
 from services.time_utils import ensure_utc
 
@@ -22,12 +23,10 @@ async def send_scheduled_announcements(session_factory=None):
     and posts each AnnouncementTarget independently — one tenant's
     Discord API failure doesn't block or corrupt another's delivery,
     same principle as PostLog's kingdom-wide fan-out in
-    routers/admin/occurrences.py._post_to_one_tenant.
+    services/discord_posting.py's _post_to_one_tenant.
 
     session_factory: see module docstring — defaults to AsyncSessionLocal.
     """
-    from routers.admin.deps import PLATFORM_BOT_TOKEN
-
     now = datetime.now(timezone.utc)
 
     async with (session_factory or AsyncSessionLocal)() as session:

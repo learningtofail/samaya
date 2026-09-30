@@ -20,12 +20,14 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from models import get_db
 from models.db import EventDefinition, EventTarget, PostLog, Tenant, User
 from services.audit import log_change
+from services.db_errors import raise_friendly_integrity_error
 
 from .deps import (
     check_kingdom_coordinator, get_current_tenant, get_current_tenants, get_current_user,
@@ -130,16 +132,23 @@ async def create_event(
     db.add(event)
     try:
         await db.flush()
-    except Exception as e:
+    except IntegrityError as e:
         await db.rollback()
-        err = str(e)
-        if "ck_duration_positive" in err:
-            raise HTTPException(status_code=422, detail="Duration must be greater than 0")
-        if "ck_interval_positive" in err:
-            raise HTTPException(status_code=422, detail="Interval must be at least 1 day")
-        if "isoformat" in err or "anchor" in err.lower():
-            raise HTTPException(status_code=422, detail="Anchor date must be in yyyy-mm-dd format")
-        raise HTTPException(status_code=422, detail=f"Validation error: {err}")
+        # Both of these are already enforced at the Pydantic layer
+        # (services/validators.py's parse_duration_hours/parse_interval_days)
+        # before a request ever reaches the DB — this is a defense-in-depth
+        # backstop, not something a normal request can trigger. The
+        # anchor_date branch this replaced ("isoformat"/"anchor" substring
+        # matching) was dead code regardless: date.fromisoformat() above
+        # runs before this try block even starts, so a bad anchor_date was
+        # never going to surface here as a caught exception in the first
+        # place — it would have 500'd earlier, or never happened at all
+        # (payload.anchor_date is already a real date by the time Pydantic
+        # hands it to us).
+        raise_friendly_integrity_error(e, {
+            "ck_duration_positive": "Duration must be greater than 0",
+            "ck_interval_positive": "Interval must be at least 1 day",
+        })
 
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id,

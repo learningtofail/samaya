@@ -157,3 +157,55 @@ class TestServerSharingBehavior:
         # No per-tenant override exists to check against — this IS the
         # source of truth both tenants now resolve through (deps.py's
         # get_discord_config reads tenant.server.bot_token directly).
+
+
+class TestDuplicateConstraintMessages:
+    """Audit remediation, Phase 2 — services/db_errors.py replaces a mix of
+    fragile str(exception) substring matching and raw-exception-text
+    leakage with one shared IntegrityError -> friendly-422 translator.
+    These pin the actual message text a client sees (not just the status
+    code), and specifically exercise the UNIQUE path — SQLite (this test
+    suite's own driver) reports a unique violation completely differently
+    from asyncpg (production's driver), so this is what proves the two
+    drivers' error text both resolve to the same friendly message rather
+    than only working in production and silently degrading to the generic
+    fallback here."""
+
+    async def test_duplicate_tenant_slug_on_create(self, client: AsyncClient, tenant: dict):
+        r = await client.post(
+            "/admin/api/tenants",
+            json={"kingdom_id": tenant["kingdom_id"], "name": "Copycat", "slug": tenant["slug"], "server_id": tenant["server_id"]},
+        )
+        assert r.status_code == 422
+        assert r.json()["detail"] == "A tenant with that slug already exists"
+
+    async def test_duplicate_tenant_slug_on_update(self, client: AsyncClient, tenant: dict, second_tenant: dict):
+        r = await client.patch(f"/admin/api/tenants/{second_tenant['id']}", json={"slug": tenant["slug"]})
+        assert r.status_code == 422
+        assert r.json()["detail"] == "A tenant with that slug already exists"
+
+    async def test_duplicate_discord_server_guild_id_on_create(self, client: AsyncClient, tenant: dict):
+        r = await client.post("/admin/api/discord-servers", json={"name": "Copycat", "guild_id": "test-guild-mod"})
+        assert r.status_code == 422
+        assert r.json()["detail"] == "A Discord server with that guild ID already exists"
+
+    async def test_duplicate_discord_server_guild_id_on_update(
+        self, client: AsyncClient, tenant: dict, second_tenant: dict
+    ):
+        r = await client.patch(f"/admin/api/discord-servers/{tenant['server_id']}", json={"guild_id": "test-guild-nsr"})
+        assert r.status_code == 422
+        assert r.json()["detail"] == "A Discord server with that guild ID already exists"
+
+    async def test_duplicate_kingdom_slug_on_create(self, client: AsyncClient, tenant: dict):
+        r = await client.post("/admin/api/kingdoms", json={"name": "Copycat Kingdom", "slug": "k138"})
+        assert r.status_code == 422
+        assert r.json()["detail"] == "A kingdom with that slug already exists"
+
+    async def test_duplicate_kingdom_slug_on_update(self, client: AsyncClient, tenant: dict):
+        r = await client.post("/admin/api/kingdoms", json={"name": "Second Kingdom", "slug": "k999"})
+        assert r.status_code == 201, r.text
+        second_kingdom_id = r.json()["id"]
+
+        r = await client.patch(f"/admin/api/kingdoms/{second_kingdom_id}", json={"slug": "k138"})
+        assert r.status_code == 422
+        assert r.json()["detail"] == "A kingdom with that slug already exists"

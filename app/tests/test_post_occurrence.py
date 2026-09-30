@@ -67,7 +67,7 @@ class TestPostOccurrence:
 
         async def fake_create(**kwargs):
             return "discord-event-1", ""
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
 
         r = await client.post(f"/admin/api/occurrences/{occ.id}/post")
         assert r.status_code == 200, r.text
@@ -85,7 +85,7 @@ class TestPostOccurrence:
 
         async def fake_create(**kwargs):
             return "", "403 Forbidden — bot missing MANAGE_EVENTS permission"
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
 
         r = await client.post(f"/admin/api/occurrences/{occ.id}/post")
         assert r.status_code == 502
@@ -102,7 +102,7 @@ class TestPostOccurrence:
 
         async def fake_create(**kwargs):
             return "discord-event-1", ""
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
 
         r1 = await client.post(f"/admin/api/occurrences/{occ.id}/post")
         assert r1.status_code == 200
@@ -183,7 +183,7 @@ class TestKingdomWidePost:
         async def fake_create(**kwargs):
             calls.append(kwargs["guild_id"])
             return f"discord-event-{kwargs['guild_id']}", ""
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
 
         r = await client.post(f"/admin/api/occurrences/{occ.id}/post")
         assert r.status_code == 200, r.text
@@ -227,7 +227,7 @@ class TestKingdomWidePost:
             if kwargs["guild_id"] == "test-guild-nsr":
                 return "", "502 Discord API unavailable"
             return "discord-event-ok", ""
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", flaky_create)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", flaky_create)
 
         r = await client.post(f"/admin/api/occurrences/{occ.id}/post")
         assert r.status_code == 200, r.text
@@ -269,7 +269,7 @@ class TestKingdomWidePost:
             return f"discord-event-{kwargs['guild_id']}", ""
         async def fake_cancel(*a, **k):
             return True, ""
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
         monkeypatch.setattr("routers.admin.occurrences.cancel_discord_event", fake_cancel)
 
         await client.post(f"/admin/api/occurrences/{occ.id}/post")
@@ -329,7 +329,7 @@ class TestSharedDiscordServerDedup:
         async def fake_create(**kwargs):
             calls.append(kwargs["guild_id"])
             return f"discord-event-{kwargs['guild_id']}", ""
-        monkeypatch.setattr("routers.admin.occurrences.create_discord_event", fake_create)
+        monkeypatch.setattr("services.discord_posting.create_discord_event", fake_create)
 
         r = await client.post(f"/admin/api/occurrences/{occ.id}/post")
         assert r.status_code == 200, r.text
