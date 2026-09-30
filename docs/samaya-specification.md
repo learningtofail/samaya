@@ -1,7 +1,7 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.31.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Version:** 1.32.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
 
 ## 1. Purpose and Scope
 
@@ -1283,3 +1283,15 @@ Only the combined view is affected (`COMBINED_MODE` gate, same as `tenantBadge()
 ### Out of Scope
 
 - Clicking an adjacent-month day switching the grid to that month — it opens the same day-detail panel in place instead, consistent with clicking any other day in the grid.
+
+## 60. Simplified "Add to Calendar" and Scope Clarification
+
+**Status:** Implemented.
+
+**Problem.** Two things about §55's "Add to Calendar" redesign: (1) the page carried a second, redundant "Subscribe to stay up to date" banner card partway down, duplicating the header's own dropdown with no added function — just a second button that did the same thing; (2) nothing on the page said *which* schedule the subscription covers — the ICS feed a visitor gets depends entirely on whether they're on one alliance's own page (`/t/{slug}/events`) or the combined all-alliances page (`/events`), and that distinction was invisible at the point where someone decides to subscribe.
+
+**Fix.** Removed the second banner card and its `calendarMenuBtnBottom`/`calendarMenuListBottom` elements entirely — one "📅 Add to Calendar ▾" button, in the header, is enough. Added `CALENDAR_SCOPE_NOTE` (`events.html`), a short line at the top of the dropdown itself stating in plain terms what subscribing here includes: "Subscribing here adds only `{ALLIANCE}`'s events" on a single alliance's page, or "...every alliance's events, combined into one calendar" on the combined page — computed directly from `TENANT_SLUG`/`COMBINED_MODE` (already known synchronously at page load) rather than waiting on the async alliance-name fetch, so it's correct immediately.
+
+### Out of Scope
+
+- A way to subscribe to more than one specific alliance (e.g. two out of three) in a single feed — the feed is still exactly "this one alliance" or "every alliance," matching the two views the page itself offers.

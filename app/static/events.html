@@ -231,6 +231,12 @@
   .calendar-dropdown-menu a:hover, .calendar-dropdown-menu a:focus-visible { background: var(--pf-t--global--background--color--secondary--default); }
   .calendar-dropdown-menu a small { color: var(--pf-t--global--text--color--subtle); }
   .calendar-dropdown-menu hr { border: none; border-top: 1px solid var(--pf-t--global--border--color--default); margin: 4px 0; }
+  .calendar-dropdown-scope-note {
+    padding: 8px 14px; font-size: var(--pf-t--global--font--size--body--sm);
+    color: var(--pf-t--global--text--color--subtle);
+    border-bottom: 1px solid var(--pf-t--global--border--color--default);
+    margin-bottom: 4px;
+  }
   /* Same PatternFly page-layout fix admin.html already carries: .pf-v6-c-page
      is CSS grid with header/sidebar/main template areas, and with no
      sidebar element on this page, .pf-v6-c-page__main-container's default
@@ -369,28 +375,6 @@
            functions the event rows themselves use. -->
       <div class="pf-v6-c-card pf-v6-u-mb-lg" id="statusLegend"></div>
 
-      <div class="pf-v6-c-card pf-v6-u-mb-lg">
-        <div class="pf-v6-c-card__body">
-          <div class="pf-v6-l-flex pf-m-justify-content-space-between pf-m-align-items-center">
-            <div class="pf-v6-l-flex__item">
-              <div class="pf-v6-c-content">
-                <p>
-                  <strong>Subscribe to stay up to date.</strong>
-                  Add our calendar to Google Calendar, Apple Calendar, or any app that supports ICS.
-                  It updates automatically — no manual refresh needed.
-                </p>
-              </div>
-            </div>
-            <div class="pf-v6-l-flex__item">
-              <div class="calendar-dropdown">
-                <button type="button" class="pf-v6-c-button pf-m-secondary" id="calendarMenuBtnBottom" aria-haspopup="true" aria-expanded="false" onclick="toggleCalendarMenu(event,'calendarMenuListBottom')">📅 Add to Calendar ▾</button>
-                <div class="calendar-dropdown-menu" id="calendarMenuListBottom" role="menu" style="right:0;left:auto"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div id="lastActivityMarquee" class="samaya-marquee" style="display:none"></div>
 
       <!-- Spec §46 — List/Calendar toggle. List is the default; picking
@@ -461,10 +445,21 @@ const ICS_ABSOLUTE_URL = window.location.origin + ICS_URL;
 const ICS_WEBCAL_URL = ICS_ABSOLUTE_URL.replace(/^https?:\/\//, 'webcal://');
 const CALENDAR_TITLE = COMBINED_MODE ? 'Kingshot Event Schedule' : `${TENANT_SLUG.toUpperCase()} — Kingshot Event Schedule`;
 
+// Spec §60 — which feed this subscribes to isn't obvious from the button
+// alone (the page can be showing one alliance's own schedule or the
+// combined all-alliances one, and the ICS feed follows whichever page
+// you're on — see ICS_URL above). Named directly off TENANT_SLUG rather
+// than waiting on the async loadAlliances() fetch, so this is correct the
+// instant the menu is built, not just after alliances finish loading.
+const CALENDAR_SCOPE_NOTE = COMBINED_MODE
+  ? 'Subscribing here adds every alliance’s events, combined into one calendar.'
+  : `Subscribing here adds only ${escapeHtml(TENANT_SLUG.toUpperCase())}'s events. Switch alliances above for a different feed.`;
+
 function calendarMenuHtml() {
   const googleUrl = `https://calendar.google.com/calendar/render?cid=${encodeURIComponent(ICS_ABSOLUTE_URL)}`;
   const outlookUrl = `https://outlook.live.com/calendar/0/addfromweb?url=${encodeURIComponent(ICS_ABSOLUTE_URL)}&name=${encodeURIComponent(CALENDAR_TITLE)}`;
   return `
+    <div class="calendar-dropdown-scope-note">${CALENDAR_SCOPE_NOTE}</div>
     <a href="${googleUrl}" target="_blank" rel="noopener" role="menuitem">Google Calendar<small>Opens Google Calendar and subscribes automatically</small></a>
     <a href="${ICS_WEBCAL_URL}" role="menuitem">Apple Calendar / Outlook (desktop)<small>Uses your device's default calendar app</small></a>
     <a href="${outlookUrl}" target="_blank" rel="noopener" role="menuitem">Outlook.com<small>Opens Outlook on the web and subscribes automatically</small></a>
@@ -473,7 +468,6 @@ function calendarMenuHtml() {
   `;
 }
 document.getElementById('calendarMenuList').innerHTML = calendarMenuHtml();
-document.getElementById('calendarMenuListBottom').innerHTML = calendarMenuHtml();
 
 function toggleCalendarMenu(evt, menuId) {
   evt.stopPropagation();
