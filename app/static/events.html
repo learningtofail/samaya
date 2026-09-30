@@ -183,6 +183,13 @@
   }
   .samaya-card-clickable { cursor: pointer; }
   .samaya-card-clickable:hover { outline: 2px solid var(--pf-t--global--color--brand--default); outline-offset: -1px; }
+  /* "Today" used to reuse PatternFly's .pf-m-selected card modifier, which
+     draws a full blue border — not a real status, just PatternFly's own
+     "this card is the current selection" treatment, and confusing here
+     since every card is "today" whenever the whole list is showing today
+     (nothing in the legend explains it). A light background tint reads as
+     "today" without looking like a status the legend forgot. */
+  .samaya-today-card { background: var(--pf-t--global--background--color--secondary--default); }
   /* Same X-close + Escape treatment as admin.html's modals. */
   .pf-v6-c-modal-box__header { position: relative; }
   .samaya-modal-close {
@@ -906,7 +913,7 @@ function buildEventCardHtml(ev, dayNum, dowLabel, isToday) {
     </div>` : '';
   const previewJson = escapeHtml(JSON.stringify(ev));
   return `
-    <div class="pf-v6-c-card pf-v6-u-mb-sm samaya-card-clickable${isToday ? ' pf-m-selected' : ''}${isAnnouncement ? ' samaya-announcement-card' : ' samaya-event-card'}"
+    <div class="pf-v6-c-card pf-v6-u-mb-sm samaya-card-clickable${isToday ? ' samaya-today-card' : ''}${isAnnouncement ? ' samaya-announcement-card' : ' samaya-event-card'}"
          onclick="openDiscordPreview(${previewJson})"
          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDiscordPreview(${previewJson});}"
          tabindex="0" role="button" aria-label="${escapeHtml(ev.event_name)} — view Discord preview"
