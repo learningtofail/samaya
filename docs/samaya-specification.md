@@ -1670,6 +1670,140 @@ Rules:
 
 Everything in §66.9, plus any change to authentication, Kingdoms, alliances or Discord server setup.
 
+## 67. Destinations, Audience Groups and Deduplication
+
+**Status:** Planned, designed 2026-10-01 and awaiting approval. Nothing here is built. It extends §66 on purpose: §66 listed "Discord server setup" as out of scope and gave each alliance exactly one Notifications destination.
+
+**Problem.** An alliance has one Discord server and one notification channel and role. Two alliances that share a channel (production: MOD and NSR on one channel) each get their own reminder, so the channel sees two messages for one event. There is no way to post to a second server or channel, to build a leadership-only audience, or to point one event at a one-off channel without a per-event override.
+
+**Decisions (2026-10-01, with the owner).**
+- An alliance owns a list of **destinations**: a Discord server, a channel, an optional role and a label. A destination has a `post_by_default` flag. An event posts to every default destination of every audience alliance, unless the event opts one out or adds a non-default one.
+- Each alliance has one **main server** (the existing `tenants.server_id`). It is used only to create and manage Discord Scheduled Events. A superadmin assigns it. Destinations are a separate list and may use any permitted server.
+- **Audience groups** live at Kingdom level. A group is a named, reusable set of destinations. A user with a kingdom-coordinator grant manages groups. A group expands into its destinations whenever occurrences are generated, so editing a group changes every future occurrence that uses it and no posted history.
+- **Deduplication:** reminders dedupe on (Discord server, channel, offset). Scheduled Events dedupe on server. The delivery log keeps one row per destination; the duplicates are marked `cancelled` with "merged into delivery #N". Role mentions are the union of the merged roles. Different offsets (60 and 10 minutes) stay separate reminders.
+- **Leadership.** A `leadership_only` event posts only to `leadership_only` destinations. A `leadership_only` destination receives only leadership events. Leadership events never create Scheduled Events and never appear publicly (§66.2, unchanged). The admin console shows a Leadership badge.
+- The per-event channel and role overrides (`event_alliances.notification_channel_id`, `notification_role_id`) are removed. A one-off channel is a destination with `post_by_default` off, ticked on the events that need it. The per-alliance message override (`event_alliances.message_override`) stays.
+
+### 67.1 Data model
+
+New tables:
+
+| Table | Columns and rules |
+|---|---|
+| `destinations` | `id`, `tenant_id` (owning alliance), `server_id` (references `discord_servers`), `channel_id` (required), `role_id` (default empty), `label` (required, unique per alliance), `post_by_default` (bool), `leadership_only` (bool), `created_at`. Unique on `(tenant_id, server_id, channel_id, role_id)` |
+| `audience_groups` | `id`, `kingdom_id`, `name` (unique per Kingdom), `description`, `created_at` |
+| `audience_group_destinations` | `group_id`, `destination_id`; unique pair; cascade on group delete, restrict on destination delete |
+| `event_destinations` | A per-event change to one destination's default: `event_id`, `destination_id`, `included` (true adds a non-default destination, false opts out of a default). Unique on `(event_id, destination_id)` |
+| `event_groups` | `event_id`, `group_id`; unique pair |
+
+Changed tables:
+- `deliveries` gains `destination_id` (nullable; null for `discord_event` rows; `SET NULL` on delete), `guild_id` and `channel_id` (snapshots, empty for `discord_event`, so history survives edits to a destination), and `merged_into_id` (nullable self reference). The unique constraint `(occurrence_id, tenant_id, kind, reminder_minutes)` is replaced by two partial unique indexes: `(occurrence_id, destination_id, reminder_minutes)` where `kind = 'reminder'`, and `(occurrence_id, tenant_id)` where `kind = 'discord_event'`.
+- `tenants.server_id` is unchanged and is now documented as the **main server**. `tenants.notification_channel_id` and `notification_role_id` stay in the schema until the closing revision (§67.8) and stop being read by the engine.
+- `event_alliances.notification_channel_id` and `notification_role_id` stay in the schema until the closing revision and stop being read or written.
+
+### 67.2 Resolving where an occurrence goes
+
+The set of destinations for an event, computed by one function (`resolve_destinations(event)`) that the engine, the save validation and the admin preview all call:
+
+1. Start with the destinations of every audience alliance where `post_by_default` is true (§66 audience rules: the listed alliances, or every alliance in the Kingdom for a kingdom-wide event).
+2. Add every destination from the event's groups.
+3. Add every `event_destinations` row with `included = true`. It must belong to an audience alliance or to one of the event's groups.
+4. Remove every `event_destinations` row with `included = false`.
+5. Apply the leadership rule: a `leadership_only` event keeps only `leadership_only` destinations; a non-leadership event drops them.
+
+Save rejects (422, naming the destination) an explicit add that a non-leadership event cannot use, and an add that is neither in the audience nor in a group. The engine skips such a destination with a `cancelled` row and the reason, in case a flag changed after save.
+
+An event that resolves to no destination creates one `error` reminder row per audience alliance reading "No destination configured" (or "No leadership-only destination configured"), as §66.4 treats a missing channel today.
+
+### 67.3 Deduplication and merging
+
+Within one occurrence, destinations that share (guild, channel) and a reminder offset form one **send**. The engine creates a delivery row for every destination and links them:
+
+- **Representative:** the existing non-cancelled delivery of the group if one exists, else the first by (alliance id, destination id). It carries the real send. The others get `status = cancelled`, `merged_into_id = <representative id>` and `detail = "Merged into delivery #N"`.
+- **Content:** one message. The text is the base effective message. The mention is `<@&role> ...` for the union of the merged destinations' roles (each once), and only when the event's `mention_role` is set.
+- **`{alliance_name}`** renders as the alliance names of the merged destinations' owners, sorted by name and joined with ", ". `{kingdom_name}` and the time placeholders are unchanged.
+- **Re-sync:** pending rows are regrouped on every sync. A `posted` or `sending` row is never rewritten. A destination that joins a send already posted is created `cancelled` with "Merged into delivery #N (already sent)".
+- **Scheduled Events** keep §52: alliances whose main servers share a guild share one Discord event. The follower rows stay `posted` with "Shared with another alliance in the same Discord server" and now also set `merged_into_id`, so the log marks them the same way. The description renders `{alliance_name}` with every audience alliance on that guild. Group and explicit destinations never create Scheduled Events.
+
+### 67.4 Conflicting messages
+
+A per-alliance `message_override` creates a **conflict** when two or more destinations in one send resolve to different effective texts (an override against the base text counts). The occurrence override applies to all alliances and never conflicts.
+
+- **At save:** the event create and update routes reject a conflict with 422, naming the channel and the alliances involved, and the admin form shows it inline. Nothing is saved.
+- **After save** (a Setup or group change creates a conflict later): the engine sends the base event message once, does not apply the conflicting overrides, and writes the explanation on the representative row ("Conflicting alliance messages on a shared channel; base message sent. Overrides for MOD, NSR were not used"). The override rows are not deleted. The Events list shows a warning on the event, computed from the same function, until the owner resolves it.
+- Nothing is sent twice and nothing is dropped silently.
+
+### 67.5 Permissions
+
+| Action | Who |
+|---|---|
+| Create, edit, delete a destination | Owner of that alliance, or superadmin |
+| Assign an alliance's main server | Superadmin |
+| Choose a destination's server | A server that is the main server of at least one alliance in the same Kingdom, or any server for a superadmin |
+| Create, edit, delete an audience group | Kingdom coordinator for that Kingdom, or superadmin |
+| Use a group or destination on an event | Anyone who may create or edit that event (viewers cannot) |
+
+Deleting a destination used by an event or a group returns 409 with the list of events and groups that use it. Deleting a group used by an event returns 409 the same way. The delivery history of a deleted destination stays through the `guild_id` and `channel_id` snapshots.
+
+### 67.6 Routes and admin console
+
+Routes (all under `/admin`, tenant by `X-Tenant-Slug`; `*` is read-only):
+- `GET/POST /api/destinations`, `PATCH/DELETE /api/destinations/{id}`.
+- `GET/POST /api/audience-groups`, `PATCH/DELETE /api/audience-groups/{id}`.
+- `POST /api/events/preview-destinations`: takes the event form's audience, groups, destination changes and leadership flag; returns the resolved destinations, the merged sends and any conflicts. The form calls this instead of repeating the rules in JavaScript.
+- `GET /api/discord/channels` and `/roles` gain an optional `server_id` query parameter (checked against §67.5), because a destination's server is no longer the alliance's own.
+- Event create, update and read gain `group_ids`, `destination_changes` (`[{destination_id, included}]`) and a read-only `warnings` list; the per-alliance channel and role fields are removed.
+- `PUT /api/notification-destination` is removed; the destination list replaces it. `GET /api/deliveries` returns one entry per send, with `members` (each destination's row, status and merge link); the health counts exclude merged rows.
+- `GET /api/discord/channels` and `/roles` keep the existing fallback to a text field when Discord is unreachable.
+
+Console:
+- **Setup, alliances:** a Main server field (editable by a superadmin, read-only for owners) and a Destinations table: label, server, channel, role, Post by default, Leadership only, with add, edit and delete.
+- **Setup, audience groups** (visible to kingdom coordinators and superadmins): name, description and a destination picker grouped by alliance.
+- **Events form:** the audience stays; a Destinations panel lists the resolved destinations grouped by alliance (default ones ticked; unticking opts out; other destinations of audience alliances can be ticked in), a Groups multi-select, and a one-line summary "Posts to N destinations in M channels". Conflicts show inline.
+- **Events and Schedule:** one row per event or occurrence. Audience chips, a "N destinations" badge, a Leadership badge and a warning marker. No row per alliance or per channel.
+- **Delivery log:** one line per send with a "merged" marker, expandable to the per-destination rows.
+- **Public page:** unchanged and still hides leadership events. `groupCombinedFanoutRows` already folds the combined view's per-alliance rows into one card with several alliance chips; the build verifies it with a test. `notification_channel_name` becomes the channel name of the alliance's first default, non-leadership destination, and a leadership-only destination is never exposed.
+
+### 67.7 Rate limits
+
+The cutover script showed that Discord returns 429 under bursts, and that one delete helper has no retry.
+- `cancel_discord_event` gains the same bounded retry as `create_discord_event` and `send_channel_message`: honour `retry_after` from the JSON body, fall back to the `Retry-After` header, then to exponential backoff. A non-JSON 429 body no longer raises.
+- Each wait is capped at 15 seconds and each call at 3 attempts, so one rate-limited send cannot stall the tick. After the last attempt the row becomes `error` with a clear reason and is retried by hand.
+- `cutover_delete_old_discord_events.py` paces its deletes (0.5 seconds apart) and retries through the shared helper, so one run completes.
+
+### 67.8 Migration and rollout
+
+- **Revision `a1f0c0de0004` (additive, with a downgrade):** creates the five tables, adds the delivery columns and indexes, and seeds data so behavior is unchanged the moment it runs:
+  - one destination per tenant with a non-empty notification channel: label "Notifications", the tenant's main server, the tenant's channel and role, `post_by_default` true;
+  - for every `event_alliances` row with a channel or role override: a destination for the override (label "Event channel", `post_by_default` false, `leadership_only` true when the event is leadership-only, reused when the same alliance, server, channel and role exist), an `event_destinations` row that adds it, and one that opts out of the alliance default. A role-only override becomes a destination on the default channel with the other role; because both destinations then share a channel, they merge and the mention is the union of both roles, which differs from the old "override replaces" rule. This is rare and is flagged here for review;
+  - existing `deliveries` get `guild_id` and `channel_id` backfilled from the alliance's destination and keep their status.
+  - Leadership events that relied on the alliance default channel now resolve to no leadership-only destination (§67.2) and show a clear error until the owner flags a destination. This is deliberate: it closes the path where a leadership reminder could reach a public channel.
+- **Revision `a1f0c0de0005` (destructive, a later release):** drops the tenant and `event_alliances` notification columns after the new engine has run cleanly on production. Taking the `ops/backup.sh` dump first is the rollback.
+- **Deploy:** a branch, a PR the owner merges, then on `lxc-taraka`: back up, `git pull`, `docker compose build app`, `alembic upgrade head`, `docker compose up -d app`, then check Setup shows the seeded destinations. Code-only rollback is safe for `0004` because the old columns remain.
+- Production entry of events can continue while this is built: the seed converts what exists, and nothing is dropped until `0005`.
+
+### 67.9 Tests
+
+Against `FakeDiscord`, following `tests/unified_helpers.py`:
+- **Shared channel (the production case):** MOD and NSR on one channel and server, one event for both, one 10-minute reminder. The fake records one message; the second delivery is `cancelled` with "Merged into delivery #N"; the mention holds both roles once; `{alliance_name}` renders "MOD, NSR". A 60-minute and a 10-minute reminder stay two sends.
+- Two alliances on different servers get two messages and two Scheduled Events; shared main server gets one Scheduled Event.
+- Default, opt-out, explicit add and group expansion each change the resolved set as §67.2 says; editing a group changes future pending rows only.
+- Leadership: a leadership event reaches only a leadership-only destination; a non-leadership event never reaches one; no Scheduled Event; a leadership event with no such destination records the error. The public-surface test for a leadership event stays and still passes.
+- Conflicts: save rejects with the channel and alliances named; a conflict created after save sends the base message once with the explanation and shows a warning; nothing is sent twice.
+- Permissions per §67.5, with `make_user_and_client`; delete returns 409 with the users listed.
+- Migration: seed a pre-`0004` database (default channels, overrides, a leadership event), upgrade, and assert the converted destinations and event rows; `alembic check` is clean.
+- Rate limits: `cancel_discord_event` and `send_channel_message` retry on 429 with JSON and non-JSON bodies, and stop after the cap.
+- Frontend: `groupCombinedFanoutRows` folds two alliance rows into one card; admin pages checked in a real browser at desktop and 390px width.
+
+### 67.10 Docs
+
+On completion: Part I and `CLAUDE.md` describe destinations, groups and merging; the cutover runbook's Setup step becomes "configure destinations"; `docs/rollback-runbook.md` gains the `0004` and `0005` notes.
+
+### 67.11 Not built here
+
+Per-destination message wording, a creation-notice destination (§66.9), per-coordinator alliance limits (§66.9), and Scheduled Events on any server other than an alliance's main server.
+
+
 # Archive
 
 Fully superseded designs, moved here unchanged except for position. Each begins with its own "Superseded" note. They stay for historical reasoning only and do not describe the current system.
