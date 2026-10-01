@@ -8,7 +8,7 @@ following" split (§66.4a) arrive with the delivery engine in Phase 2, which
 is also where deleting or editing an event starts to cancel pending
 deliveries and remove Discord events.
 """
-from datetime import date, time as dtime
+from datetime import date, datetime, time as dtime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, select
@@ -20,6 +20,8 @@ from models import get_db
 from models.db import Event, EventAlliance, EventReminder, EventType, Tenant, User
 from services.audit import log_change
 from services.db_errors import raise_friendly_integrity_error
+from services.discord_client import get_discord
+from services.event_engine import apply_event_change, remove_event_from_discord, sync_event_occurrences
 from services.validators import check_recurrence_shape
 
 from .deps import (
@@ -331,6 +333,58 @@ async def _require_write_access(db: AsyncSession, user: User, tenant: Tenant, ev
     raise HTTPException(status_code=404, detail="Event not found")
 
 
+async def apply_event_patch(
+    db: AsyncSession, user: User, event: Event, owner: Tenant, payload: EventPatch, before_scope: str,
+) -> None:
+    """Applies a partial update to `event` in memory (no flush). Shared by
+    the whole-event PATCH and the "this and following" split (§66.4a)."""
+    given = payload.model_fields_set
+
+    new_scope = payload.scope if payload.scope is not None else event.scope
+    if new_scope == "kingdom-wide":
+        await check_kingdom_coordinator(db, user, owner.kingdom_id)
+
+    if payload.type_id is not None:
+        event.type_id = (await _get_type_in_kingdom(db, payload.type_id, owner.kingdom_id)).id
+    for field in ("name", "leadership_only", "active", "message", "location", "mention_role"):
+        value = getattr(payload, field)
+        if field in given and value is not None:
+            setattr(event, field, value)
+    event.scope = new_scope
+    if payload.start_time_utc is not None:
+        event.start_time_utc = _parse_time(payload.start_time_utc)
+    if payload.anchor_date is not None:
+        event.anchor_date = date.fromisoformat(payload.anchor_date)
+    if "until_date" in given:
+        event.until_date = date.fromisoformat(payload.until_date) if payload.until_date else None
+    if "duration_hours" in given:
+        event.duration_hours = payload.duration_hours
+    if "cover_image_data" in given and payload.cover_image_data is not None:
+        event.cover_image_data = payload.cover_image_data or None
+
+    if "recurrence_kind" in given and payload.recurrence_kind is not None:
+        event.recurrence_kind = payload.recurrence_kind
+        if payload.recurrence_kind == "none" and "interval_days" not in given:
+            event.interval_days = None
+    if "interval_days" in given:
+        event.interval_days = payload.interval_days
+        if payload.interval_days is not None and "recurrence_kind" not in given:
+            event.recurrence_kind = "interval_days"
+    try:
+        check_recurrence_shape(event.recurrence_kind, event.interval_days, event.anchor_date, event.until_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    if payload.reminder_minutes is not None:
+        _sync_reminders(event, payload.reminder_minutes)
+    if payload.alliances is not None:
+        _sync_alliances(event, await _resolve_alliance_rows(db, user, owner, new_scope, payload.alliances))
+    elif payload.scope is not None and payload.scope != before_scope and new_scope == "alliance":
+        # Switching a kingdom-wide event back to a single alliance leaves
+        # only the owner as its audience.
+        _sync_alliances(event, [EventAlliance(tenant_id=owner.id)])
+
+
 @router.get("/events")
 async def list_events(
     tenants: list[Tenant] = Depends(get_current_tenants),
@@ -452,6 +506,7 @@ async def create_event(
     except IntegrityError as e:
         await db.rollback()
         raise_friendly_integrity_error(e, {})
+    await sync_event_occurrences(db, event, datetime.now(timezone.utc))
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id, table_name="events", row_id=event.id,
         action="create", after=_event_audit_snapshot(event),
@@ -466,6 +521,7 @@ async def update_event(
     tenant: Tenant = Depends(require_not_viewer),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    discord=Depends(get_discord),
 ):
     event = await _load_event(db, event_id)
     if event is None:
@@ -473,63 +529,22 @@ async def update_event(
     await _require_write_access(db, user, tenant, event)
     owner = await db.get(Tenant, event.owning_tenant_id)
     before = _event_audit_snapshot(event)
-    given = payload.model_fields_set
-
-    new_scope = payload.scope if payload.scope is not None else event.scope
-    if new_scope == "kingdom-wide":
-        await check_kingdom_coordinator(db, user, owner.kingdom_id)
-
-    if payload.type_id is not None:
-        event.type_id = (await _get_type_in_kingdom(db, payload.type_id, owner.kingdom_id)).id
-    for field in ("name", "leadership_only", "active", "message", "location", "mention_role"):
-        value = getattr(payload, field)
-        if field in given and value is not None:
-            setattr(event, field, value)
-    event.scope = new_scope
-    if payload.start_time_utc is not None:
-        event.start_time_utc = _parse_time(payload.start_time_utc)
-    if payload.anchor_date is not None:
-        event.anchor_date = date.fromisoformat(payload.anchor_date)
-    if "until_date" in given:
-        event.until_date = date.fromisoformat(payload.until_date) if payload.until_date else None
-    if "duration_hours" in given:
-        event.duration_hours = payload.duration_hours
-    if "cover_image_data" in given and payload.cover_image_data is not None:
-        event.cover_image_data = payload.cover_image_data or None
-
-    if "recurrence_kind" in given and payload.recurrence_kind is not None:
-        event.recurrence_kind = payload.recurrence_kind
-        if payload.recurrence_kind == "none" and "interval_days" not in given:
-            event.interval_days = None
-    if "interval_days" in given:
-        event.interval_days = payload.interval_days
-        if payload.interval_days is not None and "recurrence_kind" not in given:
-            event.recurrence_kind = "interval_days"
-    try:
-        check_recurrence_shape(event.recurrence_kind, event.interval_days, event.anchor_date, event.until_date)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-
-    if payload.reminder_minutes is not None:
-        _sync_reminders(event, payload.reminder_minutes)
-    if payload.alliances is not None:
-        _sync_alliances(event, await _resolve_alliance_rows(db, user, owner, new_scope, payload.alliances))
-    elif payload.scope is not None and payload.scope != before["scope"] and new_scope == "alliance":
-        # Switching a kingdom-wide event back to a single alliance leaves
-        # only the owner as its audience.
-        _sync_alliances(event, [EventAlliance(tenant_id=owner.id)])
-
+    await apply_event_patch(db, user, event, owner, payload, before["scope"])
     try:
         await db.flush()
     except IntegrityError as e:
         await db.rollback()
         raise_friendly_integrity_error(e, {})
+    discord_errors = await apply_event_change(db, discord, event, datetime.now(timezone.utc))
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id, table_name="events", row_id=event.id,
         action="update", before=before, after=_event_audit_snapshot(event),
     )
     await db.commit()
-    return _event_dict(await _load_event(db, event.id))
+    body = _event_dict(await _load_event(db, event.id))
+    if discord_errors:
+        body["discord_errors"] = discord_errors
+    return body
 
 
 @router.delete("/events/{event_id}", status_code=204)
@@ -538,12 +553,14 @@ async def delete_event(
     tenant: Tenant = Depends(require_not_viewer),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    discord=Depends(get_discord),
 ):
     event = await _load_event(db, event_id)
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
     await _require_write_access(db, user, tenant, event)
     before = _event_audit_snapshot(event)
+    await remove_event_from_discord(db, discord, event.id)
     await db.delete(event)
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id, table_name="events", row_id=event_id,

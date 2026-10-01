@@ -17,6 +17,8 @@ from scheduler.regeneration import regenerate_occurrences
 from scheduler.reminders import send_pre_event_reminders
 from scheduler.announcements import send_scheduled_announcements
 from scheduler.auto_post import auto_post_upcoming_occurrences
+from scheduler.unified_jobs import delivery_tick_job, generation_job
+from routers.admin.unified_engine import engine_enabled
 from routers import events, admin, webhooks, ics, auth as auth_router, auth_pages, tickets_public
 
 logging.basicConfig(level=logging.INFO)
@@ -95,40 +97,54 @@ async def lifespan(app: FastAPI):
             logger.info("Overdue regeneration detected on startup — running now for all tenants")
             await regenerate_occurrences()
 
-    # Daily regeneration at UTC 00:00
-    scheduler.add_job(
-        regenerate_occurrences,
-        CronTrigger(hour=0, minute=0, timezone="UTC"),
-        id="regenerate_occurrences",
-        replace_existing=True,
-    )
+    if engine_enabled():
+        # Spec §66.4: the unified engine replaces all four old jobs. They must
+        # not run alongside it, or every event would be posted twice.
+        scheduler.add_job(
+            generation_job, CronTrigger(hour=0, minute=0, timezone="UTC"),
+            id="unified_generation", replace_existing=True,
+        )
+        scheduler.add_job(
+            delivery_tick_job, IntervalTrigger(minutes=1),
+            id="unified_delivery_tick", replace_existing=True,
+        )
+        await generation_job()  # startup catch-up; idempotent
+        logger.info("Unified event engine enabled (SAMAYA_UNIFIED_ENGINE): legacy jobs not registered")
+    else:
+        # Daily regeneration at UTC 00:00
+        scheduler.add_job(
+            regenerate_occurrences,
+            CronTrigger(hour=0, minute=0, timezone="UTC"),
+            id="regenerate_occurrences",
+            replace_existing=True,
+        )
 
-    # Pre-event reminder — runs every minute
-    scheduler.add_job(
-        send_pre_event_reminders,
-        IntervalTrigger(minutes=1),
-        id="pre_event_notifier",
-        replace_existing=True,
-    )
+        # Pre-event reminder — runs every minute
+        scheduler.add_job(
+            send_pre_event_reminders,
+            IntervalTrigger(minutes=1),
+            id="pre_event_notifier",
+            replace_existing=True,
+        )
 
-    # Scheduled announcement delivery — runs every minute
-    scheduler.add_job(
-        send_scheduled_announcements,
-        IntervalTrigger(minutes=1),
-        id="announcement_delivery",
-        replace_existing=True,
-    )
+        # Scheduled announcement delivery — runs every minute
+        scheduler.add_job(
+            send_scheduled_announcements,
+            IntervalTrigger(minutes=1),
+            id="announcement_delivery",
+            replace_existing=True,
+        )
 
-    # Daily auto-post of upcoming occurrences (spec §51) — deliberately
-    # after regeneration's own UTC 00:00 slot (16:00 UTC), so a fresh
-    # day's regenerated occurrences are always in place before this job
-    # looks for anything to post.
-    scheduler.add_job(
-        auto_post_upcoming_occurrences,
-        CronTrigger(hour=16, minute=0, timezone="UTC"),
-        id="auto_post_upcoming_occurrences",
-        replace_existing=True,
-    )
+        # Daily auto-post of upcoming occurrences (spec §51) — deliberately
+        # after regeneration's own UTC 00:00 slot (16:00 UTC), so a fresh
+        # day's regenerated occurrences are always in place before this job
+        # looks for anything to post.
+        scheduler.add_job(
+            auto_post_upcoming_occurrences,
+            CronTrigger(hour=16, minute=0, timezone="UTC"),
+            id="auto_post_upcoming_occurrences",
+            replace_existing=True,
+        )
 
     scheduler.start()
     logger.info(

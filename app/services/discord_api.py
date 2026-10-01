@@ -111,10 +111,15 @@ async def update_discord_event(
     description: str,
     location:    str,
     image:       str | None = None,
+    start:       datetime | None = None,
+    end:         datetime | None = None,
 ) -> tuple[bool, str]:
     """
     Updates a Discord Scheduled Event's name/description/location to match
     the current event definition. Returns (success, error_message).
+
+    start/end (spec §66.4a, moving or editing one occurrence) are included
+    only when given, so every existing caller keeps its old behavior.
 
     Shares create_discord_event's retry/backoff and error-code handling —
     this used to be reimplemented ad hoc at each call site with a bare
@@ -133,6 +138,10 @@ async def update_discord_event(
     }
     if image:
         payload["image"] = image
+    if start is not None:
+        payload["scheduled_start_time"] = start.astimezone(timezone.utc).isoformat()
+    if end is not None:
+        payload["scheduled_end_time"] = end.astimezone(timezone.utc).isoformat()
     url = f"{DISCORD_API_BASE}/guilds/{guild_id}/scheduled-events/{discord_event_id}"
 
     async with httpx.AsyncClient() as client:
