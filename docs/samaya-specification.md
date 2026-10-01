@@ -1678,7 +1678,7 @@ Everything in §66.9, plus any change to authentication, Kingdoms, alliances or 
 
 **Decisions (2026-10-01, with the owner).**
 - An alliance owns a list of **destinations**: a Discord server, a channel, an optional role and a label. A destination has a `post_by_default` flag. An event posts to every default destination of every audience alliance, unless the event opts one out or adds a non-default one.
-- Each alliance has one **primary server** (the existing `tenants.server_id`). It is labelled **primary** in Setup. An alliance may also designate **secondary servers** (zero or more). Scheduled Events are created and managed on the primary server and on every secondary server, and nowhere else. A superadmin assigns both. Destinations are a separate list and may use any server in the alliance's Kingdom.
+- Each alliance has one **primary server** (the existing `tenants.server_id`). It is labelled **primary** in Setup. Scheduled Events are created and managed on the primary server only. An alliance may also list **secondary servers** (zero or more): servers it is allowed to post notifications to, shown to admins so they know where messages should and should not go. A secondary creates no Scheduled Event. Sharing is declared per alliance and never inferred: MOD and VAL may each list HTD's server as secondary, which says nothing about MOD and VAL sharing a server with each other. A superadmin assigns both. A destination's server must be the alliance's primary or one of its secondaries.
 - **Servers belong to a Kingdom.** Production runs one Kingdom (138) today; the link keeps a second Kingdom from sharing or reaching another's servers.
 - **Audience groups** live at Kingdom level. A group is a named, reusable set of destinations. A user with a kingdom-coordinator grant manages groups. A group expands into its destinations whenever occurrences are generated, so editing a group changes every future occurrence that uses it and no posted history.
 - **Deduplication:** reminders dedupe on (Discord server, channel, offset). Scheduled Events dedupe on server. The delivery log keeps one row per destination; the duplicates are marked `cancelled` with "merged into delivery #N". Role mentions are the union of the merged roles. Different offsets (60 and 10 minutes) stay separate reminders.
@@ -1700,7 +1700,7 @@ New tables:
 Changed tables:
 - `deliveries` gains `destination_id` (nullable; null for `discord_event` rows; `SET NULL` on delete), `guild_id` and `channel_id` (snapshots, empty for `discord_event`, so history survives edits to a destination), and `merged_into_id` (nullable self reference). The unique constraint `(occurrence_id, tenant_id, kind, reminder_minutes)` is replaced by two partial unique indexes: `(occurrence_id, destination_id, reminder_minutes)` where `kind = 'reminder'`, and `(occurrence_id, tenant_id)` where `kind = 'discord_event'`.
 - `discord_servers` gains `kingdom_id` (required). The revision backfills it from the Kingdom of the alliances that use the server, else from the only Kingdom when there is one, and stops with an error naming the server when it cannot decide. Creating or editing a server needs a Kingdom, and an alliance's primary and secondary servers must belong to its own Kingdom (422 otherwise).
-- New table `tenant_secondary_servers`: `tenant_id`, `server_id`, unique pair; the server must differ from the tenant's primary and share its Kingdom.
+- New table `tenant_secondary_servers`: `tenant_id`, `server_id`, unique pair; the server must differ from the tenant's primary and share its Kingdom. Secondary servers are informational plus the allowed-list for destinations; the engine reads them for nothing else.
 - `tenants.server_id` is unchanged and is now documented as the **primary server**. `tenants.notification_channel_id` and `notification_role_id` stay in the schema until the closing revision (§67.8) and stop being read by the engine.
 - `event_alliances.notification_channel_id` and `notification_role_id` stay in the schema until the closing revision and stop being read or written.
 
@@ -1726,7 +1726,7 @@ Within one occurrence, destinations that share (guild, channel) and a reminder o
 - **Content:** one message. The text is the base effective message. The mention is `<@&role> ...` for the union of the merged destinations' roles (each once), and only when the event's `mention_role` is set.
 - **`{alliance_name}`** renders as the alliance names of the merged destinations' owners, sorted by name and joined with ", ". `{kingdom_name}` and the time placeholders are unchanged.
 - **Re-sync:** pending rows are regrouped on every sync. A `posted` or `sending` row is never rewritten. A destination that joins a send already posted is created `cancelled` with "Merged into delivery #N (already sent)".
-- **Scheduled Events** keep §52: alliances whose servers (primary or secondary) share a guild share one Discord event. An alliance with secondary servers gets one `discord_event` delivery per server, so the log shows each guild separately; the unique index for `discord_event` rows becomes `(occurrence_id, tenant_id, server_id)` and the table gains a nullable `server_id` for them. The follower rows stay `posted` with "Shared with another alliance in the same Discord server" and now also set `merged_into_id`, so the log marks them the same way. The description renders `{alliance_name}` with every audience alliance on that guild. Group and explicit destinations never create Scheduled Events. A leadership-only event creates none on any server (§66.2).
+- **Scheduled Events** keep §52: alliances whose primary servers share a guild share one Discord event (unchanged; no `discord_event` schema change). The follower rows stay `posted` with "Shared with another alliance in the same Discord server" and now also set `merged_into_id`, so the log marks them the same way. The description renders `{alliance_name}` with every audience alliance on that guild. Group and explicit destinations never create Scheduled Events. A leadership-only event creates none on any server (§66.2).
 
 ### 67.4 Conflicting messages
 
@@ -1742,7 +1742,7 @@ A per-alliance `message_override` creates a **conflict** when two or more destin
 |---|---|
 | Create, edit, delete a destination | Owner of that alliance, or superadmin |
 | Assign an alliance's primary or secondary servers | Superadmin |
-| Choose a destination's server | Any server in the alliance's Kingdom |
+| Choose a destination's server | The alliance's primary or one of its secondary servers |
 | Create, edit, delete an audience group | Kingdom coordinator for that Kingdom, or superadmin |
 | Use a group or destination on an event | Anyone who may create or edit that event (viewers cannot) |
 
@@ -1789,8 +1789,8 @@ The cutover script showed that Discord returns 429 under bursts, and that one de
 
 Against `FakeDiscord`, following `tests/unified_helpers.py`:
 - **Shared channel (the production case):** MOD and NSR on one channel and server, one event for both, one 10-minute reminder. The fake records one message; the second delivery is `cancelled` with "Merged into delivery #N"; the mention holds both roles once; `{alliance_name}` renders "MOD, NSR". A 60-minute and a 10-minute reminder stay two sends.
-- Two alliances on different servers get two messages and two Scheduled Events; a shared server gets one. An alliance with a secondary server gets one Scheduled Event per guild.
-- Server Kingdom link: backfill, 422 on a cross-Kingdom primary, secondary or destination server.
+- Two alliances on different servers get two messages and two Scheduled Events; a shared server gets one. A secondary server never gets a Scheduled Event.
+- Server Kingdom link: backfill, 422 on a cross-Kingdom primary or secondary server, and on a destination whose server is neither the alliance's primary nor a secondary.
 - Default, opt-out, explicit add and group expansion each change the resolved set as §67.2 says; editing a group changes future pending rows only.
 - Leadership: a leadership event reaches only a leadership-only destination; a non-leadership event never reaches one; no Scheduled Event; a leadership event with no such destination records the error. The public-surface test for a leadership event stays and still passes.
 - Conflicts: save rejects with the channel and alliances named; a conflict created after save sends the base message once with the explanation and shows a warning; nothing is sent twice.
@@ -1805,7 +1805,7 @@ On completion: Part I and `CLAUDE.md` describe destinations, groups and merging;
 
 ### 67.11 Not built here
 
-Per-destination message wording, a creation-notice destination (§66.9), per-coordinator alliance limits (§66.9), and a per-event choice of which servers get a Scheduled Event (every primary and secondary server gets one for now).
+Per-destination message wording, a creation-notice destination (§66.9), per-coordinator alliance limits (§66.9),and Scheduled Events on any server other than an alliance's primary.
 
 
 # Archive
