@@ -27,10 +27,9 @@ async function loadPlatformDiscordServers() {
           ${platformCell('Name', escapeHtml(s.name))}
           ${platformCell('Guild ID', `<span class="samaya-muted">${escapeHtml(s.guild_id)}</span>`)}
           ${platformCell('Bot', s.has_own_bot_token ? 'Own bot' : 'Platform bot')}
-          ${platformCell('Alliances', s.tenant_names.length ? escapeHtml(s.tenant_names.join(', ')) : '<span class="samaya-muted">None</span>')}
           ${platformCell('Actions', actionButton('Edit', 'edit', { id: s.id }))}
         </tr>`).join('')
-      : emptyRow(5, 'No Discord servers yet.');
+      : emptyRow(4, 'No Discord servers yet.');
   } catch (e) { toast(e.message, true); }
 }
 
@@ -236,7 +235,7 @@ async function loadPlatformTenants() {
           ${platformCell('Alliance', `${t.icon_image_data ? `<img class="tenant-icon" src="${escapeHtml(t.icon_image_data)}" alt="">` : `<span class="type-chip__dot" data-color="${escapeHtml(t.color)}"></span>`} ${escapeHtml(t.name)}`)}
           ${platformCell('Slug', escapeHtml(t.slug))}
           ${platformCell('Kingdom', escapeHtml(names[t.kingdom_id] || String(t.kingdom_id)))}
-          ${platformCell('Discord server', `${escapeHtml(t.server_name)}<div class="samaya-muted">${escapeHtml(t.guild_id)}</div>`)}
+          ${platformCell('Discord server (primary)', `${escapeHtml(t.server_name)}<div class="samaya-muted">${escapeHtml(t.guild_id)}</div>`)}
           ${platformCell('Actions', actionButton('Edit', 'edit', { id: t.id }))}
         </tr>`).join('')
       : emptyRow(5, 'No alliances yet.');
