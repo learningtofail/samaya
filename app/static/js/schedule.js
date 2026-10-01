@@ -1,205 +1,365 @@
-// Schedule view (#v-schedule): the per-occurrence list (post/cancel to
-// Discord, toggle post_to_discord), plus the Gantt timeline as a second
-// layout over the same data (merged in per user feedback on the original
-// spec §38 build — Table and Timeline are one tab, not two). Depends on
-// common.js and gantt.js's renderGantt().
-//
-// Spec §49 — scheduled Announcements are fetched and shown here too, in
-// their own table/timeline sections (schedAnnouncementsWrap/
-// ganttAnnouncementsWrap in admin.html), not merged into schedTable's rows:
-// an Announcement has no start/end time, duration, or post_to_discord
-// toggle the way an Occurrence does. This reuses announcements.js's own
-// ANNOUNCEMENTS cache (rather than a Schedule-local one) so editAnnouncement/
-// cancelAnnouncement/deleteAnnouncement work identically whether opened from
-// here or from the Announcements tab itself, even if that tab was never
-// visited this session. The cache itself is declared in common.js, not
-// announcements.js — see that declaration's comment.
+// Schedule tab (#v-schedule, spec §66.7): upcoming occurrences as a table and
+// as a day-by-day timeline, with per-occurrence actions (cancel, restore, move,
+// change the message). The occurrence form also serves the Events tab's "this
+// occurrence only" edit scope (spec §66.4a). Depends on common.js and
+// composer.js.
+
+let SCHED_OCC = [];
+let SCHED_EVENTS = {};       // event id -> event dict, for owner and start time
+let SCHED_RANGE_FROM = '';
+let SCHED_RANGE_DAYS = 28;
+
+const SCHED_RANGES = [7, 14, 28, 56];
+
+function getScheduleLayout() {
+  let v = null;
+  try { v = localStorage.getItem('samaya_schedule_layout'); } catch { /* storage blocked */ }
+  return v === 'timeline' ? 'timeline' : 'table';
+}
+
+function setScheduleLayout(layout) {
+  try { localStorage.setItem('samaya_schedule_layout', layout); } catch { /* storage blocked */ }
+  byId('scheduleTableWrap').classList.toggle('hidden', layout !== 'table');
+  byId('scheduleTimelineWrap').classList.toggle('hidden', layout !== 'timeline');
+  byId('scheduleLayoutTable').setAttribute('aria-pressed', String(layout === 'table'));
+  byId('scheduleLayoutTimeline').setAttribute('aria-pressed', String(layout === 'timeline'));
+}
+
+function getScheduleDays() {
+  let v = null;
+  try { v = parseInt(localStorage.getItem('samaya_schedule_days'), 10); } catch { /* storage blocked */ }
+  return SCHED_RANGES.includes(v) ? v : 28;
+}
+
+function addDays(dateKey, n) {
+  const d = new Date(dateKey + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return utcDateKey(d);
+}
 
 async function loadSchedule() {
-  renderAllianceFilterSelect('scheduleFilter', 'schedule', loadSchedule);
+  renderAllianceFilterSelect('scheduleAlliance', 'schedule', loadSchedule);
+  SCHED_RANGE_DAYS = getScheduleDays();
+  byId('scheduleRange').innerHTML = optionsHtml(SCHED_RANGES.map((d) => ({ value: d, label: `Next ${d} days` })), SCHED_RANGE_DAYS);
+  setScheduleLayout(getScheduleLayout());
+  SCHED_RANGE_FROM = utcDateKey(new Date());
+  const to = addDays(SCHED_RANGE_FROM, SCHED_RANGE_DAYS - 1);
+  const filter = getTabFilter('schedule');
   try {
-    occurrenceData = await api('GET', '/api/occurrences', null, false, getTabFilter('schedule'));
+    const [occs, events] = await Promise.all([
+      api('GET', `/api/v2/occurrences?from=${SCHED_RANGE_FROM}&to=${to}`, null, false, filter),
+      api('GET', '/api/v2/events', null, false, filter),
+    ]);
+    SCHED_OCC = occs;
+    SCHED_EVENTS = {};
+    events.forEach((ev) => { SCHED_EVENTS[ev.id] = ev; });
     renderSchedule();
-    renderGantt(occurrenceData);
-    ANNOUNCEMENTS = await api('GET', '/api/announcements', null, false, getTabFilter('schedule'));
-    const scheduled = ANNOUNCEMENTS.filter(a => a.status === 'scheduled');
-    renderScheduleAnnouncements(scheduled);
-    renderAnnouncementGantt(scheduled);
-  } catch(e) { toast(e.message, true); }
-}
-
-function renderScheduleAnnouncements(items) {
-  const wrap = document.getElementById('schedAnnouncementsWrap');
-  const tbody = document.getElementById('schedAnnouncementsBody');
-  if (!items.length) {
-    wrap.classList.add('hidden');
-    tbody.innerHTML = '';
-    return;
+  } catch (e) {
+    toast(e.message, true);
+    byId('scheduleBody').innerHTML = emptyRow(7, 'Could not load the schedule: ' + e.message);
   }
-  wrap.classList.remove('hidden');
+}
 
-  function targetsHtml(a) {
-    return a.targets.map(t => {
-      const targetTenant = TENANTS.find(x => x.id === t.tenant_id);
-      const slug = targetTenant ? targetTenant.slug : '';
-      const channelSpan = '<span data-notif-channel="' + escapeHtml(slug) + ':' + escapeHtml(t.discord_channel_id) + '">#' + escapeHtml(t.discord_channel_id) + '</span>';
-      return '<div>' + escapeHtml(tenantName(t.tenant_id)) + ': ' + channelSpan + ' ' + occurrenceStatusBadge(t.post_status) + '</div>';
-    }).join('');
+function occWritable(occ) {
+  const ev = SCHED_EVENTS[occ.event_id];
+  return ev ? canWriteEvent(ev) : canWriteAnywhere();
+}
+
+function occWriteSlug(occ) {
+  const ev = SCHED_EVENTS[occ.event_id];
+  return ev ? writeSlugForEvent(ev) : (writableTenants()[0] || TENANTS[0] || {}).slug;
+}
+
+function occAudienceText(occ) {
+  const ev = SCHED_EVENTS[occ.event_id];
+  if (!ev) return '';
+  return ev.scope === 'kingdom-wide' ? 'Kingdom-wide' : tenantName(ev.owning_tenant_id);
+}
+
+const DELIVERY_STATUS_COLOR = {
+  pending: 'pf-m-gray', sending: 'pf-m-blue', posted: 'pf-m-green', error: 'pf-m-red', cancelled: 'pf-m-orange',
+};
+
+function deliveryCountsHtml(counts) {
+  const order = ['error', 'sending', 'pending', 'posted', 'cancelled'];
+  const parts = order.filter((s) => counts && counts[s]).map((s) => pfLabel(`${counts[s]} ${s}`, DELIVERY_STATUS_COLOR[s]));
+  return parts.length ? `<div class="label-stack">${parts.join(' ')}</div>` : '<span class="samaya-muted">None yet</span>';
+}
+
+function occStatusHtml(occ) {
+  const labels = [];
+  if (occ.status === 'cancelled') labels.push(pfLabel('Cancelled', 'pf-m-red'));
+  else labels.push(pfLabel('Scheduled', 'pf-m-gray'));
+  if (occ.is_moved) labels.push(pfLabel('Moved', 'pf-m-blue'));
+  if (occ.message_override) labels.push(pfLabel('Own message', 'pf-m-purple'));
+  if (occ.leadership_only) labels.push(pfLabel('Leadership only', 'pf-m-orange'));
+  return `<div class="label-stack">${labels.join(' ')}</div>`;
+}
+
+function buildScheduleRow(occ) {
+  const cancelled = occ.status === 'cancelled';
+  let actions = '<span class="samaya-muted">Read only</span>';
+  if (occWritable(occ)) {
+    actions = `<div class="row-actions">
+      ${cancelled
+        ? `<button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="restore" data-id="${occ.id}">Restore</button>`
+        : `<button type="button" class="pf-v6-c-button pf-m-danger pf-m-small" data-action="cancel" data-id="${occ.id}">Cancel</button>`}
+      <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="edit" data-id="${occ.id}">Move or edit message</button>
+    </div>`;
   }
-
-  tbody.innerHTML = items.map(a => {
-    const allianceLabel = a.scope === 'kingdom-wide'
-      ? '🌐 Kingdom-wide <span style="color:var(--muted);font-size:var(--fs-sm)">(via ' + escapeHtml(a.owning_tenant_name || tenantName(a.owning_tenant_id)) + '’s Kingdom)</span>'
-      : '<span class="cat-dot" style="background:' + (TENANT_COLORS[a.owning_tenant_id] || '#475569') + '"></span>' + escapeHtml(a.owning_tenant_name || tenantName(a.owning_tenant_id));
-    const recurringBadge = a.recurring
-      ? pfLabel('Every ' + a.interval_days + 'd', 'pf-m-purple')
-      : pfLabel('One-time', 'pf-m-gray');
-    // Spec §49 — no post-to-discord toggle/Post/Cancel-occurrence controls
-    // here (those are Events-only concepts); Edit and Cancel cover a still-
-    // 'scheduled' announcement (this table only ever shows 'scheduled'
-    // ones, so there's nothing here yet in a terminal state a Delete button
-    // would actually work on — the full Delete/Retry/Duplicate action set
-    // remains on the Announcements tab itself).
-    return '<tr class="pf-v6-c-table__tr">'
-      + '<td class="pf-v6-c-table__td">' + escapeHtml(a.title) + (a.leadership_only ? ' 👑' : ' 🛡️') + '</td>'
-      + '<td class="pf-v6-c-table__td">' + allianceLabel + '</td>'
-      + '<td class="pf-v6-c-table__td">' + recurringBadge + '</td>'
-      + '<td class="pf-v6-c-table__td">' + fmtDateTime(a.scheduled_for) + '</td>'
-      + '<td class="pf-v6-c-table__td">' + announcementStatusBadgeAdmin(a.status) + '</td>'
-      + '<td class="pf-v6-c-table__td">' + targetsHtml(a) + '</td>'
-      + '<td class="pf-v6-c-table__td"><div style="display:flex;gap:6px;flex-wrap:wrap">'
-      + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" onclick="editAnnouncement(' + a.id + ')" title="Edit this announcement in place">Edit</button>'
-      + '<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="cancelAnnouncement(' + a.id + ')">Cancel</button>'
-      + '</div></td>'
-      + '</tr>';
-  }).join('');
-  enhanceNotificationTargetLabels();
-}
-
-// Persisted so returning to the tab keeps whichever layout was last picked.
-function setScheduleLayout(layout) {
-  localStorage.setItem('samaya_schedule_layout', layout);
-  document.getElementById('scheduleTableView').classList.toggle('hidden', layout !== 'table');
-  document.getElementById('scheduleGanttView').classList.toggle('hidden', layout !== 'gantt');
-  document.getElementById('scheduleLayoutTableBtn').className = 'pf-v6-c-button pf-m-small ' + (layout === 'table' ? 'pf-m-primary' : 'pf-m-secondary');
-  document.getElementById('scheduleLayoutGanttBtn').className = 'pf-v6-c-button pf-m-small ' + (layout === 'gantt' ? 'pf-m-primary' : 'pf-m-secondary');
-}
-
-// Spec §38.1: an occurrence's own owning alliance (not whatever this
-// tab's filter is currently set to) is what the write endpoints below
-// actually need — get_occurrence_with_event checks the header tenant
-// against the occurrence's real tenant/kingdom, so the wrong slug 404s.
-function occurrenceOwningSlug(id) {
-  const o = occurrenceData.find(x => x.id === id);
-  return o ? tenantSlugFor(o.owning_tenant_id) : undefined;
+  return `<tr class="pf-v6-c-table__tr${cancelled ? ' is-cancelled' : ''}">
+    <td class="pf-v6-c-table__td" data-label="When">${escapeHtml(fmtDateTime(occ.start_datetime_utc))}</td>
+    <td class="pf-v6-c-table__td" data-label="Event"><strong>${escapeHtml(occ.event_name)}</strong><div>${typeChip(occ.type)}</div></td>
+    <td class="pf-v6-c-table__td" data-label="Alliance">${escapeHtml(occAudienceText(occ))}</td>
+    <td class="pf-v6-c-table__td" data-label="Status">${occStatusHtml(occ)}</td>
+    <td class="pf-v6-c-table__td" data-label="Deliveries">${deliveryCountsHtml(occ.delivery_counts)}</td>
+    <td class="pf-v6-c-table__td" data-label="Actions">${actions}</td>
+  </tr>`;
 }
 
 function renderSchedule() {
-  const today = new Date().toISOString().slice(0,10);
-  const tbody = document.getElementById('schedBody');
-  const tbodyLead = document.getElementById('schedBodyLeadership');
-  const leadWrap = document.getElementById('schedLeadershipWrap');
-  if (!occurrenceData.length) {
-    tbody.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="9" style="color:var(--muted);padding:20px">No occurrences. Run "Regenerate Now" from the Dashboard.</td></tr>';
-    leadWrap.classList.add('hidden');
+  const body = byId('scheduleBody');
+  body.innerHTML = SCHED_OCC.length
+    ? SCHED_OCC.map(buildScheduleRow).join('')
+    : emptyRow(6, 'Nothing is scheduled in this range.');
+  applyTypeColors(body);
+  const to = addDays(SCHED_RANGE_FROM, SCHED_RANGE_DAYS - 1);
+  byId('scheduleSummary').textContent = `${SCHED_OCC.length} occurrence${SCHED_OCC.length === 1 ? '' : 's'} from ${SCHED_RANGE_FROM} to ${to}. Occurrences are generated about four weeks ahead.`;
+  renderTimeline();
+}
+
+// ── Timeline ─────────────────────────────────────────────────
+
+function renderTimeline() {
+  const host = byId('scheduleTimeline');
+  if (!SCHED_OCC.length) {
+    host.innerHTML = '<p class="samaya-empty">Nothing is scheduled in this range.</p>';
     return;
   }
-
-  function buildRow(o, sectionScope) {
-    // sectionScope is 'Alliance' or 'Leadership' (which table section this
-    // row is in, used by postSelected()'s bulk actions) — distinct from
-    // o.scope, the event's own alliance/kingdom-wide field below.
-    const isToday = o.occurrence_date === today;
-    const allyColor = TENANT_COLORS[o.owning_tenant_id] || '#475569';
-    const rowStyle = 'border-left:3px solid ' + allyColor + (isToday ? ';background:var(--amber)' : '');
-    return `<tr class="pf-v6-c-table__tr samaya-row-clickable" style="${rowStyle}" onclick="handleRowPreviewClick(event,'occurrence',${escapeHtml(JSON.stringify(o))})" title="Click to preview how this looks on Discord">
-      <td class="pf-v6-c-table__td" style="${isToday?'font-weight:600':''}">${o.occurrence_date}</td>
-      <td class="pf-v6-c-table__td">${DOW3[new Date(o.occurrence_date+'T12:00:00Z').getUTCDay()]}</td>
-      <td class="pf-v6-c-table__td"><span class="cat-dot" style="background:${allyColor}"></span>${escapeHtml(o.event_name)}${o.scope === 'kingdom-wide' ? ' 🌐' : ''}${o.leadership_only ? ' 👑' : ' 🛡️'}${getTabFilter('schedule') === COMBINED_SLUG ? ' <span style="color:var(--muted);font-size:var(--fs-sm)">(' + escapeHtml(tenantName(o.owning_tenant_id)) + ')</span>' : ''}</td>
-      <td class="pf-v6-c-table__td">${fmtTime(o.start_datetime_utc)}<br><span style="color:var(--muted);font-size:0.8em">${formatRelativeTime(new Date(o.start_datetime_utc))}</span></td>
-      <td class="pf-v6-c-table__td">${o.duration_hours}h</td>
-      <td class="pf-v6-c-table__td" style="color:var(--muted);font-size:var(--fs-sm)">${escapeHtml(o.discord_channel)}</td>
-      <td class="pf-v6-c-table__td" style="text-align:center">
-        <span class="pf-v6-c-check pf-m-standalone">
-          <input class="pf-v6-c-check__input" type="checkbox" data-occ-id="${o.id}" data-scope="${sectionScope}"
-            ${o.post_to_discord?'checked':''}
-            ${['posted','cancelled'].includes(o.post_status)?'disabled':''}
-            onchange="togglePostFlag(${o.id},this.checked)">
-        </span>
-      </td>
-      <td class="pf-v6-c-table__td">
-        ${occurrenceStatusBadge(o.post_status)}
-        ${o.status_detail?`<span title="${escapeHtml(o.status_detail)}" style="cursor:help;margin-left:4px">⚠</span>`:''}
-      </td>
-      <td class="pf-v6-c-table__td">
-        ${o.post_status==='posted'
-          ? `<button class="pf-v6-c-button pf-m-danger pf-m-small" onclick="cancelOccurrence(${o.id})">Cancel</button>`
-          : `<button class="pf-v6-c-button pf-m-primary pf-m-small" onclick="postOne(${o.id})" ${o.post_status==='posted'?'disabled':''}>Post</button>`
-        }
-      </td>
-    </tr>`;
-  }
-
-  const community = occurrenceData.filter(o => !o.leadership_only);
-  const leadership = occurrenceData.filter(o => o.leadership_only);
-
-  tbody.innerHTML = community.length
-    ? community.map(o => buildRow(o, 'Alliance')).join('')
-    : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="9" style="color:var(--muted);padding:20px">No occurrences in this window.</td></tr>';
-
-  if (leadership.length) {
-    leadWrap.classList.remove('hidden');
-    tbodyLead.innerHTML = leadership.map(o => buildRow(o, 'Leadership')).join('');
-  } else {
-    leadWrap.classList.add('hidden');
-    tbodyLead.innerHTML = '';
-  }
+  const dates = [];
+  for (let i = 0; i < SCHED_RANGE_DAYS; i += 1) dates.push(addDays(SCHED_RANGE_FROM, i));
+  const today = utcDateKey(new Date());
+  const groups = new Map();
+  SCHED_OCC.forEach((occ) => {
+    if (!groups.has(occ.event_id)) groups.set(occ.event_id, { name: occ.event_name, type: occ.type, occs: [] });
+    groups.get(occ.event_id).occs.push(occ);
+  });
+  const head = dates.map((d, i) => {
+    const dt = new Date(d + 'T00:00:00Z');
+    const dow = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' }).format(dt);
+    const day = dt.getUTCDate();
+    const month = (i === 0 || day === 1) ? new Intl.DateTimeFormat('en-US', { month: 'short', timeZone: 'UTC' }).format(dt) : '';
+    const cls = ['timeline__day'];
+    if (d === today) cls.push('is-today');
+    if (dt.getUTCDay() === 0 || dt.getUTCDay() === 6) cls.push('is-weekend');
+    return `<th scope="col" class="${cls.join(' ')}"><span class="timeline__month">${month}</span><span class="timeline__dow">${dow}</span><span class="timeline__num">${day}</span></th>`;
+  }).join('');
+  const rows = Array.from(groups.values()).map((g) => {
+    const cells = dates.map((d) => {
+      const marks = g.occs.filter((o) => utcDateKey(toUtcDate(o.start_datetime_utc)) === d).map((o) => {
+        const time = utcTimeKey(toUtcDate(o.start_datetime_utc));
+        const cancelled = o.status === 'cancelled';
+        const cls = ['timeline__mark'];
+        if (cancelled) cls.push('is-cancelled');
+        if (o.is_moved) cls.push('is-moved');
+        const state = cancelled ? 'cancelled' : (o.is_moved ? 'moved' : 'scheduled');
+        const label = `${o.event_name} on ${d} at ${time} UTC, ${state}`;
+        const attrs = occWritable(o) ? `data-action="edit" data-id="${o.id}"` : 'disabled';
+        return `<button type="button" class="${cls.join(' ')}" data-accent="${escapeHtml(g.type ? g.type.color : '#475569')}" ${attrs} aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${time}</button>`;
+      }).join('');
+      const cls = d === today ? ' class="is-today"' : '';
+      return `<td${cls}>${marks}</td>`;
+    }).join('');
+    return `<tr><th scope="row" class="timeline__event">${typeChip(g.type)} ${escapeHtml(g.name)}</th>${cells}</tr>`;
+  }).join('');
+  host.innerHTML = `<table class="timeline">
+    <caption class="sr-only">Occurrences by day, times in UTC. Activate a time to move it or change its message.</caption>
+    <thead><tr><th scope="col" class="timeline__corner">Event</th>${head}</tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+  applyTypeColors(host);
 }
 
-async function togglePostFlag(id, checked) {
-  try {
-    await api('PATCH', `/api/occurrences/${id}`, { post_to_discord: checked }, false, occurrenceOwningSlug(id));
-    const occ = occurrenceData.find(o => o.id === id);
-    if (occ) occ.post_to_discord = checked;
-  } catch(e) { toast(e.message, true); }
+// ── Row actions ──────────────────────────────────────────────
+
+async function patchOccurrence(occ, payload, doneMessage) {
+  const res = await api('PATCH', `/api/v2/occurrences/${occ.id}`, payload, false, occWriteSlug(occ));
+  toastDiscordErrors(res.discord_errors, doneMessage);
+  return res;
 }
 
-async function postOne(id) {
-  try {
-    const result = await api('POST', `/api/occurrences/${id}/post`, null, false, occurrenceOwningSlug(id));
-    toast(`Posted — Discord ID: ${result.discord_event_id}`);
-    loadSchedule();
-  } catch(e) { toast(e.message, true); }
-}
+const SCHED_ACTIONS = {
+  async cancel(btn) {
+    const occ = SCHED_OCC.find((o) => o.id === parseInt(btn.dataset.id, 10));
+    if (!occ) return;
+    if (!confirm(`Cancel "${occ.event_name}" on ${occ.occurrence_date}? Its pending reminders are cancelled and its Discord event, if one exists, is removed. The rest of the series is not affected, and you can restore it later.`)) return;
+    try { await patchOccurrence(occ, { cancelled: true }, 'Occurrence cancelled.'); loadSchedule(); } catch (e) { toast(e.message, true); }
+  },
+  async restore(btn) {
+    const occ = SCHED_OCC.find((o) => o.id === parseInt(btn.dataset.id, 10));
+    if (!occ) return;
+    try { await patchOccurrence(occ, { cancelled: false }, 'Occurrence restored.'); loadSchedule(); } catch (e) { toast(e.message, true); }
+  },
+  edit(btn) {
+    const occ = SCHED_OCC.find((o) => o.id === parseInt(btn.dataset.id, 10));
+    if (occ) openOccurrenceModal({ occurrence: occ });
+  },
+};
 
-async function cancelOccurrence(id) {
-  if (!confirm('Cancel this Discord event? This cannot be undone.')) return;
-  try {
-    await api('DELETE', `/api/occurrences/${id}/discord`, null, false, occurrenceOwningSlug(id));
-    toast('Event cancelled on Discord');
-    loadSchedule();
-  } catch(e) { toast(e.message, true); }
-}
-
-async function postSelected(scope) {
-  const checked = document.querySelectorAll(`input[data-occ-id][data-scope="${scope}"]:checked:not(:disabled)`);
-  if (!checked.length) { toast('No events checked for posting'); return; }
-  let posted = 0, errors = 0;
-  for (const cb of checked) {
-    try {
-      await api('POST', `/api/occurrences/${cb.dataset.occId}/post`, null, false, occurrenceOwningSlug(parseInt(cb.dataset.occId, 10)));
-      posted++;
-    } catch(e) { errors++; }
-  }
-  toast(`Posted: ${posted}${errors?`  ·  Errors: ${errors}`:''}`);
+bindActions(byId('scheduleBody'), SCHED_ACTIONS);
+bindActions(byId('scheduleTimeline'), SCHED_ACTIONS);
+byId('scheduleRange').addEventListener('change', (e) => {
+  try { localStorage.setItem('samaya_schedule_days', e.target.value); } catch { /* storage blocked */ }
   loadSchedule();
+});
+byId('scheduleLayoutTable').addEventListener('click', () => setScheduleLayout('table'));
+byId('scheduleLayoutTimeline').addEventListener('click', () => setScheduleLayout('timeline'));
+
+// ── Occurrence form (this occurrence only) ───────────────────
+
+const OCC = {
+  list: [],          // occurrences the picker offers
+  current: null,     // the selected occurrence dict
+  event: null,       // its event dict (for the original start time and owner)
+  composer: null,
+  resetMove: false,
+  saving: false,
+};
+
+function occOriginalStart(occ, ev) {
+  return ev ? `${occ.occurrence_date}T${ev.start_time_utc}:00Z` : occ.start_datetime_utc;
 }
 
+function occMoveStartDate() {
+  const d = byId('occMoveDate').value;
+  const t = normalizeTime(byId('occMoveTime').value);
+  if (!d || !t) return null;
+  const dt = new Date(`${d}T${t}:00Z`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
 
-// Wire this view's layout toggle/refresh/bulk-post controls — replaces
-// their onclick attributes (Phase 3 audit remediation).
-document.getElementById('scheduleLayoutTableBtn')?.addEventListener('click', () => setScheduleLayout('table'));
-document.getElementById('scheduleLayoutGanttBtn')?.addEventListener('click', () => setScheduleLayout('gantt'));
-document.getElementById('btnScheduleRefresh')?.addEventListener('click', () => loadSchedule());
-document.getElementById('btnPostSelectedAlliance')?.addEventListener('click', () => postSelected('Alliance'));
-document.getElementById('btnPostSelectedLeadership')?.addEventListener('click', () => postSelected('Leadership'));
+function showOccErrors(messages) {
+  const box = byId('occErrors');
+  box.innerHTML = messages.length
+    ? '<ul>' + messages.map((m) => `<li>${escapeHtml(m)}</li>`).join('') + '</ul>'
+    : '';
+  box.classList.toggle('hidden', !messages.length);
+}
+
+function syncOccMoveEnabled() {
+  const cancelled = byId('occCancelled').checked;
+  byId('occMoveDate').disabled = cancelled;
+  byId('occMoveTime').disabled = cancelled;
+  byId('btnOccResetMove').disabled = cancelled;
+}
+
+function fillOccurrenceFields(occ) {
+  OCC.current = occ;
+  OCC.event = (typeof SCHED_EVENTS !== 'undefined' && SCHED_EVENTS[occ.event_id]) || eventById(occ.event_id) || null;
+  OCC.resetMove = false;
+  const start = toUtcDate(occ.start_datetime_utc);
+  byId('occCancelled').checked = occ.status === 'cancelled';
+  byId('occMoveDate').value = utcDateKey(start);
+  byId('occMoveTime').value = utcTimeKey(start);
+  OCC.composer.setValue(occ.message_override || '');
+  const bits = [`Normally ${fmtDateTime(occOriginalStart(occ, OCC.event))}`];
+  if (occ.is_moved) bits.push('currently moved');
+  byId('occInfo').textContent = bits.join(', ') + '.';
+  syncOccMoveEnabled();
+  showOccErrors([]);
+}
+
+// opts: { occurrence } (from the Schedule) or { eventId } (from the Events
+// tab's edit scope: the picker lists that event's upcoming occurrences).
+async function openOccurrenceModal(opts) {
+  let list;
+  let eventDict;
+  if (opts.occurrence) {
+    list = [opts.occurrence];
+    eventDict = SCHED_EVENTS[opts.occurrence.event_id] || eventById(opts.occurrence.event_id);
+  } else {
+    eventDict = eventById(opts.eventId);
+    const from = utcDateKey(new Date());
+    try {
+      const all = await api('GET', `/api/v2/occurrences?from=${from}&to=${addDays(from, 56)}`, null, false, writeSlugForEvent(eventDict));
+      list = all.filter((o) => o.event_id === opts.eventId);
+    } catch (e) { toast(e.message, true); return; }
+    if (!list.length) {
+      toast('This event has no generated occurrences in the next eight weeks, so there is nothing to change one at a time.', true);
+      return;
+    }
+  }
+  OCC.list = list;
+  byId('occEvent').textContent = list[0].event_name;
+  byId('occPick').innerHTML = optionsHtml(list.map((o) => ({
+    value: o.id,
+    label: `${fmtDateTime(o.start_datetime_utc)}${o.status === 'cancelled' ? ' (cancelled)' : ''}`,
+  })), list[0].id);
+  byId('occPick').disabled = list.length === 1;
+  const ownerSlug = eventDict ? writeSlugForEvent(eventDict) : (TENANTS[0] || {}).slug;
+  OCC.composer = createComposer(byId('occMessageHost'), {
+    idPrefix: 'occMsg', label: 'Message for this occurrence only', value: '', rows: 4,
+    helper: 'Replaces the event message for this date. Leave empty to use the event message.',
+    previewSlug: () => ownerSlug,
+    eventStart: occMoveStartDate,
+  });
+  OCC.composer.setPreviewSlug(ownerSlug);
+  fillOccurrenceFields(list[0]);
+  openModalById('occurrenceModal');
+}
+
+function closeOccurrenceModal() {
+  closeModalById('occurrenceModal');
+}
+
+byId('occPick').addEventListener('change', (e) => {
+  const occ = OCC.list.find((o) => o.id === parseInt(e.target.value, 10));
+  if (occ) fillOccurrenceFields(occ);
+});
+byId('occCancelled').addEventListener('change', syncOccMoveEnabled);
+['occMoveDate', 'occMoveTime'].forEach((id) => byId(id).addEventListener('input', () => {
+  OCC.resetMove = false;
+  if (OCC.composer) OCC.composer.refresh();
+}));
+byId('btnOccResetMove').addEventListener('click', () => {
+  const original = toUtcDate(occOriginalStart(OCC.current, OCC.event));
+  byId('occMoveDate').value = utcDateKey(original);
+  byId('occMoveTime').value = utcTimeKey(original);
+  OCC.resetMove = true;
+});
+byId('btnOccClearMessage').addEventListener('click', () => OCC.composer.setValue(''));
+
+byId('btnSaveOccurrence').addEventListener('click', async () => {
+  if (OCC.saving || !OCC.current) return;
+  const occ = OCC.current;
+  const payload = {};
+  const nowCancelled = byId('occCancelled').checked;
+  const wasCancelled = occ.status === 'cancelled';
+  if (nowCancelled !== wasCancelled) payload.cancelled = nowCancelled;
+  if (!nowCancelled) {
+    if (OCC.resetMove) {
+      if (occ.is_moved) payload.clear_move = true;
+    } else {
+      const start = occMoveStartDate();
+      if (!start) { showOccErrors(['Enter the new date and a 24-hour UTC time such as 19:00, or leave them as they are.']); return; }
+      if (start.getTime() !== toUtcDate(occ.start_datetime_utc).getTime()) payload.start_datetime_utc = start.toISOString();
+    }
+  }
+  const message = OCC.composer.value().trim();
+  if (message !== (occ.message_override || '')) payload.message_override = message;
+  if (!Object.keys(payload).length) { toast('Nothing was changed.'); closeOccurrenceModal(); return; }
+  OCC.saving = true;
+  byId('btnSaveOccurrence').disabled = true;
+  try {
+    await patchOccurrence({ id: occ.id, event_id: occ.event_id }, payload, 'Occurrence updated.');
+    closeOccurrenceModal();
+    if (byId('v-schedule').classList.contains('active')) loadSchedule();
+  } catch (e) {
+    showOccErrors([e.message]);
+  } finally {
+    OCC.saving = false;
+    byId('btnSaveOccurrence').disabled = false;
+  }
+});
+
+VIEW_LOADERS.schedule = loadSchedule;

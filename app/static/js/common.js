@@ -1,372 +1,372 @@
-// Shared helpers loaded before every other admin view script (dashboard.js,
-// events.js, schedule.js, gantt.js, postlog.js, config.js, sync.js,
-// access.js, platform.js). Classic <script> tags, not ES modules, so the
-// functions and consts declared here are reachable as plain globals from
-// every file loaded after this one — see the <script src> order in
-// admin.html.
+// Shared helpers loaded before every other admin script. Classic <script>
+// tags, not ES modules, so everything declared at the top level here is a
+// plain global for the files loaded after it (see the <script src> order in
+// admin.html, which is the dependency order).
+//
+// Spec §66.7: the console has seven tabs (Events, Schedule, Delivery log,
+// Event types, Feedback, Setup, Audit log). Each tab's script registers its
+// own loader in VIEW_LOADERS; showView() below calls it when the tab opens.
 
 // ── Current user ─────────────────────────────────────────────
-// Populated by loadMe() before anything else runs (see init.js). Drives
-// which tabs/buttons show at all — e.g. the Access tab only appears for
-// a tenant owner, the Platform tab only for a superadmin.
 let ME = null;
 
-// ── Modal close: Escape key ──────────────────────────────────
-// Every modal backdrop (event/announcement/template/tenant/timezone) has
-// a data-close-fn attribute naming its own close function — an X button
-// in each modal's header already calls that function directly on click;
-// this one listener covers Escape for all of them without each modal
-// needing its own keydown handler. Registered once, here, since common.js
-// loads before every modal-owning view script.
+// view id -> function that (re)loads and renders that tab. Filled in by each
+// tab's own script at load time.
+const VIEW_LOADERS = {};
+
+// ── Modals ───────────────────────────────────────────────────
+// Every modal backdrop names its own close function in data-close-fn. One
+// listener per interaction (Escape, backdrop click, dismiss button) calls it,
+// so no modal needs its own wiring for these.
+function closeFnOf(backdrop) {
+  const fnName = backdrop && backdrop.dataset.closeFn;
+  return fnName && typeof window[fnName] === 'function' ? window[fnName] : null;
+}
+
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  const openModal = document.querySelector('.pf-v6-c-backdrop.open');
-  if (!openModal) return;
-  const fnName = openModal.dataset.closeFn;
-  if (fnName && typeof window[fnName] === 'function') window[fnName]();
+  const open = document.querySelectorAll('.pf-v6-c-backdrop.open');
+  if (!open.length) return;
+  const fn = closeFnOf(open[open.length - 1]);
+  if (fn) fn();
 });
 
-// A click directly on the backdrop (not on the modal box itself) closes
-// the same way the X button/Escape already do, via the same data-close-fn
-// attribute — one delegated listener per backdrop, registered once here
-// since every modal backdrop already exists in the static markup.
 document.querySelectorAll('.pf-v6-c-backdrop').forEach((backdrop) => {
   backdrop.addEventListener('click', (e) => {
     if (e.target !== backdrop) return;
-    const fnName = backdrop.dataset.closeFn;
-    if (fnName && typeof window[fnName] === 'function') window[fnName]();
+    const fn = closeFnOf(backdrop);
+    if (fn) fn();
   });
 });
 
-// Every modal's own X button and its footer Cancel/Close button both just
-// call that same modal's close function — admin.html now marks each with
-// a plain data-modal-dismiss attribute instead of its own
-// onclick="close*Modal()" (Phase 3 audit remediation), and this one
-// delegated listener reads the ancestor backdrop's data-close-fn (the same
-// attribute the Escape-key and backdrop-click handlers above already use)
-// rather than needing its own hardcoded function name.
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-modal-dismiss]');
   if (!btn) return;
-  const backdrop = btn.closest('.pf-v6-c-backdrop');
-  const fnName = backdrop && backdrop.dataset.closeFn;
-  if (fnName && typeof window[fnName] === 'function') window[fnName]();
+  const fn = closeFnOf(btn.closest('.pf-v6-c-backdrop'));
+  if (fn) fn();
 });
 
-// Tab bar (spec §17) — each tab button carries a plain data-view attribute
-// instead of its own onclick="showView('x',this)" (Phase 3 audit
-// remediation); one delegated listener here calls the same showView(id,
-// btn) every tab used to call directly, since the tab bar itself (unlike
-// each tab's own content) is shared shell chrome, not any one view's
-// concern.
-document.querySelector('.pf-v6-c-tabs__list')?.addEventListener('click', (e) => {
-  const btn = e.target.closest('.pf-v6-c-tabs__link[data-view]');
-  if (btn) showView(btn.dataset.view, btn);
-});
-
-// Header clock link opens the time zone modal — replaces its own
-// onclick="openTimezoneModal();return false;" (Phase 3 audit remediation).
-document.getElementById('headerClock')?.addEventListener('click', (e) => {
-  e.preventDefault();
-  openTimezoneModal(false);
-});
-
-// ── Modal focus management (ported from events-public.js's openModal/
-// closeModal, spec §62) ──────────────────────────────────────────
-// Same "remember what had focus, move focus into the modal, restore it on
-// close" pattern the public events page already uses, adapted to this
-// page's own .open-class modal convention (see the Escape listener above)
-// rather than switching every modal over to events-public.js's own
-// hidden-attribute one. Each view's own open*Modal()/close*Modal()
-// function still owns showing/hiding and populating its modal — these two
-// helpers only own focus, called right after classList.add('open') and
-// right before/after classList.remove('open') respectively.
-let _modalReturnFocus = null;
+// Remembers what had focus when a modal opened and gives it back on close.
+// Modals can stack (the occurrence picker opens over nothing, but the scope
+// chooser hands off to the event form), so this is a stack, not one slot.
+const _modalReturnFocus = [];
 
 function focusModal(modalEl) {
   if (!modalEl) return;
-  _modalReturnFocus = document.activeElement;
-  const focusable = modalEl.querySelector('select, textarea, input, button:not(.samaya-modal-close)');
+  _modalReturnFocus.push(document.activeElement);
+  const focusable = modalEl.querySelector('select, textarea, input:not([type="hidden"]), button:not(.samaya-modal-close)');
   if (focusable) focusable.focus();
 }
 
 function unfocusModal() {
-  if (_modalReturnFocus && typeof _modalReturnFocus.focus === 'function') _modalReturnFocus.focus();
-  _modalReturnFocus = null;
+  const el = _modalReturnFocus.pop();
+  if (el && typeof el.focus === 'function' && document.contains(el)) el.focus();
 }
 
-// ── Markdown toolbar (spec §28) — shared by the Event/Announcement/Template
-// modals' Description/Body fields (mDescription/aBody/tBody), replacing the
-// per-button onclick="wrapSelection(...)" attributes admin.html used to
-// carry (Phase 3 audit remediation: no inline event handlers). One
-// delegated click/change listener per toolbar instead of one onclick per
-// button — wired once, at script-load time, from whichever view file owns
-// that toolbar's modal (events.js for the Event modal's, announcements.js
-// for the Announcement/Template modals' two) via wireMarkdownToolbar(id)
-// below. The actual commands (wrapSelection/prefixSelectedLines/
-// insertCodeBlock/insertRoleMention) still live in announcements.js,
-// unchanged — this only replaces how each button's click reaches them.
-const MD_TOOLBAR_COMMANDS = {
-  bold:      (target) => wrapSelection(target, '**', '**', 'bold'),
-  italic:    (target) => wrapSelection(target, '*', '*', 'italic'),
-  underline: (target) => wrapSelection(target, '__', '__', 'underline'),
-  strike:    (target) => wrapSelection(target, '~~', '~~', 'strike'),
-  spoiler:   (target) => wrapSelection(target, '||', '||', 'spoiler'),
-  heading:   (target) => prefixSelectedLines(target, '# '),
-  quote:     (target) => prefixSelectedLines(target, '> '),
-  code:      (target) => wrapSelection(target, '`', '`', 'code'),
-  codeblock: (target) => insertCodeBlock(target),
-};
+// Open/close a modal by id with the shared focus handling. Each modal's own
+// close<Name>() function (named in data-close-fn) calls closeModalById().
+function openModalById(id) {
+  const modal = document.getElementById(id);
+  if (!modal) return;
+  modal.classList.add('open');
+  focusModal(modal);
+}
 
-function wireMarkdownToolbar(toolbarId) {
-  const toolbar = document.getElementById(toolbarId);
-  if (!toolbar) return;
-  const target = toolbar.dataset.target;
-  toolbar.addEventListener('click', (e) => {
-    const btn = e.target.closest('button[data-md-cmd]');
-    if (!btn) return;
-    if (btn.dataset.mdCmd === 'emoji') { toggleEmojiPicker(btn, target); return; }
-    const fn = MD_TOOLBAR_COMMANDS[btn.dataset.mdCmd];
-    if (fn) fn(target);
-  });
-  toolbar.addEventListener('change', (e) => {
-    if (e.target.matches('select[data-role-mention]')) insertRoleMention(e.target.id, target);
+function closeModalById(id) {
+  const modal = document.getElementById(id);
+  if (!modal || !modal.classList.contains('open')) return;
+  modal.classList.remove('open');
+  unfocusModal();
+}
+
+// ── Delegated row actions ────────────────────────────────────
+// Per-row buttons built in template strings carry data-action="name" and a
+// data-* payload; one listener on the container maps the name to a handler.
+function bindActions(root, handlers) {
+  if (!root) return;
+  root.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (!el || !root.contains(el) || el.disabled) return;
+    const fn = handlers[el.dataset.action];
+    if (fn) fn(el, e);
   });
 }
 
-async function loadMe() {
-  ME = await api('GET', '/api/me', null, /*skipTenantHeader=*/true);
-  return ME;
+// ── API ──────────────────────────────────────────────────────
+// tenantOverride sends one explicit X-Tenant-Slug (a real slug, or '*' for the
+// combined read-only view on endpoints that accept it). skipTenantHeader is
+// kept for the calls that need no tenant at all.
+async function api(method, path, body, skipTenantHeader, tenantOverride) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (!skipTenantHeader && tenantOverride) headers['X-Tenant-Slug'] = tenantOverride;
+  const opts = { method, headers, credentials: 'same-origin' };
+  if (body !== undefined && body !== null) opts.body = JSON.stringify(body);
+  const res = await fetch('/admin' + path, opts);
+  if (res.status === 401) {
+    window.location.href = '/auth/login';
+    throw new Error('Not logged in. Redirecting to login.');
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(describeApiError(err, res.statusText));
+  }
+  if (res.status === 204) return null;
+  return res.json();
 }
 
-// Spec §38: the admin console has exactly two meaningful tiers now —
-// superadmin (full read/write, everywhere, including the merged Access &
-// Platform console and the Audit Log) and everyone else (view-only in
-// practice). There aren't enough distinct admins yet to warrant the old
-// per-tenant owner/coordinator nuance in the UI layer, so visibility
-// checks below collapsed onto ME.is_superadmin alone. The underlying
-// owner/coordinator/viewer roles still exist server-side (UserTenant.role)
-// and write endpoints still enforce them (require_not_viewer,
-// require_tenant_owner) — this is a UI simplification, not a permissions
-// change.
-function isSuperadmin() {
-  return !!(ME && ME.is_superadmin);
+// FastAPI returns `detail` as a string for HTTPExceptions and as a list of
+// {loc, msg} objects for request-validation failures.
+function describeApiError(err, fallback) {
+  const d = err && err.detail;
+  if (Array.isArray(d)) {
+    return d.map((x) => (x && x.msg ? x.msg : String(x))).join('; ') || fallback;
+  }
+  return d || fallback;
 }
 
-// ── Tenants + per-tab alliance filters (spec §38.1) ──────────
-// There is no more one global "current tenant" governing every tab — the
-// header alliance switcher is gone. Each data-bearing tab (Dashboard,
-// Events, Announcements, Post Log, Sync, Discord Config) keeps its own
-// independent filter selection, defaulting to "All" (COMBINED_SLUG),
-// remembered per tab so narrowing one tab doesn't affect the others.
-let TENANTS = [];               // populated by loadTenants()
-const TENANT_COLORS = {};       // tenant.id -> tenant.color
-const TENANT_ICONS = {};        // tenant.slug -> icon_image_data (or null)
+// ── Toasts ───────────────────────────────────────────────────
+// kind: falsy = success, true or 'error' = error, 'warn' = warning (the
+// action worked but something needs attention, e.g. discord_errors).
+let _toastTimer = null;
 
-// The literal slug '*' is the combined-view pseudo-tenant: sent as-is in
-// the X-Tenant-Slug header, which deps.get_current_tenants on the server
-// recognizes as "every tenant I have access to" for read/list endpoints.
-// Write endpoints never receive '*' — a create/edit modal always sends
-// one explicit real slug (its own Alliance field, or api()'s
-// tenantOverride param), never the filter's current value.
-const COMBINED_SLUG = '*';
-
-function getTabFilter(tab) {
-  return localStorage.getItem('samaya_filter_' + tab) || COMBINED_SLUG;
-}
-function setTabFilter(tab, slug) {
-  localStorage.setItem('samaya_filter_' + tab, slug);
+function toast(msg, kind) {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.remove('toast--error', 'toast--warn');
+  if (kind === true || kind === 'error') t.classList.add('toast--error');
+  else if (kind === 'warn') t.classList.add('toast--warn');
+  t.classList.add('show');
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove('show'), kind ? 7000 : 3500);
 }
 
-async function loadTenants() {
-  TENANTS = await api('GET', '/api/tenants', null, /*skipTenantHeader=*/true);
-  TENANTS.forEach(t => { TENANT_COLORS[t.id] = t.color; TENANT_ICONS[t.slug] = t.icon_image_data || null; });
+// Shows the Discord problems a save reported while still treating the save
+// itself as done.
+function toastDiscordErrors(errors, doneMessage) {
+  if (errors && errors.length) {
+    toast(doneMessage + ' But Discord reported: ' + errors.join('; '), 'warn');
+  } else {
+    toast(doneMessage);
+  }
 }
 
-// Renders a small "Alliance: [dropdown]" filter into the given <select>,
-// used identically by every combined-capable tab. `onChange` is called
-// (with no args) after the tab's own filter state updates — the caller
-// re-fetches/re-renders its own data using getTabFilter(tab) again.
-function renderAllianceFilterSelect(selectId, tab, onChange) {
-  const select = document.getElementById(selectId);
-  if (!select) return;
-  const current = getTabFilter(tab);
-  const options = [{ slug: COMBINED_SLUG, name: '— All Alliances —' }, ...TENANTS.map(t => ({ slug: t.slug, name: t.name }))];
-  select.innerHTML = options.map(o =>
-    `<option value="${escapeHtml(o.slug)}" ${o.slug === current ? 'selected' : ''}>${escapeHtml(o.name)}</option>`
-  ).join('');
-  select.onchange = () => { setTabFilter(tab, select.value); onChange(); };
+// ── HTML helpers ─────────────────────────────────────────────
+function byId(id) {
+  return document.getElementById(id);
 }
 
-// Populates a plain "which alliance does this belong to" <select> for a
-// create/edit modal (spec §38.1) — every such select uses this, since
-// there's no more ambient "current tenant" to imply the answer.
-function renderOwningTenantSelect(selectId, selectedSlug) {
-  const select = document.getElementById(selectId);
-  if (!select) return;
-  select.innerHTML = TENANTS.map(t =>
-    `<option value="${escapeHtml(t.slug)}" ${t.slug === selectedSlug ? 'selected' : ''}>${escapeHtml(t.name)}</option>`
-  ).join('');
-}
-
-// Spec §49 — the combined "Owning Alliance" selector Events and
-// Announcements both use, replacing a plain alliance <select> plus a
-// separate "Kingdom-wide" checkbox with a single control: every option
-// is either one alliance (scope=alliance, that tenant owns it) or that
-// same alliance's kingdom-wide option (scope=kingdom-wide, that tenant
-// still does the actual posting/owns the row — see EventDefinition/
-// Announcement.scope's own docstrings for why an owning tenant is still
-// needed even when kingdom-wide). Option values are "alliance:<slug>" or
-// "kingdomwide:<slug>"; callers split on the first ":" to recover both
-// the scope and the slug. Also used for reassigning an existing row to a
-// different alliance (or into/out of kingdom-wide) from the same control
-// on edit, not just at creation.
-function renderOwningTenantScopeSelect(selectId, selectedSlug, selectedScope) {
-  const select = document.getElementById(selectId);
-  if (!select) return;
-  const allianceOptions = TENANTS.map(t =>
-    `<option value="alliance:${escapeHtml(t.slug)}">${escapeHtml(t.name)}</option>`
-  ).join('');
-  // "via <name>'s Kingdom", not "posted via <name>" — a kingdom-wide row
-  // still fans out to every alliance's own Discord server independently
-  // (see _resolve_post_targets), so naming one alliance here is only
-  // saying which Kingdom to fan out to, never which server actually does
-  // the posting. The old "(posted via X)" wording implied the opposite.
-  const kingdomOptions = TENANTS.map(t =>
-    `<option value="kingdomwide:${escapeHtml(t.slug)}">🌐 Kingdom-wide (via ${escapeHtml(t.name)}'s Kingdom)</option>`
-  ).join('');
-  select.innerHTML =
-    `<optgroup label="Alliance">${allianceOptions}</optgroup>` +
-    `<optgroup label="Kingdom-wide">${kingdomOptions}</optgroup>`;
-  const kind = selectedScope === 'kingdom-wide' ? 'kingdomwide' : 'alliance';
-  const wanted = `${kind}:${selectedSlug}`;
-  select.value = wanted;
-  // Fall back to the first option (rather than leaving the browser's
-  // default blank-ish selection) when selectedSlug doesn't match any
-  // known tenant — e.g. TENANTS[0] not loaded yet.
-  if (select.value !== wanted) select.selectedIndex = 0;
-}
-
-// Splits a renderOwningTenantScopeSelect option value back into
-// { scope, slug } — the one place both events.js and announcements.js
-// parse it, so the "alliance:"/"kingdomwide:" encoding only lives here.
-function parseOwningTenantScopeValue(value) {
-  const idx = value.indexOf(':');
-  const kind = value.slice(0, idx);
-  const slug = value.slice(idx + 1);
-  return { scope: kind === 'kingdomwide' ? 'kingdom-wide' : 'alliance', slug };
-}
-
-// Shows/hides the merged Access & Platform tab and the Audit tab —
-// superadmin-only now (see isSuperadmin()'s comment above). Called once
-// after login; there's no more per-tenant-switch re-check needed since
-// this no longer depends on which alliance is selected anywhere.
-function applyRoleVisibility() {
-  const accessItem = document.getElementById('accessTabItem');
-  const auditItem = document.getElementById('auditTabItem');
-  if (accessItem) accessItem.classList.toggle('hidden', !isSuperadmin());
-  if (auditItem)  auditItem.classList.toggle('hidden', !isSuperadmin());
-}
-
-// ── HTML escaping ────────────────────────────────────────────
-// Every value interpolated into innerHTML below that originates from
-// the database (event names, channel labels, descriptions, etc.) must
-// go through this — those fields are admin-editable text, not fixed
-// UI strings, so treat them as untrusted.
+// Every server-provided string interpolated into innerHTML goes through this.
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
 }
 
-const GANTT_PALETTE = ['#bbf7d0','#bfdbfe','#fed7aa','#fde68a','#e9d5ff','#99f6e4','#fecaca','#d9f99d','#fbcfe8','#a5f3fc','#c7d2fe','#fef08a'];
-const DOW3 = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-let occurrenceData = [];
+// A PatternFly label. `text` is plain text and is escaped here.
+function pfLabel(text, color) {
+  return `<span class="pf-v6-c-label ${color} pf-m-filled"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${escapeHtml(text)}</span></span></span>`;
+}
 
-// The last list loaded by loadAnnouncements() (announcements.js) —
-// duplicateAnnouncement() reads from this instead of a second GET, since
-// the row it's duplicating is already sitting in front of the user.
-// schedule.js's loadSchedule() also reassigns this directly (rather than
-// keeping a Schedule-local cache) so editAnnouncement()/duplicateAnnouncement()
-// stay in sync regardless of which tab last fetched. Declared here, in the
-// first-loaded file, rather than in announcements.js: admin.html loads
-// schedule.js before announcements.js, and a `let` declared later in load
-// order isn't in scope yet for an earlier file's top-level code — this
-// only happened not to matter because schedule.js's own reference is
-// inside a function, called well after every script has finished loading.
-let ANNOUNCEMENTS = [];
+// <option> list. options: [{value, label}], selected: value to mark.
+function optionsHtml(options, selected) {
+  return options.map((o) =>
+    `<option value="${escapeHtml(o.value)}"${String(o.value) === String(selected) ? ' selected' : ''}>${escapeHtml(o.label)}</option>`
+  ).join('');
+}
 
-// Same pattern for Announcement Templates (spec §27) — useTemplate() and
-// editTemplate() (announcements.js) read from this instead of a second GET.
-let ANNOUNCEMENT_TEMPLATES = [];
+function emptyRow(colspan, message) {
+  return `<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td samaya-empty" colspan="${colspan}">${escapeHtml(message)}</td></tr>`;
+}
 
-// ── Display time zone (spec §15) ────────────────────────────
-// Governs the "local" half of every dual-time display (dualTimeString/
-// fmtTime/fmtDateTime in events.js) across the whole admin UI — global,
-// not tied to any one view, hence living here rather than in events.js
-// where it used to be buried inside the Add/Edit Event modal.
-//
-// Same IANA zone list the old mTimezone dropdown offered — kept as the
-// fallback for a browser without Intl.supportedValuesOf (see allTimeZones
-// below), and as the "detected zone" fast path when it's already common.
+// Event type color chip. The hex comes from the server and is validated
+// there, but it is still escaped and shown through a data attribute that CSS
+// cannot read, so it is applied with the CSSOM after render (see
+// applyTypeColors) rather than an inline style attribute.
+function typeChip(type) {
+  const name = type ? type.name : '?';
+  const color = type ? type.color : '#475569';
+  return `<span class="type-chip"><span class="type-chip__dot" data-color="${escapeHtml(color)}"></span>${escapeHtml(name)}</span>`;
+}
+
+function applyTypeColors(root) {
+  const scope = root || document;
+  scope.querySelectorAll('[data-color]').forEach((node) => {
+    if (/^#[0-9a-fA-F]{6}$/.test(node.dataset.color)) node.style.backgroundColor = node.dataset.color;
+  });
+  scope.querySelectorAll('[data-accent]').forEach((node) => {
+    if (/^#[0-9a-fA-F]{6}$/.test(node.dataset.accent)) node.style.borderLeftColor = node.dataset.accent;
+  });
+}
+
+// ── Roles ────────────────────────────────────────────────────
+async function loadMe() {
+  ME = await api('GET', '/api/me', null, /*skipTenantHeader=*/true);
+  return ME;
+}
+
+function isSuperadmin() {
+  return !!(ME && ME.is_superadmin);
+}
+
+function roleForTenant(tenantId) {
+  return ME && ME.tenant_roles ? ME.tenant_roles[tenantId] : undefined;
+}
+
+// A viewer can read everything and change nothing (spec §31.3). The server
+// enforces this on every write; the UI only hides what would be refused.
+function canWriteTenant(tenant) {
+  if (!tenant) return false;
+  if (isSuperadmin()) return true;
+  const role = roleForTenant(tenant.id);
+  return !!role && role !== 'viewer';
+}
+
+function writableTenants() {
+  return TENANTS.filter(canWriteTenant);
+}
+
+function canWriteAnywhere() {
+  return writableTenants().length > 0;
+}
+
+function isOwnerOfTenant(tenant) {
+  return !!tenant && (isSuperadmin() || roleForTenant(tenant.id) === 'owner');
+}
+
+// ── Tenants and per-tab alliance filters ─────────────────────
+let TENANTS = [];
+const TENANT_ICONS = {};
+
+// '*' is the combined read-only pseudo-alliance, sent as-is in
+// X-Tenant-Slug on list endpoints that accept it.
+const COMBINED_SLUG = '*';
+
+function getTabFilter(tab) {
+  let saved = null;
+  try { saved = localStorage.getItem('samaya_filter_' + tab); } catch { /* storage blocked */ }
+  if (saved && saved !== COMBINED_SLUG && !TENANTS.some((t) => t.slug === saved)) return COMBINED_SLUG;
+  return saved || COMBINED_SLUG;
+}
+
+function setTabFilter(tab, slug) {
+  try { localStorage.setItem('samaya_filter_' + tab, slug); } catch { /* storage blocked */ }
+}
+
+async function loadTenants() {
+  TENANTS = await api('GET', '/api/tenants', null, /*skipTenantHeader=*/true);
+  TENANTS.forEach((t) => { TENANT_ICONS[t.slug] = t.icon_image_data || null; });
+}
+
+function tenantById(id) {
+  return TENANTS.find((t) => t.id === id) || null;
+}
+
+function tenantBySlug(slug) {
+  return TENANTS.find((t) => t.slug === slug) || null;
+}
+
+function tenantName(id) {
+  const t = tenantById(id);
+  return t ? t.name : '#' + id;
+}
+
+// Fills an "Alliance" filter <select>: every accessible alliance, plus "All"
+// unless allowAll is false. onChange runs after the choice is stored.
+function renderAllianceFilterSelect(selectId, tab, onChange, allowAll) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  const useAll = allowAll !== false;
+  let current = getTabFilter(tab);
+  if (!useAll && current === COMBINED_SLUG) current = TENANTS[0] ? TENANTS[0].slug : '';
+  const options = TENANTS.map((t) => ({ value: t.slug, label: t.name }));
+  if (useAll) options.unshift({ value: COMBINED_SLUG, label: 'All alliances' });
+  select.innerHTML = optionsHtml(options, current);
+  select.onchange = () => { setTabFilter(tab, select.value); onChange(); };
+}
+
+// The alliance a tab should act as for single-alliance reads (event types,
+// feedback): its filter, or the first accessible alliance for "All".
+function singleSlugFor(tab) {
+  const f = getTabFilter(tab);
+  if (f !== COMBINED_SLUG) return f;
+  return TENANTS[0] ? TENANTS[0].slug : '';
+}
+
+// The alliance a write to an event must be sent as: the event's owner when the
+// caller can see it, otherwise (a kingdom-wide event owned elsewhere in the
+// Kingdom) the first alliance the caller can write for.
+function writeSlugForEvent(event) {
+  const owner = tenantById(event.owning_tenant_id);
+  if (owner) return owner.slug;
+  const any = writableTenants()[0] || TENANTS[0];
+  return any ? any.slug : '';
+}
+
+// ── Tabs ─────────────────────────────────────────────────────
+function showView(id) {
+  const view = document.getElementById('v-' + id);
+  const btn = document.querySelector('.tabs__link[data-view="' + id + '"]');
+  if (!view || !btn) return;
+  document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
+  document.querySelectorAll('.tabs__link').forEach((b) => b.removeAttribute('aria-current'));
+  view.classList.add('active');
+  btn.setAttribute('aria-current', 'page');
+  try { history.replaceState(null, '', '#' + id); } catch { /* not fatal */ }
+  const loader = VIEW_LOADERS[id];
+  if (loader) loader();
+}
+
+document.querySelector('.tabs__list')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.tabs__link[data-view]');
+  if (btn) showView(btn.dataset.view);
+});
+
+// Superadmin-only tabs. Setup stays visible to everyone (display name and
+// notification destinations are not superadmin-only); its superadmin parts
+// are hidden inside it by setup.js.
+function applyRoleVisibility() {
+  const auditItem = document.getElementById('auditTabItem');
+  if (auditItem) auditItem.classList.toggle('hidden', !isSuperadmin());
+}
+
+// ── Display time zone ────────────────────────────────────────
 const DISPLAY_TZ_OPTIONS = [
   'UTC', 'America/Toronto', 'America/New_York', 'America/Chicago',
   'America/Denver', 'America/Los_Angeles', 'Europe/London', 'Europe/Paris',
   'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney',
 ];
 
-// Full IANA time zone database (~400 zones) rather than the ~10-option
-// curated list above — Intl.supportedValuesOf('timeZone') is the
-// standard way to get it (Baseline widely-available since 2023; every
-// browser this app already requires for Intl.DateTimeFormat's own
-// timeZoneName option supports it). Falls back to the curated list on an
-// older engine that lacks it rather than throwing.
 function allTimeZones() {
   try {
-    if (typeof Intl.supportedValuesOf === 'function') {
-      return Intl.supportedValuesOf('timeZone');
-    }
-  } catch (e) { /* fall through to the curated list below */ }
+    if (typeof Intl.supportedValuesOf === 'function') return Intl.supportedValuesOf('timeZone');
+  } catch { /* fall through to the short list */ }
   return DISPLAY_TZ_OPTIONS;
 }
 
 function getDisplayTz() {
-  // Falls back to the browser-detected zone, not a hardcoded 'UTC' —
-  // the old version's default was the actual bug this section fixes:
-  // a new user saw their own zone named right next to the control and
-  // still got UTC everywhere until they opened the Event modal and
-  // picked it themselves.
-  return localStorage.getItem('samaya_display_tz')
-    || Intl.DateTimeFormat().resolvedOptions().timeZone
-    || 'UTC';
+  let saved = null;
+  try { saved = localStorage.getItem('samaya_display_tz'); } catch { /* storage blocked */ }
+  return saved || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
 
 function setDisplayTz(tz) {
-  localStorage.setItem('samaya_display_tz', tz);
+  try { localStorage.setItem('samaya_display_tz', tz); } catch { /* storage blocked */ }
 }
 
-// Header's time-zone control (spec §24): a live "HH:MM UTC · HH:MM <zone>"
-// clock, rather than the old bare <select id="displayTzPicker"> — clicking
-// it opens the Time Zone modal (openTimezoneModal below) to change it.
-// Needs no login/tenant context, same as the picker it replaces, so
-// init.js starts it immediately rather than waiting on loadMe().
 let _headerClockTimer = null;
 
 function formatHeaderClock() {
   const now = new Date();
   const utcStr = now.toLocaleTimeString('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' });
   const tz = getDisplayTz();
-  if (tz === 'UTC') return `🕐 ${utcStr} UTC`;
-  let localStr;
+  if (tz === 'UTC') return `${utcStr} UTC`;
   try {
-    localStr = now.toLocaleTimeString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit' });
-  } catch (e) {
-    // An invalid/unrecognized IANA zone name (shouldn't happen via the
-    // modal's own option list, but guards a hand-edited localStorage
-    // value) — fall back to showing UTC only rather than throwing.
-    return `🕐 ${utcStr} UTC`;
+    const localStr = now.toLocaleTimeString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit' });
+    return `${utcStr} UTC · ${localStr} (${tz})`;
+  } catch {
+    return `${utcStr} UTC`;
   }
-  return `🕐 ${utcStr} UTC · ${localStr} (${tz})`;
 }
 
 function startHeaderClock() {
@@ -375,151 +375,98 @@ function startHeaderClock() {
   const tick = () => { el.textContent = formatHeaderClock(); };
   tick();
   if (_headerClockTimer) clearInterval(_headerClockTimer);
-  _headerClockTimer = setInterval(tick, 30000); // minute-resolution display, 30s is plenty
+  _headerClockTimer = setInterval(tick, 30000);
 }
 
-// firstVisit=true renders extra explanatory copy and is triggered
-// automatically once, the first time someone opens the admin UI with no
-// stored preference yet (see maybeShowFirstVisitTzModal below) — every
-// other call (the header clock click) is a plain re-open.
+document.getElementById('headerClock')?.addEventListener('click', () => openTimezoneModal(false));
+
 function openTimezoneModal(firstVisit) {
   const list = document.getElementById('timezoneModalList');
   const intro = document.getElementById('timezoneModalIntro');
   const current = getDisplayTz();
   if (intro) {
     intro.textContent = firstVisit
-      ? `We show event times in both UTC and your local time zone so nothing gets missed across time zones. We've detected ${current} from your browser — pick a different one below if that's wrong, or just close this if it looks right.`
-      : 'Controls the local half of every time shown alongside UTC across the admin UI — the header clock, and every dual-time display in Dashboard, Schedule, Gantt, Post Log, and Announcements.';
+      ? `Times are shown in UTC and in your own time zone so nothing is missed across zones. ${current} was detected from your browser. Pick another below if that is wrong, or close this if it looks right.`
+      : 'Sets the local half of every time shown next to UTC in this console, including the header clock.';
   }
-  // Full IANA database (~400 zones) in a native <select> rather than the
-  // old curated 10-button list — a native select supports type-to-jump,
-  // so this needs no separate search box to stay usable at this size.
   const zones = allTimeZones();
-  const options = zones.includes(current) ? zones : [current, ...zones];
-  list.innerHTML = `<select class="pf-v6-c-form-control" id="timezoneSelect" style="width:100%" onchange="selectTimezone(this.value)">`
-    + options.map(tz => `<option value="${tz}" ${tz === current ? 'selected' : ''}>${tz}</option>`).join('')
-    + `</select>`;
-  document.getElementById('timezoneModal').classList.add('open');
-  focusModal(document.getElementById('timezoneModal'));
+  const options = (zones.includes(current) ? zones : [current, ...zones]).map((tz) => ({ value: tz, label: tz }));
+  list.innerHTML = `<label class="pf-v6-c-form__label" for="timezoneSelect"><span class="pf-v6-c-form__label-text">Time zone</span></label>`
+    + `<select class="pf-v6-c-form-control" id="timezoneSelect">${optionsHtml(options, current)}</select>`;
+  document.getElementById('timezoneSelect').addEventListener('change', (e) => selectTimezone(e.target.value));
+  openModalById('timezoneModal');
 }
 
-// Called once from init.js after the page is otherwise ready — a stored
-// samaya_display_tz means either an explicit past choice or a past
-// confirm/dismiss of this very modal (selectTimezone/closeTimezoneModal
-// both set it), so its mere presence is "already asked."
 function maybeShowFirstVisitTzModal() {
-  if (localStorage.getItem('samaya_display_tz')) return;
-  openTimezoneModal(/*firstVisit=*/true);
+  try {
+    if (localStorage.getItem('samaya_display_tz')) return;
+  } catch {
+    return;
+  }
+  openTimezoneModal(true);
 }
 
 function closeTimezoneModal() {
-  // Closing without picking a zone still counts as "confirmed" — this is
-  // what stops the first-visit prompt from reappearing on every future
-  // visit even if the detected default was left as-is (see
-  // maybeShowFirstVisitTzModal above, which only checks presence).
-  if (!localStorage.getItem('samaya_display_tz')) setDisplayTz(getDisplayTz());
-  document.getElementById('timezoneModal').classList.remove('open');
-  unfocusModal();
+  let saved = null;
+  try { saved = localStorage.getItem('samaya_display_tz'); } catch { /* storage blocked */ }
+  if (!saved) setDisplayTz(getDisplayTz());
+  closeModalById('timezoneModal');
 }
 
 function selectTimezone(tz) {
   setDisplayTz(tz);
   closeTimezoneModal();
   startHeaderClock();
-  // Reload whichever view is currently open so its times re-render
-  // under the new zone — same set of views that read getDisplayTz()
-  // through fmtTime/fmtTimeShort/fmtDateTime.
-  const activeView = document.querySelector('.view.active');
-  if (!activeView) return;
-  const id = activeView.id.replace('v-', '');
-  if (id === 'dashboard')     loadDashboard();
-  if (id === 'schedule')      { renderSchedule(); renderGantt(occurrenceData); }
-  if (id === 'postlog')       loadPostLog();
-  if (id === 'announcements') loadAnnouncements();
+  const active = document.querySelector('.view.active');
+  const loader = active && VIEW_LOADERS[active.id.replace('v-', '')];
+  if (loader) loader();
 }
 
-function showView(id, btn) {
-  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.querySelectorAll('.pf-v6-c-tabs__item').forEach(li => li.classList.remove('pf-m-current'));
-  document.getElementById('v-' + id).classList.add('active');
-  btn.closest('.pf-v6-c-tabs__item').classList.add('pf-m-current');
-  if (id === 'dashboard') loadDashboard();
-  if (id === 'events')    loadEvents();
-  if (id === 'schedule')  { setScheduleLayout(localStorage.getItem('samaya_schedule_layout') || 'table'); loadSchedule(); }
-  if (id === 'postlog')   loadPostLog();
-  if (id === 'sync')      loadSync();
-  if (id === 'config')    loadDiscordConfig();
-  // Spec §38.6 — Access & Platform merged into one tab/view ('access');
-  // loadAccess() now also renders the Platform section for a superadmin.
-  if (id === 'access')    loadAccess();
-  if (id === 'audit')     loadAuditLog();
-  if (id === 'tickets')   loadTickets();
-  if (id === 'announcements') { loadAnnouncements(); loadAnnouncementTemplates(); }
+// ── Time formatting ──────────────────────────────────────────
+function toUtcDate(isoStr) {
+  const hasTz = /Z$|[+-]\d{2}:\d{2}$/.test(isoStr);
+  return new Date(hasTz ? isoStr : isoStr + 'Z');
 }
 
-// tenantOverride sends one explicit tenant slug regardless of any tab
-// filter's current value — every write endpoint (create/edit an event,
-// create an announcement, a Sync "push fix" row, ...) requires exactly
-// one real tenant, never the combined '*' pseudo-tenant, so callers
-// always pass an explicit slug here rather than relying on a global
-// "current tenant" (removed — see the §38.1 comment above TENANTS).
-async function api(method, path, body, skipTenantHeader, tenantOverride) {
-  const headers = {'Content-Type':'application/json'};
-  if (!skipTenantHeader) {
-    if (tenantOverride) headers['X-Tenant-Slug'] = tenantOverride;
-  }
-  const opts = { method, headers, credentials: 'same-origin' };
-  if (body) opts.body = JSON.stringify(body);
-  const res = await fetch('/admin' + path, opts);
-  if (res.status === 401) {
-    window.location.href = '/auth/login';
-    throw new Error('Not logged in — redirecting to login.');
-  }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({detail: res.statusText}));
-    throw new Error(err.detail || res.statusText);
-  }
-  return res.json();
+// "19:00 UTC · 3:00 PM EDT"; collapses to UTC alone when the display zone is UTC.
+function dualTimeString(utcIso) {
+  const d = toUtcDate(utcIso);
+  const utcPart = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' }).format(d) + ' UTC';
+  const tz = getDisplayTz();
+  if (tz === 'UTC') return utcPart;
+  const localPart = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short', timeZone: tz }).format(d);
+  return utcPart + ' · ' + localPart;
 }
 
-function toast(msg, err) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.style.background = err ? '#991b1b' : 'var(--banner)';
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 3500);
+// "2026-10-02 19:00 UTC", plus the local time and, only when it differs from
+// the UTC date, the local date.
+function fmtDateTime(utcIso) {
+  const d = toUtcDate(utcIso);
+  const p = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC',
+  }).formatToParts(d).reduce((a, x) => (a[x.type] = x.value, a), {});
+  const utcDateKey = `${p.year}-${p.month}-${p.day}`;
+  const utcStr = `${utcDateKey} ${p.hour}:${p.minute} UTC`;
+  const tz = getDisplayTz();
+  if (tz === 'UTC') return utcStr;
+  const lp = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz })
+    .formatToParts(d).reduce((a, x) => (a[x.type] = x.value, a), {});
+  const localDateKey = `${lp.year}-${lp.month}-${lp.day}`;
+  const localTimeStr = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short', timeZone: tz }).format(d);
+  if (localDateKey === utcDateKey) return `${utcStr} · ${localTimeStr}`;
+  const localDateStr = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: tz }).format(d);
+  return `${utcStr} · ${localDateStr}, ${localTimeStr}`;
 }
 
-// ── Remembered last-used Discord channel per tenant (spec §29) ──────
-// Coordinators post to the same channel for a given alliance almost every
-// time — a brand-new target row (Events or Announcements) defaults to
-// whatever channel was last picked for that tenant, rather than forcing
-// a fresh "— none —" pick on every single row. Per-browser only
-// (localStorage), never sent to the server, and never overrides an
-// explicit channelId passed in for an edit/duplicate — callers only
-// consult this when there's no real value to prefill with.
-const LAST_CHANNEL_KEY = 'samaya_last_channels';
-
-function getLastChannelForTenant(tenantSlug) {
-  try {
-    const map = JSON.parse(localStorage.getItem(LAST_CHANNEL_KEY) || '{}');
-    return map[tenantSlug] || null;
-  } catch (e) { return null; }
+function utcDateKey(date) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 }
 
-function setLastChannelForTenant(tenantSlug, channelId) {
-  if (!tenantSlug || !channelId) return;
-  try {
-    const map = JSON.parse(localStorage.getItem(LAST_CHANNEL_KEY) || '{}');
-    map[tenantSlug] = channelId;
-    localStorage.setItem(LAST_CHANNEL_KEY, JSON.stringify(map));
-  } catch (e) { /* best-effort convenience only */ }
+function utcTimeKey(date) {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
 }
 
-// ── Relative time ("in 20 minutes" / "3 hours ago") (spec §29) ──────
-// Shared by the Schedule/Dashboard occurrence badges and (via a thin
-// wrapper) the announcement composer's live preview (§28) — one
-// implementation rather than two copies of the same threshold math.
+// "in 20 minutes" / "3 hours ago"
 function formatRelativeTime(date) {
   const diffSeconds = Math.round((date.getTime() - Date.now()) / 1000);
   const abs = Math.abs(diffSeconds);
@@ -531,239 +478,56 @@ function formatRelativeTime(date) {
       return diffSeconds >= 0 ? `in ${count} ${plural}` : `${count} ${plural} ago`;
     }
   }
+  return '';
 }
 
-// ── Emoji picker (spec §28) ──────────────────────────────────
-// Discord's *default* (standard Unicode) emoji set only — never a
-// server's custom/uploaded emoji, which would need a per-guild fetch and
-// image assets this app has no other use for. Browsers render these
-// glyphs natively, the same glyphs Discord's own client shows for
-// non-custom emoji, so a curated static list is all this needs.
-const EMOJI_PICKER_LIST = {
-  'Faces': ['😀','😁','😂','🤣','😊','😇','🙂','😉','😍','🤩','😎','🤔','😐','😴','😭','😡','🤯','🥳','😅','🤗'],
-  'Gestures': ['👍','👎','👏','🙌','🤝','🙏','💪','✌️','🤞','👋','🫡','🤙','👀','🖐️','☝️'],
-  'Symbols': ['🔥','⭐','✨','💯','⚔️','🛡️','🏆','⚠️','✅','❌','❗','❓','⏰','📅','📢','🔔','💀','👑','🎉','🚨'],
-};
-
-// Inserts `text` at the current cursor position of the textarea with the
-// given id (replacing any selection), fires `input` so char counts and
-// the live preview update, and restores focus with the cursor placed
-// right after the inserted text.
-function insertAtCursor(textareaId, text) {
-  const ta = document.getElementById(textareaId);
-  if (!ta) return;
-  const start = ta.selectionStart;
-  const end = ta.selectionEnd;
-  ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
-  const cursor = start + text.length;
-  ta.focus();
-  ta.setSelectionRange(cursor, cursor);
-  ta.dispatchEvent(new Event('input', { bubbles: true }));
+// 90 -> "1 hour 30 minutes before"; 0 -> "At start".
+function describeReminder(minutes) {
+  if (minutes === 0) return 'At start';
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const mins = minutes % 60;
+  const parts = [];
+  if (days) parts.push(days + (days === 1 ? ' day' : ' days'));
+  if (hours) parts.push(hours + (hours === 1 ? ' hour' : ' hours'));
+  if (mins) parts.push(mins + (mins === 1 ? ' minute' : ' minutes'));
+  return parts.join(' ') + ' before';
 }
 
-// One shared popover, repositioned/retargeted per call rather than one
-// per textarea — matches the "one modal, refilled" convention used
-// elsewhere in this app rather than duplicating markup.
-function toggleEmojiPicker(buttonEl, textareaId) {
-  let picker = document.getElementById('emojiPicker');
-  const alreadyOpenForThis = picker && picker.classList.contains('open') && picker.dataset.targetTextarea === textareaId;
-  if (!picker) {
-    picker = document.createElement('div');
-    picker.id = 'emojiPicker';
-    picker.className = 'emoji-picker';
-    document.body.appendChild(picker);
-    document.addEventListener('click', (e) => {
-      if (!picker.contains(e.target) && !e.target.classList.contains('emoji-picker-btn')) {
-        picker.classList.remove('open');
-      }
-    });
-  }
-  if (alreadyOpenForThis) {
-    picker.classList.remove('open');
-    return;
-  }
-  picker.dataset.targetTextarea = textareaId;
-  picker.innerHTML = Object.entries(EMOJI_PICKER_LIST).map(([heading, emojis]) =>
-    '<div class="emoji-picker-heading">' + heading + '</div>'
-    + '<div class="emoji-picker-grid">'
-    + emojis.map(e => '<button type="button" class="emoji-picker-item" onclick="insertAtCursor(\'' + textareaId + '\',\'' + e + '\')">' + e + '</button>').join('')
-    + '</div>'
-  ).join('');
-  const rect = buttonEl.getBoundingClientRect();
-  picker.style.top = (rect.bottom + window.scrollY + 4) + 'px';
-  picker.style.left = (rect.left + window.scrollX) + 'px';
-  picker.classList.add('open');
+// Plain-language recurrence for an event dict.
+function describeRecurrence(ev) {
+  if (ev.recurrence_kind !== 'interval_days' || !ev.interval_days) return 'One-off';
+  if (ev.interval_days === 1) return 'Every day';
+  if (ev.interval_days === 7) return 'Every week';
+  return `Every ${ev.interval_days} days`;
 }
 
-// ── "Preview as it would look on Discord" modal (spec §46) ──────────
-// Click-to-preview for an event/announcement row/card across Dashboard,
-// Schedule, Events, and Announcements — reuses the exact rendering
-// announcements.js's composer preview already built (renderDiscordMarkdownPreview/
-// clientRenderPlaceholders/formatDiscordAbsolutePreview/formatDiscordRelativePreview,
-// all defined there — safe to call from here since every admin script has
-// already loaded and defined its top-level functions by the time a user
-// can click anything). `kind` is 'occurrence' (Dashboard/Schedule row —
-// an Occurrence dict), 'eventdef' (Events tab row — an EventDefinition
-// dict, previewed against its own anchor_date/start_time_utc since it has
-// no concrete "next occurrence" the way a real Occurrence does), or
-// 'announcement' (an Announcement dict, ANNOUNCEMENTS-shaped).
-// Row-level click target for the tables/cards below — lets the whole
-// row/card open the preview while a click on an actual control inside it
-// (Post, Cancel, Edit, a checkbox, a <select>...) keeps doing what it
-// already does instead of also popping the preview open underneath it.
-function handleRowPreviewClick(evt, kind, item) {
-  if (evt.target.closest('button, a, select, input, .pf-v6-c-check')) return;
-  openDiscordPreview(kind, item);
+// ── Kingdom names (for the {kingdom_name} placeholder preview) ─
+let KINGDOM_NAMES_CACHE = null;
+
+async function ensureKingdomNamesLoaded() {
+  if (KINGDOM_NAMES_CACHE) return KINGDOM_NAMES_CACHE;
+  KINGDOM_NAMES_CACHE = {};
+  try {
+    const kingdoms = await api('GET', '/api/kingdoms', null, /*skipTenantHeader=*/true);
+    kingdoms.forEach((k) => { KINGDOM_NAMES_CACHE[k.id] = k.name; });
+  } catch { /* the preview just shows a blank kingdom name */ }
+  return KINGDOM_NAMES_CACHE;
 }
 
-async function openDiscordPreview(kind, item) {
-  const modal = document.getElementById('discordPreviewModal');
-  const pane = document.getElementById('discordPreviewModalBody');
-  if (!modal || !pane) return;
-  pane.innerHTML = '<p style="color:var(--muted)">Loading preview…</p>';
-  modal.classList.add('open');
-  focusModal(modal);
-
-  let tenantSlug, title, rawBody, scheduledFor, eventOffsetMinutes, coverImage, channelLabel, durationHours;
-  const isAnnouncement = kind === 'announcement';
-
-  if (kind === 'occurrence') {
-    tenantSlug = tenantSlugFor(item.owning_tenant_id);
-    title = item.event_name;
-    rawBody = item.description || '';
-    scheduledFor = new Date();
-    eventOffsetMinutes = Math.round((new Date(item.start_datetime_utc).getTime() - Date.now()) / 60000);
-    coverImage = item.cover_image_data || null;
-    channelLabel = item.discord_channel;
-    durationHours = item.duration_hours;
-  } else if (kind === 'eventdef') {
-    tenantSlug = tenantSlugFor(item.owning_tenant_id);
-    title = item.name;
-    rawBody = item.description || '';
-    scheduledFor = new Date();
-    const start = new Date(item.anchor_date + 'T' + (item.start_time_utc || '00:00') + ':00Z');
-    eventOffsetMinutes = Math.round((start.getTime() - Date.now()) / 60000);
-    coverImage = item.cover_image_data || null;
-    channelLabel = item.discord_channel;
-    durationHours = item.duration_hours;
-  } else {
-    tenantSlug = item.owning_tenant_slug;
-    title = item.title;
-    rawBody = item.body_markdown || '';
-    scheduledFor = new Date(item.scheduled_for);
-    eventOffsetMinutes = item.event_offset_minutes || 0;
-  }
-
-  const tenant = TENANTS.find(t => t.slug === tenantSlug);
-  const allianceName = tenant ? tenant.name : (tenantSlug || '');
-
-  const kingdomNames = await ensureKingdomNamesLoaded();
-  const [roles, channels] = await Promise.all([
-    ensurePreviewRolesLoaded(tenantSlug),
-    ensurePreviewChannelsLoaded(tenantSlug),
-  ]);
-
-  const resolved = clientRenderPlaceholders(rawBody, {
-    allianceName, kingdomName: tenant ? kingdomNames[tenant.kingdom_id] : '',
-    scheduledFor, eventOffsetMinutes,
+// Reads an image file as a data URI for the cover image / alliance icon
+// fields. Resolves to '' (after a toast) when the file is too large or unreadable.
+function readImageFile(file, maxBytes) {
+  return new Promise((resolve) => {
+    if (!file) { resolve(''); return; }
+    if (file.size > maxBytes) {
+      toast(`That image is too large (max ${Math.round(maxBytes / 1048576)}MB). Pick a smaller file.`, true);
+      resolve('');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => { toast('Could not read that image file', true); resolve(''); };
+    reader.readAsDataURL(file);
   });
-  const html = renderDiscordMarkdownPreview(resolved, { roles, channels });
-
-  if (isAnnouncement) {
-    pane.innerHTML = `
-      <div class="discord-preview-msg">
-        <div class="discord-preview-avatar">S</div>
-        <div class="discord-preview-body">
-          <div class="discord-preview-header">
-            <span class="discord-preview-name">Samaya</span><span class="discord-preview-bot-tag">BOT</span>
-            <span style="color:#949ba4;font-size:0.75em">${formatDiscordAbsolutePreview(scheduledFor)}</span>
-          </div>
-          <div class="discord-preview-text">${html}</div>
-        </div>
-      </div>`;
-  } else {
-    const eventStart = new Date(scheduledFor.getTime() + eventOffsetMinutes * 60000);
-    pane.innerHTML = `
-      <div class="discord-preview-event">
-        ${coverImage ? `<img class="discord-preview-event-cover" src="${coverImage}" alt="">` : ''}
-        <div class="discord-preview-event-body">
-          <div class="discord-preview-event-title">${escapeHtml(title)}</div>
-          <div class="discord-preview-event-time">🗓️ ${formatDiscordAbsolutePreview(eventStart)} <span style="color:#949ba4">(${formatDiscordRelativePreview(eventStart)})</span></div>
-          <div class="discord-preview-event-meta">${durationHours ? '⏱ ' + durationHours + 'h' : ''}${channelLabel ? (durationHours ? ' · ' : '') + '💬 ' + escapeHtml(channelLabel) : ''}</div>
-          <div class="discord-preview-text discord-preview-event-desc">${html}</div>
-          <button type="button" class="discord-preview-event-interested" disabled>✓ Interested</button>
-        </div>
-      </div>`;
-  }
-}
-
-function closeDiscordPreviewModal() {
-  document.getElementById('discordPreviewModal').classList.remove('open');
-  unfocusModal();
-}
-
-// ── Notification Targets column (spec §49) ─────────────────────────
-// The Alliance Events/Leadership Notifications tables (events.js) and the
-// Announcements table (announcements.js) all show a "Notification
-// Targets" column naming the actual Discord channel(s)/role(s) a row
-// posts/pings to. The channel/role fields involved are real Discord
-// snowflake IDs, not names — resolving them requires a per-tenant API
-// call, so each cell first renders with the bare ID (all that's known
-// synchronously) inside a `data-notif-channel="tenantSlug:id"` /
-// `data-notif-role="tenantSlug:id"` span, and enhanceNotificationTargetLabels()
-// upgrades every such span to a real "#name"/"@name" label afterward —
-// one batched fetch per distinct tenant rather than one per row/target.
-const _notifChannelNameCache = {};
-const _notifRoleNameCache = {};
-
-async function _loadNotifChannelMap(tenantSlug) {
-  if (_notifChannelNameCache[tenantSlug]) return _notifChannelNameCache[tenantSlug];
-  try {
-    const channels = await api('GET', '/api/discord/channels', null, false, tenantSlug);
-    const map = {};
-    channels.forEach(c => { map[c.id] = c.name; });
-    _notifChannelNameCache[tenantSlug] = map;
-    return map;
-  } catch (e) {
-    return {};
-  }
-}
-
-async function _loadNotifRoleMap(tenantSlug) {
-  if (_notifRoleNameCache[tenantSlug]) return _notifRoleNameCache[tenantSlug];
-  try {
-    const roles = await api('GET', '/api/discord/roles', null, false, tenantSlug);
-    const map = {};
-    roles.forEach(r => { map[r.id] = r.name; });
-    _notifRoleNameCache[tenantSlug] = map;
-    return map;
-  } catch (e) {
-    return {};
-  }
-}
-
-async function enhanceNotificationTargetLabels(root) {
-  const scope = root || document;
-  const chanEls = Array.from(scope.querySelectorAll('[data-notif-channel]'));
-  const roleEls = Array.from(scope.querySelectorAll('[data-notif-role]'));
-  const slugs = new Set(
-    chanEls.map(el => el.dataset.notifChannel.split(':')[0])
-      .concat(roleEls.map(el => el.dataset.notifRole.split(':')[0]))
-  );
-  for (const slug of slugs) {
-    if (!slug) continue;
-    const [channelMap, roleMap] = await Promise.all([_loadNotifChannelMap(slug), _loadNotifRoleMap(slug)]);
-    chanEls
-      .filter(el => el.dataset.notifChannel.startsWith(slug + ':'))
-      .forEach(el => {
-        const id = el.dataset.notifChannel.slice(slug.length + 1);
-        if (channelMap[id]) el.textContent = '#' + channelMap[id];
-      });
-    roleEls
-      .filter(el => el.dataset.notifRole.startsWith(slug + ':'))
-      .forEach(el => {
-        const id = el.dataset.notifRole.slice(slug.length + 1);
-        if (roleMap[id]) el.textContent = '@' + roleMap[id];
-      });
-  }
 }

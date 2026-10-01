@@ -1,0 +1,113 @@
+// Delivery log tab (#v-delivery, spec §66.7): a health card for the delivery
+// engine and a filterable table of every Discord post it has made or tried to
+// make, with the reason on each row and Retry for ones that failed.
+// Depends on common.js.
+
+let DELIVERIES = [];
+
+const DELIVERY_KIND_LABELS = { discord_event: 'Discord event', reminder: 'Reminder', announcement: 'Message' };
+
+function deliveryKindText(d) {
+  if (d.kind === 'reminder' && d.reminder_minutes !== null && d.reminder_minutes !== undefined) {
+    return 'Reminder, ' + describeReminder(d.reminder_minutes);
+  }
+  return DELIVERY_KIND_LABELS[d.kind] || d.kind;
+}
+
+async function loadDelivery() {
+  renderAllianceFilterSelect('deliveryAlliance', 'delivery', loadDelivery);
+  const filter = getTabFilter('delivery');
+  const params = new URLSearchParams();
+  const status = byId('deliveryStatus').value;
+  const kind = byId('deliveryKind').value;
+  const eventId = byId('deliveryEvent').value;
+  if (status) params.set('status', status);
+  if (kind) params.set('kind', kind);
+  if (eventId) params.set('event_id', eventId);
+  params.set('limit', '200');
+  params.set('days', byId('deliveryDays').value || '7');
+  try {
+    const [health, rows, events] = await Promise.all([
+      api('GET', '/api/v2/delivery-health', null, false, filter),
+      api('GET', '/api/v2/deliveries?' + params.toString(), null, false, filter),
+      api('GET', '/api/v2/events', null, false, filter),
+    ]);
+    renderDeliveryHealth(health);
+    renderDeliveryEventFilter(events, eventId);
+    DELIVERIES = rows;
+    renderDeliveries();
+  } catch (e) {
+    toast(e.message, true);
+    byId('deliveryBody').innerHTML = emptyRow(6, 'Could not load the delivery log: ' + e.message);
+  }
+}
+
+function renderDeliveryEventFilter(events, selected) {
+  const sel = byId('deliveryEvent');
+  const options = [{ value: '', label: 'Any event' }].concat(
+    events.slice().sort((a, b) => a.name.localeCompare(b.name)).map((e) => ({ value: e.id, label: e.name })));
+  sel.innerHTML = optionsHtml(options, selected);
+}
+
+function renderDeliveryHealth(h) {
+  const banner = byId('deliveryEngineOff');
+  banner.classList.toggle('hidden', h.engine_enabled !== false);
+  const counts = h.counts || {};
+  const order = [['posted', 'Posted', 'pf-m-green'], ['pending', 'Pending', 'pf-m-gray'], ['sending', 'Sending', 'pf-m-blue'],
+    ['error', 'Errors', 'pf-m-red'], ['cancelled', 'Cancelled', 'pf-m-orange']];
+  const overdue = h.oldest_pending_overdue_minutes || 0;
+  byId('deliveryHealth').innerHTML = `
+    <div class="health__state ${h.healthy ? 'health__state--ok' : 'health__state--bad'}" role="status">
+      ${h.healthy ? 'Healthy' : 'Needs attention'}
+    </div>
+    <ul class="health__counts" aria-label="Deliveries due in the last ${h.window_days} days">
+      ${order.map(([key, label, color]) => `<li class="health__count">${pfLabel(label, color)} <strong>${counts[key] || 0}</strong></li>`).join('')}
+    </ul>
+    <p class="health__note">Last ${h.window_days} days. ${overdue > 5
+    ? `The oldest pending delivery is ${overdue} minutes overdue, which means the engine is not sending.`
+    : 'Nothing is waiting longer than it should.'}</p>`;
+}
+
+function deliveryStatusLabel(status) {
+  const color = { pending: 'pf-m-gray', sending: 'pf-m-blue', posted: 'pf-m-green', error: 'pf-m-red', cancelled: 'pf-m-orange' }[status] || 'pf-m-gray';
+  return pfLabel(status, color);
+}
+
+function buildDeliveryRow(d) {
+  const canRetry = d.status === 'error' && canWriteAnywhere();
+  const action = canRetry
+    ? `<button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="retry" data-id="${d.id}" data-slug="${escapeHtml(d.tenant_slug)}">Retry</button>`
+    : '';
+  return `<tr class="pf-v6-c-table__tr">
+    <td class="pf-v6-c-table__td" data-label="Due">${escapeHtml(fmtDateTime(d.due_at_utc))}</td>
+    <td class="pf-v6-c-table__td" data-label="Event"><strong>${escapeHtml(d.event_name)}</strong><div class="samaya-muted">${escapeHtml(d.occurrence_date)}</div></td>
+    <td class="pf-v6-c-table__td" data-label="Alliance and kind">${escapeHtml(d.tenant_name)}<div class="samaya-muted">${escapeHtml(deliveryKindText(d))}</div></td>
+    <td class="pf-v6-c-table__td" data-label="Status">${deliveryStatusLabel(d.status)}</td>
+    <td class="pf-v6-c-table__td" data-label="Detail">${d.detail ? escapeHtml(d.detail) : '<span class="samaya-muted">None</span>'}</td>
+    <td class="pf-v6-c-table__td" data-label="Actions">${action}</td>
+  </tr>`;
+}
+
+function renderDeliveries() {
+  byId('deliveryBody').innerHTML = DELIVERIES.length
+    ? DELIVERIES.map(buildDeliveryRow).join('')
+    : emptyRow(6, 'No deliveries match these filters.');
+  byId('deliveryCount').textContent = `${DELIVERIES.length} shown, newest first (up to 200).`;
+}
+
+bindActions(byId('deliveryBody'), {
+  async retry(btn) {
+    btn.disabled = true;
+    try {
+      await api('POST', `/api/v2/deliveries/${btn.dataset.id}/retry`, null, false, btn.dataset.slug);
+      toast('Retry queued. The engine sends it on its next minute.');
+      loadDelivery();
+    } catch (e) {
+      toast(e.message, true);
+      btn.disabled = false;
+    }
+  },
+});
+['deliveryStatus', 'deliveryKind', 'deliveryEvent', 'deliveryDays'].forEach((id) => byId(id).addEventListener('change', loadDelivery));
+
+VIEW_LOADERS.delivery = loadDelivery;
