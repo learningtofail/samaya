@@ -35,6 +35,9 @@
   --fs-md: 1.125rem;
   --fs-lg: 1.375rem;
   --tap: 44px;
+  --logout-bg: #F8FAFC;
+  --logout-bg-hover: #E2E8F0;
+  --logout-ink: #0F172A;
   font-size: 16px;
 }
 
@@ -58,6 +61,8 @@ summary:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--focus
 .masthead__sub { font-size: var(--fs-sm); color: #CBD5E1; }
 .masthead__tools { display: flex; align-items: center; gap: var(--space-3); }
 .masthead__logout { margin: 0; }
+.masthead__logout-button { background: var(--logout-bg); color: var(--logout-ink); border: 1px solid var(--logout-bg); border-radius: var(--radius); padding: var(--space-1) var(--space-4); min-height: var(--tap); font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
+.masthead__logout-button:hover { background: var(--logout-bg-hover); }
 .masthead__clock { background: none; border: 1px solid #94A3B8; color: var(--brand-ink); border-radius: var(--radius); padding: var(--space-1) var(--space-3); min-height: var(--tap); font-size: var(--fs-sm); cursor: pointer; }
 .masthead__clock:hover { background: #334155; }
 
