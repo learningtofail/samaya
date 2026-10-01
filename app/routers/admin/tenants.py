@@ -20,8 +20,10 @@ from services.audit import log_change
 from services.db_errors import raise_friendly_integrity_error
 from services.discord_api import verify_token
 
-from .deps import get_current_user, require_superadmin
-from .schemas import DiscordServerIn, DiscordServerPatch, KingdomIn, KingdomPatch, TenantIn, TenantPatch
+from .deps import get_current_user, require_superadmin, require_tenant_owner
+from .schemas import (
+    DiscordServerIn, DiscordServerPatch, KingdomIn, KingdomPatch, NotificationDestinationIn, TenantIn, TenantPatch,
+)
 
 router = APIRouter()
 
@@ -73,6 +75,8 @@ def _tenant_dict(t: Tenant) -> dict:
         "guild_id":    t.server.guild_id,
         "color":       t.color,
         "icon_image_data": t.icon_image_data or None,
+        "notification_channel_id": t.notification_channel_id or "",
+        "notification_role_id":    t.notification_role_id or "",
     }
 
 
@@ -177,6 +181,28 @@ async def create_tenant(
     # was never loaded on this brand-new object) — re-select instead,
     # which picks up Tenant.server's lazy="joined" default.
     tenant = (await db.execute(select(Tenant).where(Tenant.id == tenant.id))).scalar_one()
+    return _tenant_dict(tenant)
+
+
+@router.put("/api/notification-destination")
+async def set_notification_destination(
+    payload: NotificationDestinationIn,
+    tenant: Tenant = Depends(require_tenant_owner), user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The selected alliance's Notifications destination (spec §66.1). An
+    alliance owner can set their own; it is not superadmin-only. Only fields
+    present are applied."""
+    before = {"channel": tenant.notification_channel_id, "role": tenant.notification_role_id}
+    if payload.notification_channel_id is not None:
+        tenant.notification_channel_id = payload.notification_channel_id
+    if payload.notification_role_id is not None:
+        tenant.notification_role_id = payload.notification_role_id
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id, table_name="tenants", row_id=tenant.id, action="update",
+        before=before, after={"channel": tenant.notification_channel_id, "role": tenant.notification_role_id},
+    )
+    await db.commit()
     return _tenant_dict(tenant)
 
 

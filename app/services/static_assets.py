@@ -19,7 +19,7 @@ move when a static asset actually changes.
 """
 import re
 
-STATIC_ASSET_VERSION = "1.36.0"
+STATIC_ASSET_VERSION = "1.37.0"
 
 _STATIC_ASSET_REF = re.compile(r'(src|href)="(/static/[^"?]+)"')
 

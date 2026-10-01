@@ -51,6 +51,7 @@ const STATUS_META = {
   in_progress: { label: 'In Progress', color: 'pf-m-orange' },
   done:        { label: 'Done',        color: 'pf-m-green' },
   declined:    { label: 'Declined',    color: 'pf-m-red' },
+  dismissed:   { label: 'Dismissed',   color: 'pf-m-gray' },
 };
 
 function pfLabel(text, color) {
@@ -68,7 +69,7 @@ function formatRelativeTime(iso) {
   return `${days}d ago`;
 }
 
-let TICKETS = [];
+let TICKETS = { active: [], archived: [] };
 
 async function loadTickets() {
   try {
@@ -79,30 +80,38 @@ async function loadTickets() {
   }
 }
 
+function formatWhen(iso) {
+  return iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+}
+
+function responsesHtml(t) {
+  if (!t.responses || !t.responses.length) return '';
+  return `<ul class="ticket-responses" aria-label="Responses from the team">${t.responses.map(r => `
+    <li class="ticket-responses__item">
+      <div class="ticket-responses__head"><strong>${escapeHtml(r.author)}</strong>
+        <span class="samaya-subtle-text">${escapeHtml(formatWhen(r.created_at))}</span></div>
+      <p class="ticket-responses__body">${escapeHtml(r.body)}</p>
+    </li>`).join('')}</ul>`;
+}
+
 // Each row's upvote button carries data-ticket-id instead of an inline
-// onclick="toggleVote(${t.id})" — the ticketsWrap container below handles
-// the click via delegation (elementList didn't exist yet, so a per-row
-// addEventListener() at render time isn't an option here; see the module
-// doc comment).
-function renderTickets() {
-  const wrap = document.getElementById('ticketsWrap');
-  if (!TICKETS.length) {
-    wrap.innerHTML = '<div class="empty-state">Nothing here yet — be the first to submit feedback or a request.</div>';
-    return;
-  }
-  wrap.innerHTML = TICKETS.map(t => {
-    const kindMeta = KIND_META[t.kind] || { label: t.kind, color: 'pf-m-gray' };
-    const statusMeta = STATUS_META[t.status] || { label: t.status, color: 'pf-m-gray' };
-    const relatedLine = (t.kind === 'error' && t.related_name)
-      ? `<div class="pf-v6-u-font-size-sm samaya-subtle-text">Re: ${escapeHtml(t.related_name)}</div>` : '';
-    const allianceLine = t.tenant_name ? escapeHtml(t.tenant_name) : 'Kingdom-wide / general';
-    return `
+// onclick — the ticketsWrap container handles the click via delegation.
+// An archived ticket (done or declined) is read-only: no vote button, but
+// its status and responses stay visible so the reasoning can be looked up.
+function ticketHtml(t, archived) {
+  const kindMeta = KIND_META[t.kind] || { label: t.kind, color: 'pf-m-gray' };
+  const statusMeta = STATUS_META[t.status] || { label: t.status, color: 'pf-m-gray' };
+  const relatedLine = (t.kind === 'error' && t.related_name)
+    ? `<div class="pf-v6-u-font-size-sm samaya-subtle-text">Re: ${escapeHtml(t.related_name)}</div>` : '';
+  const allianceLine = t.tenant_name ? escapeHtml(t.tenant_name) : 'Kingdom-wide / general';
+  const vote = archived
+    ? `<span class="vote-btn vote-btn--static" aria-label="${t.upvote_count} upvotes"><span>▲</span><span class="vote-count">${t.upvote_count}</span></span>`
+    : `<button class="vote-btn${t.voted_by_me ? ' voted' : ''}" data-ticket-id="${t.id}" aria-label="Upvote ${escapeHtml(t.title)}"><span>▲</span><span class="vote-count">${t.upvote_count}</span></button>`;
+  return `
     <div class="pf-v6-c-card pf-v6-u-mb-sm">
       <div class="pf-v6-c-card__body">
         <div class="ticket-row">
-          <button class="vote-btn${t.voted_by_me ? ' voted' : ''}" data-ticket-id="${t.id}" aria-label="Upvote ${escapeHtml(t.title)}">
-            <span>▲</span><span class="vote-count">${t.upvote_count}</span>
-          </button>
+          ${vote}
           <div class="ticket-body">
             <div class="pf-v6-l-flex pf-m-align-items-center pf-m-space-items-sm">
               ${pfLabel(kindMeta.label, kindMeta.color)}
@@ -114,11 +123,26 @@ function renderTickets() {
               ${pfLabel(statusMeta.label, statusMeta.color)}
               <span class="pf-v6-u-font-size-sm samaya-subtle-text">${allianceLine} · reported ${formatRelativeTime(t.created_at)}</span>
             </div>
+            ${responsesHtml(t)}
           </div>
         </div>
       </div>
     </div>`;
-  }).join('');
+}
+
+function renderTickets() {
+  const wrap = document.getElementById('ticketsWrap');
+  const { active, archived } = TICKETS;
+  const activeHtml = active.length
+    ? active.map(t => ticketHtml(t, false)).join('')
+    : '<div class="empty-state">Nothing open right now. Be the first to submit feedback or a request.</div>';
+  const archiveHtml = archived.length ? `
+    <details class="ticket-archive">
+      <summary>Archived (${archived.length})</summary>
+      <p class="samaya-subtle-text ticket-archive__note">Finished or declined. Read-only, kept so you can see what was decided and why.</p>
+      ${archived.map(t => ticketHtml(t, true)).join('')}
+    </details>` : '';
+  wrap.innerHTML = activeHtml + archiveHtml;
 }
 
 document.getElementById('ticketsWrap').addEventListener('click', (e) => {
@@ -129,7 +153,7 @@ document.getElementById('ticketsWrap').addEventListener('click', (e) => {
 async function toggleVote(id) {
   try {
     const result = await api('POST', `/api/tickets/${id}/vote`);
-    const t = TICKETS.find(x => x.id === id);
+    const t = TICKETS.active.find(x => x.id === id);
     if (t) { t.upvote_count = result.upvote_count; t.voted_by_me = result.voted_by_me; }
     renderTickets();
   } catch (e) {

@@ -1,37 +1,35 @@
-"""Admin triage view over the public feedback board's Ticket rows (spec
-§43.3). Kingdom-wide, not tenant-scoped by query — a ticket's own
-tenant_id is informational (who it's about/for), but every admin with
-access to at least one tenant sees the whole list, same "cross-alliance
-visibility is the point" reasoning already applied to the Audit Log.
+"""Admin moderation of the public feedback board (spec §43.3, §66.10).
 
-GET requires only that the caller be logged in with access to some
-tenant (get_current_tenant, X-Tenant-Slug header still required to prove
-that, even though the ticket query itself ignores which one); PATCH
-(status changes) additionally requires require_not_viewer, matching
-every other mutating admin route in this app (spec §31.3).
+Kingdom-wide, not tenant-scoped by query: every admin with access to at
+least one tenant sees the whole board (X-Tenant-Slug still proves that).
+Viewers see everything and change nothing (§31.3). Coordinators and owners
+can respond, dismiss and edit; permanent deletion is superadmin only and is
+always audited. Edits are audited with before and after, and the submitter
+is not told.
 """
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from models import get_db
-from models.db import Announcement, EventDefinition, Occurrence, Tenant, Ticket
+from models.db import Tenant, Ticket, TicketResponse, User
+from services.audit import log_change
+from services.ticket_views import ALL_STATUSES, RESPONSE_MAX_CHARS, occurrence_names, response_dict
 
-from .deps import get_current_tenant, require_not_viewer
+from .deps import get_current_tenant, get_current_user, require_not_viewer, require_superadmin
 
 router = APIRouter()
 
-_STATUSES = ("open", "planned", "in_progress", "done", "declined")
+_KINDS = ("feedback", "event_request", "announcement_request", "error")
+_TITLE_MAX = 120
+_DESCRIPTION_MAX = 2000
 
 
-def _ticket_admin_dict(t: Ticket, tenant_by_id: dict, occ_by_id: dict, ann_by_id: dict) -> dict:
-    related_name = None
-    if t.related_occurrence_id and t.related_occurrence_id in occ_by_id:
-        related_name = occ_by_id[t.related_occurrence_id]
-    elif t.related_announcement_id and t.related_announcement_id in ann_by_id:
-        related_name = ann_by_id[t.related_announcement_id]
-
+def _ticket_admin_dict(t: Ticket, tenant_by_id: dict, occ_names: dict) -> dict:
     tenant = tenant_by_id.get(t.tenant_id) if t.tenant_id else None
     return {
         "id": t.id,
@@ -45,61 +43,185 @@ def _ticket_admin_dict(t: Ticket, tenant_by_id: dict, occ_by_id: dict, ann_by_id
         "updated_at": t.updated_at.isoformat() if t.updated_at else None,
         "tenant_name": tenant.name if tenant else None,
         "tenant_slug": tenant.slug if tenant else None,
-        "related_name": related_name,
+        "related_occurrence_id": t.related_occurrence_id,
+        "related_name": occ_names.get(t.related_occurrence_id),
         "submitter_contact": t.submitter_contact,
+        "responses": [
+            {**response_dict(r), "author_user_id": r.author_user_id} for r in t.responses
+        ],
     }
+
+
+def _audit_snapshot(t: Ticket) -> dict:
+    return {"kind": t.kind, "error_type": t.error_type, "title": t.title,
+            "description": t.description, "status": t.status}
+
+
+async def _load_ticket(db: AsyncSession, ticket_id: int) -> Ticket:
+    ticket = (await db.execute(
+        select(Ticket).options(selectinload(Ticket.responses)).where(Ticket.id == ticket_id)
+        .execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return ticket
+
+
+async def _ticket_json(db: AsyncSession, ticket: Ticket) -> dict:
+    tenant = await db.get(Tenant, ticket.tenant_id) if ticket.tenant_id else None
+    return _ticket_admin_dict(ticket, {tenant.id: tenant} if tenant else {}, await occurrence_names(db, [ticket]))
 
 
 @router.get("/api/tickets")
 async def list_tickets_admin(tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Ticket).order_by(Ticket.upvote_count.desc(), Ticket.created_at.desc()))
-    tickets = result.scalars().all()
-
+    """Every ticket including dismissed ones, with its responses."""
+    tickets = (await db.execute(
+        select(Ticket).options(selectinload(Ticket.responses))
+        .order_by(Ticket.upvote_count.desc(), Ticket.created_at.desc(), Ticket.id.desc())
+    )).scalars().unique().all()
     tenant_ids = {t.tenant_id for t in tickets if t.tenant_id}
     tenant_by_id = {}
     if tenant_ids:
-        tres = await db.execute(select(Tenant).where(Tenant.id.in_(tenant_ids)))
-        tenant_by_id = {t.id: t for t in tres.scalars().all()}
-
-    occ_ids = {t.related_occurrence_id for t in tickets if t.related_occurrence_id}
-    occ_by_id = {}
-    if occ_ids:
-        ores = await db.execute(
-            select(Occurrence.id, EventDefinition.name)
-            .join(EventDefinition, Occurrence.event_id == EventDefinition.id)
-            .where(Occurrence.id.in_(occ_ids))
-        )
-        occ_by_id = {row[0]: row[1] for row in ores.all()}
-
-    ann_ids = {t.related_announcement_id for t in tickets if t.related_announcement_id}
-    ann_by_id = {}
-    if ann_ids:
-        ares = await db.execute(select(Announcement.id, Announcement.title).where(Announcement.id.in_(ann_ids)))
-        ann_by_id = {row[0]: row[1] for row in ares.all()}
-
-    return [_ticket_admin_dict(t, tenant_by_id, occ_by_id, ann_by_id) for t in tickets]
+        tenant_by_id = {t.id: t for t in (await db.execute(
+            select(Tenant).where(Tenant.id.in_(tenant_ids)))).scalars().unique().all()}
+    occ_names = await occurrence_names(db, tickets)
+    return [_ticket_admin_dict(t, tenant_by_id, occ_names) for t in tickets]
 
 
-class TicketStatusPatch(BaseModel):
-    status: str
+class TicketPatch(BaseModel):
+    """Status, or a correction to the text (to remove personal details or fix
+    a typo) and the type. Only fields present are applied."""
+    status:      Optional[str] = None
+    title:       Optional[str] = Field(default=None, max_length=_TITLE_MAX)
+    description: Optional[str] = Field(default=None, max_length=_DESCRIPTION_MAX)
+    kind:        Optional[str] = None
+    error_type:  Optional[str] = None
 
     @field_validator("status")
     @classmethod
     def _valid_status(cls, v):
-        if v not in _STATUSES:
-            raise ValueError(f"status must be one of {_STATUSES}")
+        if v is not None and v not in ALL_STATUSES:
+            raise ValueError(f"status must be one of {ALL_STATUSES}")
         return v
+
+    @field_validator("kind")
+    @classmethod
+    def _valid_kind(cls, v):
+        if v is not None and v not in _KINDS:
+            raise ValueError(f"kind must be one of {_KINDS}")
+        return v
+
+    @field_validator("title", "description")
+    @classmethod
+    def _not_blank(cls, v):
+        if v is not None and not v.strip():
+            raise ValueError("must not be blank")
+        return v.strip() if v is not None else v
 
 
 @router.patch("/api/tickets/{ticket_id}")
-async def update_ticket_status(
-    ticket_id: int, payload: TicketStatusPatch,
-    tenant: Tenant = Depends(require_not_viewer), db: AsyncSession = Depends(get_db),
+async def update_ticket(
+    ticket_id: int, payload: TicketPatch,
+    tenant: Tenant = Depends(require_not_viewer), user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    ticket = await db.get(Ticket, ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
-    ticket.status = payload.status
+    ticket = await _load_ticket(db, ticket_id)
+    before = _audit_snapshot(ticket)
+    for field in payload.model_fields_set:
+        setattr(ticket, field, getattr(payload, field))
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id, table_name="tickets", row_id=ticket.id,
+        action="update", before=before, after=_audit_snapshot(ticket),
+    )
     await db.commit()
-    await db.refresh(ticket)
-    return {"id": ticket.id, "status": ticket.status}
+    return await _ticket_json(db, await _load_ticket(db, ticket_id))
+
+
+@router.delete("/api/tickets/{ticket_id}", status_code=204)
+async def delete_ticket(
+    ticket_id: int,
+    tenant: Tenant = Depends(get_current_tenant), user: User = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanent, with its votes and responses. Superadmin only."""
+    ticket = await _load_ticket(db, ticket_id)
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id, table_name="tickets", row_id=ticket.id,
+        action="delete", before={**_audit_snapshot(ticket), "response_count": len(ticket.responses)},
+    )
+    await db.delete(ticket)
+    await db.commit()
+
+
+class ResponseIn(BaseModel):
+    body: str = Field(max_length=RESPONSE_MAX_CHARS)
+
+    @field_validator("body")
+    @classmethod
+    def _not_blank(cls, v):
+        if not v.strip():
+            raise ValueError("A response cannot be empty")
+        return v.strip()
+
+
+@router.post("/api/tickets/{ticket_id}/responses", status_code=201)
+async def add_response(
+    ticket_id: int, payload: ResponseIn,
+    tenant: Tenant = Depends(require_not_viewer), user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ticket = await _load_ticket(db, ticket_id)
+    response = TicketResponse(ticket_id=ticket.id, author_user_id=user.id, body=payload.body)
+    db.add(response)
+    await db.flush()
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id, table_name="ticket_responses", row_id=response.id,
+        action="create", after={"ticket_id": ticket.id, "body": response.body},
+    )
+    await db.commit()
+    ticket = await _load_ticket(db, ticket_id)
+    created = next(r for r in ticket.responses if r.id == response.id)
+    return {**response_dict(created), "author_user_id": created.author_user_id}
+
+
+async def _own_or_superadmin_response(db: AsyncSession, ticket_id: int, response_id: int, user: User) -> TicketResponse:
+    response = await db.get(TicketResponse, response_id)
+    if response is None or response.ticket_id != ticket_id:
+        raise HTTPException(status_code=404, detail="Response not found")
+    if not user.is_superadmin and response.author_user_id != user.id:
+        raise HTTPException(status_code=403, detail="Only the author or a superadmin can change a response")
+    return response
+
+
+@router.patch("/api/tickets/{ticket_id}/responses/{response_id}")
+async def edit_response(
+    ticket_id: int, response_id: int, payload: ResponseIn,
+    tenant: Tenant = Depends(require_not_viewer), user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    response = await _own_or_superadmin_response(db, ticket_id, response_id, user)
+    before = {"body": response.body}
+    response.body = payload.body
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id, table_name="ticket_responses", row_id=response.id,
+        action="update", before=before, after={"body": response.body},
+    )
+    await db.commit()
+    ticket = await _load_ticket(db, ticket_id)
+    edited = next(r for r in ticket.responses if r.id == response_id)
+    return {**response_dict(edited), "author_user_id": edited.author_user_id}
+
+
+@router.delete("/api/tickets/{ticket_id}/responses/{response_id}", status_code=204)
+async def delete_response(
+    ticket_id: int, response_id: int,
+    tenant: Tenant = Depends(require_not_viewer), user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    response = await _own_or_superadmin_response(db, ticket_id, response_id, user)
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id, table_name="ticket_responses", row_id=response.id,
+        action="delete", before={"ticket_id": ticket_id, "body": response.body},
+    )
+    await db.delete(response)
+    await db.commit()

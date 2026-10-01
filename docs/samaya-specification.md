@@ -1619,6 +1619,8 @@ Rules:
 - Submitters stay anonymous. `submitter_contact` is still never shown publicly.
 - The three public ticket endpoints keep their rate limits (§65); the response and moderation endpoints are admin routes behind a session.
 
+**As built (Phase 4 backend).** Migration `a1f0c0de0002` adds the `dismissed` status and `ticket_responses`, drops `tickets.related_announcement_id` and repoints `tickets.related_occurrence_id` at `event_occurrences` (existing references are cleared; foreign keys are dropped by what they reference because production's names came from hand-written scripts). The public `GET /api/tickets` returns `{active, archived}`; `dismissed` is in neither, voting on an archived ticket is 409 and on a dismissed one 404, and each ticket carries its responses. Admin: `GET /admin/api/tickets` (all statuses, responses included), `PATCH` (status, title, description, kind, error_type; audited with before and after), `DELETE` (superadmin only, audited with the response count), and `POST/PATCH/DELETE /admin/api/tickets/{id}/responses` (author or superadmin may change or delete; viewers cannot respond). A response author is shown as the user's `display_name`, or "Team" when none is set; the Discord username is never shown publicly. `PATCH /admin/api/me` sets your own display name; a superadmin sets anyone's through `PATCH /admin/api/users/{id}`. `PUT /admin/api/notification-destination` sets the selected alliance's Notifications channel and role (alliance owner or superadmin, digits only, empty clears).
+
 ### 66.11 Disposition of earlier sections
 
 | Section | Disposition |

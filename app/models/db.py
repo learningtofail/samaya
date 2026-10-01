@@ -549,8 +549,12 @@ class Ticket(Base):
     title                    = Column(Text, nullable=False)
     description              = Column(Text, nullable=False)
     tenant_id                = Column(Integer, ForeignKey("tenants.id"), nullable=True)
-    related_occurrence_id    = Column(Integer, ForeignKey("occurrences.id"), nullable=True)
-    related_announcement_id  = Column(Integer, ForeignKey("announcements.id"), nullable=True)
+    # Spec §66.11: an error report references an occurrence only. SET NULL
+    # so deleting an event keeps the report (its text still says what was wrong).
+    related_occurrence_id    = Column(
+        Integer, ForeignKey("event_occurrences.id", ondelete="SET NULL", name="fk_ticket_related_occurrence"),
+        nullable=True,
+    )
     submitter_contact        = Column(Text, nullable=True)
     status                   = Column(Text, nullable=False, default="open")
     upvote_count             = Column(Integer, nullable=False, default=1)
@@ -558,19 +562,21 @@ class Ticket(Base):
     updated_at               = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     votes = relationship("TicketVote", back_populates="ticket", cascade="all, delete-orphan")
+    responses = relationship(
+        "TicketResponse", back_populates="ticket", cascade="all, delete-orphan",
+        order_by="TicketResponse.created_at, TicketResponse.id",
+    )
 
     __table_args__ = (
         CheckConstraint(
             "kind IN ('feedback', 'event_request', 'announcement_request', 'error')",
             name="ck_ticket_kind",
         ),
+        # Spec §66.10: 'dismissed' hides a ticket from the public board
+        # without deleting it; 'done' and 'declined' are the archive.
         CheckConstraint(
-            "status IN ('open', 'planned', 'in_progress', 'done', 'declined')",
+            "status IN ('open', 'planned', 'in_progress', 'done', 'declined', 'dismissed')",
             name="ck_ticket_status",
-        ),
-        CheckConstraint(
-            "related_occurrence_id IS NULL OR related_announcement_id IS NULL",
-            name="ck_ticket_related_mutually_exclusive",
         ),
     )
 
@@ -594,6 +600,28 @@ class TicketVote(Base):
 
     __table_args__ = (
         UniqueConstraint("ticket_id", "voter_key", name="uq_ticket_vote"),
+    )
+
+
+class TicketResponse(Base):
+    """A public reply from the team on a ticket (spec §66.10). The author's
+    name is not stored: it is read from users.display_name when the board is
+    shown, so renaming someone updates their earlier replies. author_user_id
+    is SET NULL if the user is ever removed, and the reply then shows as "Team"."""
+    __tablename__ = "ticket_responses"
+
+    id             = Column(Integer, primary_key=True)
+    ticket_id      = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False)
+    author_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    body           = Column(Text, nullable=False)
+    created_at     = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at     = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    ticket = relationship("Ticket", back_populates="responses")
+    author = relationship("User", lazy="joined")
+
+    __table_args__ = (
+        CheckConstraint("length(body) > 0 AND length(body) <= 2000", name="ck_ticket_response_length"),
     )
 
 

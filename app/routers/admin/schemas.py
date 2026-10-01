@@ -7,7 +7,7 @@ unchanged" rather than "invalid".
 """
 from typing import Optional
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from services.validators import (
     parse_interval_days, parse_duration_hours, parse_scope,
@@ -199,10 +199,32 @@ class UserTenantPatch(BaseModel):
 
 
 class UserPatch(BaseModel):
-    """Superadmin-only: toggles a User's platform-wide is_superadmin flag.
-    No other User fields are editable here — discord_id/discord_username
+    """Superadmin-only: toggles a User's platform-wide is_superadmin flag
+    and/or sets the display name shown on public feedback responses (spec
+    §66.10). Only fields present are applied. discord_id/discord_username
     come from Discord OAuth and aren't ours to change."""
-    is_superadmin: bool
+    is_superadmin: Optional[bool] = None
+    display_name:  Optional[str] = Field(default=None, max_length=60)
+
+
+class DisplayNameIn(BaseModel):
+    """The caller's own display name. Blank clears it."""
+    display_name: str = Field(max_length=60)
+
+
+class NotificationDestinationIn(BaseModel):
+    """An alliance's Notifications destination (spec §66.1): where reminders
+    go unless an event overrides it. An empty string clears a value."""
+    notification_channel_id: Optional[str] = Field(default=None, max_length=32)
+    notification_role_id:    Optional[str] = Field(default=None, max_length=32)
+
+    @field_validator("notification_channel_id", "notification_role_id")
+    @classmethod
+    def _numeric_id(cls, v):
+        v = (v or "").strip() if v is not None else v
+        if v and not v.isdigit():
+            raise ValueError("A Discord ID is digits only")
+        return v
 
 
 class KingdomInviteIn(BaseModel):
