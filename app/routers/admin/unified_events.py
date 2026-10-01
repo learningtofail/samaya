@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from models import get_db
 from models.db import (
-    AudienceGroup, Event, EventAlliance, EventDestination, EventGroup, EventReminder, EventType, Tenant, User,
+    Event, EventAlliance, EventAudience, EventReminder, EventType, Tenant, User,
 )
 from services.audit import log_change
 from services.db_errors import raise_friendly_integrity_error
@@ -30,7 +30,7 @@ from .deps import (
     resolve_target_tenants,
 )
 from .unified_schemas import (
-    DestinationChangeIn, EventAllianceIn, EventIn, EventPatch, EventPreviewIn, EventTypeIn, EventTypePatch,
+    AudienceChangeIn, EventAllianceIn, EventIn, EventPatch, EventPreviewIn, EventTypeIn, EventTypePatch,
 )
 
 router = APIRouter(prefix="/api")
@@ -97,10 +97,9 @@ def _event_dict(e: Event) -> dict:
             }
             for a in sorted(e.alliances, key=lambda a: a.tenant_id)
         ],
-        "group_ids": sorted(g.group_id for g in e.group_links),
-        "destination_changes": [
-            {"destination_id": d.destination_id, "included": d.included}
-            for d in sorted(e.destination_links, key=lambda d: d.destination_id)
+        "audience_changes": [
+            {"audience_id": a.audience_id, "included": a.included}
+            for a in sorted(e.audience_links, key=lambda a: a.audience_id)
         ],
     }
 
@@ -122,8 +121,7 @@ def _event_audit_snapshot(e: Event) -> dict:
         "mention_role": e.mention_role, "active": e.active,
         "reminder_minutes": sorted((r.minutes_before for r in e.reminders), reverse=True),
         "alliance_tenant_ids": sorted(a.tenant_id for a in e.alliances),
-        "group_ids": sorted(g.group_id for g in e.group_links),
-        "destination_changes": sorted((d.destination_id, d.included) for d in e.destination_links),
+        "audience_changes": sorted((a.audience_id, a.included) for a in e.audience_links),
     }
 
 
@@ -239,7 +237,7 @@ async def delete_event_type(
 
 _EVENT_OPTIONS = (
     selectinload(Event.alliances), selectinload(Event.reminders),
-    selectinload(Event.group_links), selectinload(Event.destination_links),
+    selectinload(Event.audience_links),
 )
 
 
@@ -337,42 +335,29 @@ async def _audience_in_memory(db: AsyncSession, owner: Tenant, scope: str, allia
     return list(found.scalars().all())
 
 
-async def _check_groups(db: AsyncSession, owner: Tenant, group_ids: list[int]) -> None:
-    for gid in group_ids:
-        group = await db.get(AudienceGroup, gid)
-        if group is None or group.kingdom_id != owner.kingdom_id:
-            raise HTTPException(status_code=422, detail=f"Audience group {gid} not found")
-
-
-def _sync_selection(event: Event, group_ids: list[int] | None, changes: list[DestinationChangeIn] | None) -> None:
-    """Edits the event's groups and destination changes in place."""
-    if group_ids is not None:
-        wanted = set(group_ids)
-        for row in [g for g in event.group_links if g.group_id not in wanted]:
-            event.group_links.remove(row)
-        for gid in sorted(wanted - {g.group_id for g in event.group_links}):
-            event.group_links.append(EventGroup(group_id=gid))
-    if changes is not None:
-        wanted_changes = {c.destination_id: c.included for c in changes}
-        for row in [d for d in event.destination_links if d.destination_id not in wanted_changes]:
-            event.destination_links.remove(row)
-        by_dest = {d.destination_id: d for d in event.destination_links}
-        for did, included in wanted_changes.items():
-            if did in by_dest:
-                by_dest[did].included = included
-            else:
-                event.destination_links.append(EventDestination(destination_id=did, included=included))
+def _sync_selection(event: Event, changes: list[AudienceChangeIn] | None) -> None:
+    """Edits the event's per-Audience changes in place."""
+    if changes is None:
+        return
+    wanted = {c.audience_id: c.included for c in changes}
+    for row in [a for a in event.audience_links if a.audience_id not in wanted]:
+        event.audience_links.remove(row)
+    by_audience = {a.audience_id: a for a in event.audience_links}
+    for aid, included in wanted.items():
+        if aid in by_audience:
+            by_audience[aid].included = included
+        else:
+            event.audience_links.append(EventAudience(audience_id=aid, included=included))
 
 
 async def _validate_destinations(db: AsyncSession, owner: Tenant, event: Event) -> None:
     """Spec §67.2 and §67.4: reject a selection the event cannot use, and a
     shared channel whose alliances would get different messages. Nothing is
     saved when this raises."""
-    await _check_groups(db, owner, [g.group_id for g in event.group_links])
     tenants = await _audience_in_memory(db, owner, event.scope, {a.tenant_id for a in event.alliances})
     plan = await plan_destinations(
-        db, tenants=tenants, group_ids=[g.group_id for g in event.group_links],
-        changes={d.destination_id: d.included for d in event.destination_links},
+        db, tenants=tenants, owner=owner,
+        changes={a.audience_id: a.included for a in event.audience_links},
         leadership_only=event.leadership_only, base_message=event.message or "",
         overrides=alliance_overrides(event.alliances),
     )
@@ -452,7 +437,7 @@ async def apply_event_patch(
         # Switching a kingdom-wide event back to a single alliance leaves
         # only the owner as its audience.
         _sync_alliances(event, [EventAlliance(tenant_id=owner.id)])
-    _sync_selection(event, payload.group_ids, payload.destination_changes)
+    _sync_selection(event, payload.audience_changes)
     await _validate_destinations(db, owner, event)
 
 
@@ -505,31 +490,34 @@ async def preview_destinations(
     if payload.scope == "kingdom-wide":
         await check_kingdom_coordinator(db, user, tenant.kingdom_id)
     rows = await _resolve_alliance_rows(db, user, tenant, payload.scope, payload.alliances)
-    await _check_groups(db, tenant, payload.group_ids)
     tenants = await _audience_in_memory(db, tenant, payload.scope, {r.tenant_id for r in rows})
     plan = await plan_destinations(
-        db, tenants=tenants, group_ids=payload.group_ids,
-        changes={c.destination_id: c.included for c in payload.destination_changes},
+        db, tenants=tenants, owner=tenant,
+        changes={c.audience_id: c.included for c in payload.audience_changes},
         leadership_only=payload.leadership_only, base_message=payload.message,
         overrides=alliance_overrides(rows),
     )
-    dest_ids_in_sends = {d.id: send for send in plan.sends for d in send.destinations}
+    send_of = {t.id: send for send in plan.sends for t in send.targets}
     return {
-        "destinations": [
+        "audiences": [
             {
-                "id": d.id, "label": d.label, "tenant_id": d.tenant_id, "alliance": d.tenant.name,
-                "server_name": d.server.name, "channel_id": d.channel_id, "role_id": d.role_id,
-                "post_by_default": d.post_by_default,
-                "shares_channel_with": [
-                    o.label for o in dest_ids_in_sends[d.id].destinations if o.id != d.id
+                "id": a.id, "label": a.label, "kingdom_id": a.kingdom_id, "leadership_only": a.leadership_only,
+                "destinations": [
+                    {"server_name": d.server.name, "channel_id": d.channel_id, "role_id": d.role_id}
+                    for d in a.destinations
                 ],
+                "alliances": sorted({t.tenant.name for t in plan.resolution.targets if t.audience.id == a.id}, key=str.lower),
+                "shares_channel_with": sorted({
+                    o.label for d in a.destinations if d.id in send_of
+                    for o in send_of[d.id].targets if o.audience.id != a.id}),
             }
-            for d in plan.resolution.destinations
+            for a in plan.resolution.audiences
         ],
+        "destination_count": len(plan.resolution.destinations),
         "channel_count": len(plan.sends),
         "conflicts": [c.message() for c in plan.conflicts],
         "problems": plan.problems,
-        "dropped": [d.label for d in plan.resolution.dropped],
+        "dropped": [a.label for a in plan.resolution.dropped],
     }
 
 
@@ -611,8 +599,8 @@ async def create_event(
     )
     event.alliances = await _resolve_alliance_rows(db, user, tenant, payload.scope, payload.alliances)
     event.reminders = _reminder_rows(reminder_minutes)
-    event.group_links, event.destination_links = [], []
-    _sync_selection(event, payload.group_ids, payload.destination_changes)
+    event.audience_links = []
+    _sync_selection(event, payload.audience_changes)
     await _validate_destinations(db, tenant, event)
     db.add(event)
     try:

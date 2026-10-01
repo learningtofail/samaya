@@ -12,14 +12,14 @@ import pytest
 from sqlalchemy import select
 
 from models.db import (
-    Delivery, Destination, DiscordServer, Event, EventAlliance, EventOccurrence, Tenant,
+    Audience, Delivery, DiscordServer, Event, EventAlliance, EventOccurrence, Tenant,
 )
 from services.discord_client import get_discord
 from services.event_engine import (
     STALE_CLAIM_AFTER, process_delivery, run_delivery_tick, run_generation,
 )
 
-from tests.unified_helpers import NOW, UTC, add_destination, change_destination, deliveries, make_event, sync
+from tests.unified_helpers import NOW, UTC, add_audience, change_audience, deliveries, make_event, sync
 
 BASE = "/admin/api"
 
@@ -161,12 +161,12 @@ class TestReminders:
 
     async def test_event_can_swap_the_default_destination_for_another(self, sf, fake, configured):
         event_id = await make_event(sf, configured, mention_role=True)
-        leaders = await add_destination(sf, configured, "leaders", "leader-role", label="Leaders", default=False)
+        leaders = await add_audience(sf, configured, "leaders", "leader-role", label="Leaders", default=False)
         async with sf() as s:
-            default = (await s.execute(select(Destination).where(Destination.label == "Notifications"))).scalar_one()
+            default = (await s.execute(select(Audience).where(Audience.label == "Notifications"))).scalar_one()
             default_id = default.id
-        await change_destination(sf, event_id, leaders, True)
-        await change_destination(sf, event_id, default_id, False)
+        await change_audience(sf, event_id, leaders, True)
+        await change_audience(sf, event_id, default_id, False)
         await sync(sf, event_id)
         await run_delivery_tick(sf, fake, datetime(2026, 10, 2, 18, 0, 30, tzinfo=UTC))
         sends = [c for c in fake.calls if c[0] == "send"]
@@ -225,7 +225,7 @@ class TestTickSafety:
         assert fake.count("send") == 1
 
     async def test_one_failing_delivery_does_not_block_the_rest(self, sf, fake, configured, second_tenant):
-        await add_destination(sf, second_tenant, "chan-nsr")
+        await add_audience(sf, second_tenant, "chan-nsr")
         fake.raise_on_send_to = {"chan-mod"}
         event_id = await make_event(sf, configured, scope="kingdom-wide", interval=None, duration=None)
         await sync(sf, event_id)

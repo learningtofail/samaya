@@ -1,9 +1,9 @@
-// Discord channel and role pickers, used by the destination form on the Setup
-// tab (spec §67). Depends on common.js.
+// Discord channel and role pickers, used by the Audience form on the Setup
+// tab (spec §68). Depends on common.js.
 //
 // Each picker is a <select> filled from GET /api/discord/channels or
-// /api/discord/roles for one alliance and one of its servers (the primary, or
-// a secondary when `serverId` is given). If Discord cannot be reached (no bot
+// /api/discord/roles for one Discord server of the Kingdom (`serverId`),
+// reached through an alliance the user can access (`slug`). If Discord cannot be reached (no bot
 // token, network, permissions) the select is replaced by a plain text input
 // for the numeric ID, so a value can always be typed in.
 
@@ -103,4 +103,30 @@ function mountDiscordPicker(host, opts) {
       }
     },
   };
+}
+
+// Replaces the IDs in `.dest-channel` and `.dest-role` elements (data-slug,
+// data-server, data-channel / data-role) with names once Discord answers. A
+// failure leaves the ID, which is still correct.
+function resolveDestinationNames(host) {
+  host.querySelectorAll('.dest-channel').forEach((el) => {
+    loadDiscordList('channel', el.dataset.slug, el.dataset.server).then(({ items }) => {
+      const hit = items.find((c) => String(c.id) === el.dataset.channel);
+      if (hit) el.textContent = '#' + hit.name;
+    });
+  });
+  host.querySelectorAll('.dest-role').forEach((el) => {
+    loadDiscordList('role', el.dataset.slug, el.dataset.server).then(({ items }) => {
+      const hit = items.find((r) => String(r.id) === el.dataset.role);
+      if (hit) el.textContent = '@' + hit.name;
+    });
+  });
+}
+
+// One destination (server, channel, optional role) as inline HTML.
+function destinationHtml(d, slug) {
+  const role = d.role_id
+    ? ` <span class="samaya-muted dest-role" data-server="${d.server_id}" data-slug="${escapeHtml(slug)}" data-role="${escapeHtml(d.role_id)}">${escapeHtml(d.role_id)}</span>`
+    : '';
+  return `<span class="dest">${serverBadgeHtml(d.server_name, true)} <span class="dest-channel" data-server="${d.server_id}" data-slug="${escapeHtml(slug)}" data-channel="${escapeHtml(d.channel_id)}">${escapeHtml(d.channel_id)}</span>${role}</span>`;
 }

@@ -98,10 +98,12 @@ The log must contain `Samaya scheduler started: daily generation at UTC
 
 ## 9. Configure and re-enter
 
-In the admin console (Setup tab), open each alliance's destinations. The
-migration seeds a "Notifications" destination from each alliance's old channel
-and role, so check it is right (and add secondary servers or more destinations
-if needed). Then create the events from `old_events.csv` and
+In the admin console (Setup tab), open the Audiences panel. The migration
+seeds a "Notifications" audience from each alliance's old channel and role
+(alliances that shared a channel and role share one audience), so check each is
+right, add destinations on other servers if needed, and under "Alliances and
+audiences" confirm which audiences each alliance uses and posts to by default.
+Then create the events from `old_events.csv` and
 `old_announcements.csv`. Each Kingdom already has a "General" event type;
 create the others you want in the Event types tab first.
 

@@ -78,7 +78,7 @@ function shortReminder(m) {
   return m + 'm';
 }
 
-// Audience chips plus a destination count and any warning (spec §67.6).
+// Alliance chips plus an audience and channel count and any warning (spec §68).
 // `audience_tenant_ids` already expands a Kingdom-wide event to every alliance.
 function eventAudienceHtml(ev) {
   const ids = ev.audience_tenant_ids && ev.audience_tenant_ids.length
@@ -90,9 +90,9 @@ function eventAudienceHtml(ev) {
 }
 
 function destinationBadgeHtml(o) {
-  if (o.destination_count === undefined) return '';
-  const text = `${o.destination_count} destination${o.destination_count === 1 ? '' : 's'}`
-    + (o.channel_count !== o.destination_count ? `, ${o.channel_count} channel${o.channel_count === 1 ? '' : 's'}` : '');
+  if (o.audience_count === undefined) return '';
+  const text = `${o.audience_count} audience${o.audience_count === 1 ? '' : 's'}, `
+    + `${o.channel_count} channel${o.channel_count === 1 ? '' : 's'}`;
   const warn = (o.warnings || []).map((w) => `<div class="warn-mark" role="note">Warning: ${escapeHtml(w)}</div>`).join('');
   return `<div class="samaya-muted">${escapeHtml(text)}</div>${warn}`;
 }
@@ -271,10 +271,8 @@ const EVF = {
   reminders: null,
   types: [],
   aud: new Map(),        // slug -> audience row state
-  destAll: [],           // every destination in the Kingdom (spec §67)
-  destChecked: new Map(), // destination id -> ticked, only for ones the user touched or the event stored
-  groups: [],            // audience groups of the Kingdom
-  groupIds: new Set(),
+  audiencesAll: [],      // every Audience of the Kingdom (spec §68)
+  audChecked: new Map(), // Audience id -> ticked, only for ones the user touched or the event stored
   cover: { original: '', current: '' },
   saving: false,
 };
@@ -447,7 +445,7 @@ function renderAudience() {
     ? `This event also includes ${unknown} alliance${unknown === 1 ? '' : 's'} you cannot see. Changing the audience here removes ${unknown === 1 ? 'it' : 'them'}.`
     : '';
   note.classList.toggle('hidden', !unknown);
-  renderDestinations();
+  renderEventAudiences();
 }
 
 function mountAudRow(row) {
@@ -468,7 +466,7 @@ byId('evAudienceList').addEventListener('change', (e) => {
   const box = e.target.closest('input[type="checkbox"][data-slug]');
   if (!box) return;
   EVF.aud.get(box.dataset.slug).included = box.checked;
-  renderDestinations();
+  renderEventAudiences();
 });
 byId('evAudienceList').addEventListener('input', () => schedulePreview());
 
@@ -502,92 +500,70 @@ function audienceTenantIds() {
     .map((t) => t.id);
 }
 
-function destChecked(d) {
-  return EVF.destChecked.has(d.id) ? EVF.destChecked.get(d.id) : d.post_by_default;
+// An Audience is on by default when an alliance taking part in the event
+// uses it by default.
+function audienceDefault(a) {
+  const ids = new Set(audienceTenantIds());
+  return a.links.some((l) => ids.has(l.tenant_id) && l.post_by_default);
 }
 
-// A leadership event only posts to leadership-only destinations, and the
+function audienceChecked(a) {
+  return EVF.audChecked.has(a.id) ? EVF.audChecked.get(a.id) : audienceDefault(a);
+}
+
+// Only Audiences an alliance in the event uses can be chosen.
+function audienceChoices() {
+  const ids = new Set(audienceTenantIds());
+  return EVF.audiencesAll.filter((a) => a.links.some((l) => ids.has(l.tenant_id)));
+}
+
+// A leadership event only posts to leadership-only audiences, and the
 // reverse, so the other kind is shown but cannot be ticked.
-function destUsable(d) {
-  return d.leadership_only === byId('evLeadershipOnly').checked;
+function audienceUsable(a) {
+  return a.leadership_only === byId('evLeadershipOnly').checked;
 }
 
-function renderGroups() {
-  const host = byId('evGroupList');
-  host.innerHTML = EVF.groups.length
-    ? EVF.groups.map((g) => `<label class="check"><input type="checkbox" data-group="${g.id}" ${EVF.groupIds.has(g.id) ? 'checked' : ''}> ${escapeHtml(g.name)} <span class="samaya-muted">${g.destinations.length} destination${g.destinations.length === 1 ? '' : 's'}</span></label>`).join('')
-    : '<p class="samaya-muted">No audience groups yet. A Kingdom coordinator can create them in Setup.</p>';
-}
-
-function renderDestinations() {
-  const host = byId('evDestPanel');
+function renderEventAudiences() {
+  const host = byId('evAudiencePanel');
   if (!host) return;
-  const ids = new Set(audienceTenantIds());
-  const byTenant = new Map();
-  EVF.destAll.filter((d) => ids.has(d.tenant_id)).forEach((d) => {
-    if (!byTenant.has(d.tenant_id)) byTenant.set(d.tenant_id, []);
-    byTenant.get(d.tenant_id).push(d);
-  });
-  const html = Array.from(byTenant.entries()).map(([tenantId, list]) => {
-    const t = tenantById(tenantId);
-    const items = list.map((d) => {
-      const usable = destUsable(d);
-      const primary = !t || d.server_id === t.server_id;
-      const note = usable ? '' : `<span class="samaya-muted">${d.leadership_only ? 'Leadership events only' : 'Not used by a leadership event'}</span>`;
-      return `<li class="dest-list__item">
-        <label class="check"><input type="checkbox" data-dest="${d.id}" ${usable && destChecked(d) ? 'checked' : ''} ${usable ? '' : 'disabled'}> ${escapeHtml(d.label)}</label>
-        ${serverBadgeHtml(d.server_name, primary)}
-        <span class="samaya-muted dest-channel" data-server="${d.server_id}" data-slug="${escapeHtml(d.alliance_slug)}" data-channel="${escapeHtml(d.channel_id)}">${escapeHtml(d.channel_id)}</span>
+  const slug = ownerSlugValue();
+  const choices = audienceChoices();
+  host.innerHTML = choices.length
+    ? `<ul class="dest-list">${choices.map((a) => {
+      const usable = audienceUsable(a);
+      const note = usable ? '' : `<span class="samaya-muted">${a.leadership_only ? 'Leadership events only' : 'Not used by a leadership event'}</span>`;
+      return `<li class="dest-list__item dest-list__item--stack">
+        <label class="check"><input type="checkbox" data-audience="${a.id}" ${usable && audienceChecked(a) ? 'checked' : ''} ${usable ? '' : 'disabled'}> <strong>${escapeHtml(a.label)}</strong></label>
+        <span class="dest-list__destinations">${a.destinations.map((d) => destinationHtml(d, slug)).join(' ')}</span>
         ${note}
-        <span class="samaya-muted" id="evDestShare${d.id}"></span>
+        <span class="samaya-muted" id="evAudShare${a.id}"></span>
       </li>`;
-    }).join('');
-    return `<div class="dest-group"><p class="dest-group__title">${escapeHtml(tenantName(tenantId))}</p><ul class="dest-list">${items}</ul></div>`;
-  }).join('');
-  host.innerHTML = html || '<p class="samaya-muted">The selected alliances have no destinations yet. Add one in Setup.</p>';
-  host.querySelectorAll('.dest-channel').forEach((el) => {
-    loadDiscordList('channel', el.dataset.slug, serverArg(el.dataset.slug, el.dataset.server)).then(({ items }) => {
-      const hit = items.find((c) => String(c.id) === el.dataset.channel);
-      if (hit) el.textContent = '#' + hit.name;
-    });
-  });
+    }).join('')}</ul>`
+    : '<p class="samaya-muted">None of the selected alliances uses an audience yet. Choose one in Setup.</p>';
+  resolveDestinationNames(host);
   schedulePreview();
 }
 
-byId('evDestPanel').addEventListener('change', (e) => {
-  const box = e.target.closest('input[data-dest]');
+byId('evAudiencePanel').addEventListener('change', (e) => {
+  const box = e.target.closest('input[data-audience]');
   if (!box) return;
-  EVF.destChecked.set(parseInt(box.dataset.dest, 10), box.checked);
-  schedulePreview();
-});
-byId('evGroupList').addEventListener('change', (e) => {
-  const box = e.target.closest('input[data-group]');
-  if (!box) return;
-  const id = parseInt(box.dataset.group, 10);
-  if (box.checked) EVF.groupIds.add(id); else EVF.groupIds.delete(id);
+  EVF.audChecked.set(parseInt(box.dataset.audience, 10), box.checked);
   schedulePreview();
 });
 
-// The destination rows that differ from each destination's default, plus any
-// rows for destinations this user cannot see (kept so a save does not drop them).
-function collectDestinationChanges() {
-  const visible = new Set(EVF.destAll.map((d) => d.id));
-  const ids = new Set(audienceTenantIds());
+// The Audience rows that differ from each Audience's default, plus any rows
+// for Audiences this user cannot see (kept so a save does not drop them).
+function collectAudienceChanges() {
+  const visible = new Set(EVF.audiencesAll.map((a) => a.id));
   const out = [];
-  EVF.destAll.filter((d) => ids.has(d.tenant_id) && destUsable(d)).forEach((d) => {
-    const on = destChecked(d);
-    if (on !== d.post_by_default) out.push({ destination_id: d.id, included: on });
+  audienceChoices().filter(audienceUsable).forEach((a) => {
+    const on = audienceChecked(a);
+    if (on !== audienceDefault(a)) out.push({ audience_id: a.id, included: on });
   });
-  (EVF.event ? EVF.event.destination_changes : []).forEach((c) => {
-    if (!visible.has(c.destination_id)) out.push({ destination_id: c.destination_id, included: c.included });
+  (EVF.event ? EVF.event.audience_changes : []).forEach((c) => {
+    if (!visible.has(c.audience_id)) out.push({ audience_id: c.audience_id, included: c.included });
   });
-  return out.sort((a, b) => a.destination_id - b.destination_id);
-}
-
-function collectGroupIds() {
-  const known = new Set(EVF.groups.map((g) => g.id));
-  const keep = (EVF.event ? EVF.event.group_ids : []).filter((id) => !known.has(id));
-  return Array.from(EVF.groupIds).concat(keep).sort((a, b) => a - b);
+  return out.sort((a, b) => a.audience_id - b.audience_id);
 }
 
 let PREVIEW_TIMER = null;
@@ -605,36 +581,30 @@ async function runPreview() {
   const scope = byId('evScope').value;
   const body = {
     scope, leadership_only: byId('evLeadershipOnly').checked, message: EVF.composer ? EVF.composer.value() : '',
-    alliances: collectAudience(scope), group_ids: collectGroupIds(), destination_changes: collectDestinationChanges(),
+    alliances: collectAudience(scope), audience_changes: collectAudienceChanges(),
   };
   try {
     const res = await api('POST', '/api/events/preview-destinations', body, false, ownerSlugValue());
     if (seq === PREVIEW_SEQ) renderPreview(res);
   } catch (e) {
-    if (seq === PREVIEW_SEQ) renderPreview({ destinations: [], channel_count: 0, conflicts: [], problems: [e.message], dropped: [] });
+    if (seq === PREVIEW_SEQ) renderPreview({ audiences: [], destination_count: 0, channel_count: 0, conflicts: [], problems: [e.message], dropped: [] });
   }
 }
 
 function renderPreview(res) {
-  const n = res.destinations.length;
+  const n = res.audiences.length;
   byId('evDestSummary').textContent = n
-    ? `Posts to ${n} destination${n === 1 ? '' : 's'} in ${res.channel_count} channel${res.channel_count === 1 ? '' : 's'}.`
+    ? `Posts to ${n} audience${n === 1 ? '' : 's'} in ${res.channel_count} channel${res.channel_count === 1 ? '' : 's'}.`
     : 'Posts nowhere yet.';
   const issues = res.problems.concat(res.conflicts);
   const box = byId('evDestProblems');
   box.innerHTML = issues.map((m) => `<p class="dest-warning" role="alert">${escapeHtml(m)}</p>`).join('');
   box.classList.toggle('hidden', !issues.length);
-  EVF.destAll.forEach((d) => { const el = byId('evDestShare' + d.id); if (el) el.textContent = ''; });
-  res.destinations.forEach((d) => {
-    const el = byId('evDestShare' + d.id);
-    if (el && d.shares_channel_with.length) el.textContent = `Same channel as ${d.shares_channel_with.join(', ')}: one message, roles combined.`;
+  EVF.audiencesAll.forEach((a) => { const el = byId('evAudShare' + a.id); if (el) el.textContent = ''; });
+  res.audiences.forEach((a) => {
+    const el = byId('evAudShare' + a.id);
+    if (el && a.shares_channel_with.length) el.textContent = `Same channel as ${a.shares_channel_with.join(', ')}: one message, roles combined.`;
   });
-  const own = new Set(EVF.destAll.map((d) => d.id));
-  const extra = res.destinations.filter((d) => !own.has(d.id) || !EVF.destAll.some((x) => x.id === d.id && audienceTenantIds().includes(x.tenant_id)));
-  const hostExtra = byId('evDestExtra');
-  hostExtra.innerHTML = extra.length
-    ? `<p class="dest-group__title">Also from groups</p><ul class="dest-list">${extra.map((d) => `<li class="dest-list__item">${escapeHtml(d.alliance)}: ${escapeHtml(d.label)} ${serverBadgeHtml(d.server_name, true)}</li>`).join('')}</ul>`
-    : '';
 }
 
 // ── Open the form ────────────────────────────────────────────
@@ -645,9 +615,8 @@ async function openEventForm({ mode, event, splitFrom, duplicate }) {
   EVF.splitFrom = splitFrom || null;
   EVF.aud = new Map();
   EVF.touched = new Set();
-  EVF.destChecked = new Map();
-  EVF.groupIds = new Set(event ? event.group_ids : []);
-  if (event) event.destination_changes.forEach((c) => EVF.destChecked.set(c.destination_id, c.included));
+  EVF.audChecked = new Map();
+  if (event) event.audience_changes.forEach((c) => EVF.audChecked.set(c.audience_id, c.included));
   const editing = mode === 'edit' || mode === 'split';
   if (editing || duplicate) ['message', 'calendar', 'recurrence', 'reminders', 'mention'].forEach((f) => EVF.touched.add(f));
 
@@ -684,7 +653,7 @@ async function openEventForm({ mode, event, splitFrom, duplicate }) {
 
   try {
     EVF.types = await loadEventTypesFor(ownerSlugValue());
-    await loadDestinationChoices();
+    await loadAudienceChoices();
   } catch (e) {
     toast('Could not load the form: ' + e.message, true);
     return;
@@ -754,13 +723,8 @@ async function openEventForm({ mode, event, splitFrom, duplicate }) {
   openModalById('eventModal');
 }
 
-async function loadDestinationChoices() {
-  const slug = ownerSlugValue();
-  [EVF.destAll, EVF.groups] = await Promise.all([
-    api('GET', '/api/destinations?kingdom=true', null, false, slug),
-    api('GET', '/api/audience-groups', null, false, slug),
-  ]);
-  renderGroups();
+async function loadAudienceChoices() {
+  EVF.audiencesAll = await api('GET', '/api/audiences', null, false, ownerSlugValue());
 }
 
 function closeEventModal() {
@@ -778,10 +742,9 @@ byId('evOwner').addEventListener('change', async () => {
     EVF.types = types;
     byId('evType').innerHTML = optionsHtml(types.map((t) => ({ value: t.id, label: t.name })), keep);
     applyTypeDefaults();
-    await loadDestinationChoices();
+    await loadAudienceChoices();
   } catch (e) { toast('Could not load event types: ' + e.message, true); }
-  EVF.groupIds = new Set();
-  EVF.destChecked = new Map();
+  EVF.audChecked = new Map();
   renderAudience();
 });
 byId('evScope').addEventListener('change', syncScopeGroups);
@@ -790,7 +753,7 @@ byId('evDuration').addEventListener('input', () => EVF.touched.add('calendar'));
 byId('evRecurrence').addEventListener('change', () => { EVF.touched.add('recurrence'); syncRecurrenceGroups(); });
 byId('evInterval').addEventListener('input', () => EVF.touched.add('recurrence'));
 byId('evMentionRole').addEventListener('change', () => EVF.touched.add('mention'));
-byId('evLeadershipOnly').addEventListener('change', () => { syncLeadershipNote(); renderDestinations(); });
+byId('evLeadershipOnly').addEventListener('change', () => { syncLeadershipNote(); renderEventAudiences(); });
 ['evAnchor', 'evStart'].forEach((id) => byId(id).addEventListener('input', () => {
   if (EVF.composer) EVF.composer.refresh();
 }));
@@ -848,7 +811,7 @@ function collectEventForm() {
     message: EVF.composer.value(), anchor_date: anchor, start_time_utc: start,
     duration_hours: duration, recurrence_kind: repeats ? 'interval_days' : 'none',
     interval_days: interval, until_date: until, reminder_minutes: EVF.reminders.value(),
-    alliances: audience, group_ids: collectGroupIds(), destination_changes: collectDestinationChanges(),
+    alliances: audience, audience_changes: collectAudienceChanges(),
     ownerSlug: ownerSlugValue(),
   };
 }
@@ -891,8 +854,7 @@ function buildEventChanges(orig, f, skipAnchor) {
   if ((f.until_date || null) !== (orig.until_date || null)) c.until_date = f.until_date;
   if (JSON.stringify(f.reminder_minutes) !== JSON.stringify(orig.reminder_minutes)) c.reminder_minutes = f.reminder_minutes;
   if (formAudienceKey(f) !== origAudienceKey(orig, f.scope)) c.alliances = f.alliances;
-  if (JSON.stringify(f.group_ids) !== JSON.stringify(orig.group_ids)) c.group_ids = f.group_ids;
-  if (JSON.stringify(f.destination_changes) !== JSON.stringify(orig.destination_changes)) c.destination_changes = f.destination_changes;
+  if (JSON.stringify(f.audience_changes) !== JSON.stringify(orig.audience_changes)) c.audience_changes = f.audience_changes;
   if (EVF.cover.current !== (orig.cover_image_data || '')) c.cover_image_data = EVF.cover.current;
   return c;
 }
@@ -912,7 +874,7 @@ async function saveEventForm() {
         message: f.message, duration_hours: f.duration_hours, recurrence_kind: f.recurrence_kind,
         interval_days: f.interval_days, until_date: f.until_date, mention_role: f.mention_role,
         reminder_minutes: f.reminder_minutes, alliances: f.alliances,
-        group_ids: f.group_ids, destination_changes: f.destination_changes,
+        audience_changes: f.audience_changes,
       };
       if (EVF.cover.current) payload.cover_image_data = EVF.cover.current;
       await api('POST', '/api/events', payload, false, f.ownerSlug);

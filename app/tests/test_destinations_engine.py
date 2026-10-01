@@ -1,13 +1,13 @@
-"""Spec §67: destination resolution, deduplication and conflicts in the
+"""Spec §67 and §68: Audience resolution, deduplication and conflicts in the
 delivery engine, against a fake Discord client."""
 from datetime import datetime
 
 from sqlalchemy import select
 
-from models.db import AudienceGroup, AudienceGroupDestination, Delivery, EventAlliance, EventGroup
+from models.db import AudienceDestination, Delivery, EventAlliance
 from services.event_engine import run_delivery_tick
 from tests.unified_helpers import (
-    NOW, UTC, add_destination, change_destination, deliveries, make_event, sync,
+    NOW, UTC, add_audience, change_audience, deliveries, link_audience, make_event, sync,
 )
 
 AT = datetime(2026, 10, 2, 18, 0, 30, tzinfo=UTC)  # an hour before the 19:00 start, 30s in
@@ -15,8 +15,8 @@ AT = datetime(2026, 10, 2, 18, 0, 30, tzinfo=UTC)  # an hour before the 19:00 st
 
 async def _shared_channel_setup(sf, tenant, second_tenant, **event_kw):
     """MOD and NSR both post to channel `shared` on MOD's server, each with its own role."""
-    await add_destination(sf, tenant, "shared", "role-mod")
-    await add_destination(sf, second_tenant, "shared", "role-nsr", server_id=tenant["server_id"])
+    await add_audience(sf, tenant, "shared", "role-mod")
+    await add_audience(sf, second_tenant, "shared", "role-nsr", server_id=tenant["server_id"])
     return await make_event(sf, tenant, audience=[tenant["id"], second_tenant["id"]], **event_kw)
 
 
@@ -52,27 +52,27 @@ class TestSharedChannelIsOneSend:
         assert fake.count("send") == 2
 
     async def test_the_same_channel_name_on_another_server_is_not_merged(self, sf, fake, tenant, second_tenant):
-        await add_destination(sf, tenant, "shared")
-        await add_destination(sf, second_tenant, "shared")  # NSR's own server
+        await add_audience(sf, tenant, "shared")
+        await add_audience(sf, second_tenant, "shared")  # NSR's own server
         event_id = await make_event(sf, tenant, audience=[tenant["id"], second_tenant["id"]])
         await sync(sf, event_id)
         await run_delivery_tick(sf, fake, AT)
         assert fake.count("send") == 2
 
     async def test_distinct_channels_get_their_own_messages(self, sf, fake, tenant, second_tenant):
-        await add_destination(sf, tenant, "chan-a")
-        await add_destination(sf, second_tenant, "chan-b")
+        await add_audience(sf, tenant, "chan-a")
+        await add_audience(sf, second_tenant, "chan-b")
         event_id = await make_event(sf, tenant, audience=[tenant["id"], second_tenant["id"]])
         await sync(sf, event_id)
         await run_delivery_tick(sf, fake, AT)
         assert sorted(c[1] for c in fake.calls if c[0] == "send") == ["chan-a", "chan-b"]
 
     async def test_a_destination_joining_an_already_sent_message_is_not_sent_again(self, sf, fake, tenant, second_tenant):
-        await add_destination(sf, tenant, "shared", "role-mod")
+        await add_audience(sf, tenant, "shared", "role-mod")
         event_id = await make_event(sf, tenant, audience=[tenant["id"], second_tenant["id"]])
         await sync(sf, event_id)
         await run_delivery_tick(sf, fake, AT)
-        await add_destination(sf, second_tenant, "shared", server_id=tenant["server_id"])
+        await add_audience(sf, second_tenant, "shared", server_id=tenant["server_id"])
         await sync(sf, event_id, now=AT)
         await run_delivery_tick(sf, fake, AT)
         assert fake.count("send") == 1
@@ -82,53 +82,65 @@ class TestSharedChannelIsOneSend:
 
 class TestResolution:
     async def test_default_destinations_of_every_audience_alliance(self, sf, fake, tenant, second_tenant):
-        await add_destination(sf, tenant, "a")
-        await add_destination(sf, tenant, "extra", label="Extra", default=False)
-        await add_destination(sf, second_tenant, "b")
+        await add_audience(sf, tenant, "a")
+        await add_audience(sf, tenant, "extra", label="Extra", default=False)
+        await add_audience(sf, second_tenant, "b")
         event_id = await make_event(sf, tenant, audience=[tenant["id"], second_tenant["id"]])
         await sync(sf, event_id)
         await run_delivery_tick(sf, fake, AT)
         assert sorted(c[1] for c in fake.calls if c[0] == "send") == ["a", "b"]
 
     async def test_opt_out_and_add(self, sf, fake, tenant):
-        default = await add_destination(sf, tenant, "a")
-        extra = await add_destination(sf, tenant, "extra", label="Extra", default=False)
+        default = await add_audience(sf, tenant, "a")
+        extra = await add_audience(sf, tenant, "extra", label="Extra", default=False)
         event_id = await make_event(sf, tenant)
-        await change_destination(sf, event_id, default, False)
-        await change_destination(sf, event_id, extra, True)
+        await change_audience(sf, event_id, default, False)
+        await change_audience(sf, event_id, extra, True)
         await sync(sf, event_id)
         await run_delivery_tick(sf, fake, AT)
         assert [c[1] for c in fake.calls if c[0] == "send"] == ["extra"]
 
-    async def test_group_expands_into_its_destinations_and_follows_edits(self, sf, fake, tenant, second_tenant):
-        mine = await add_destination(sf, tenant, "mine")
-        theirs = await add_destination(sf, second_tenant, "theirs", label="Theirs", default=False)
-        async with sf() as s:
-            group = AudienceGroup(kingdom_id=tenant["kingdom_id"], name="Everyone")
-            s.add(group)
-            await s.flush()
-            s.add(AudienceGroupDestination(group_id=group.id, destination_id=theirs))
-            event_id = await make_event(sf, tenant)
-            s.add(EventGroup(event_id=event_id, group_id=group.id))
-            await s.commit()
-            group_id = group.id
+    async def test_audience_with_several_destinations_posts_to_each_and_follows_edits(self, sf, fake, tenant, second_tenant):
+        everyone = await add_audience(
+            sf, tenant, "mine", label="Everyone", default=False,
+            also=[(second_tenant["server_id"], "theirs", "")],
+        )
+        event_id = await make_event(sf, tenant)
+        await change_audience(sf, event_id, everyone, True)
         await sync(sf, event_id)
         await run_delivery_tick(sf, fake, AT)
-        assert sorted(c[1] for c in fake.calls if c[0] == "send") == ["mine", "theirs"]
-        assert mine
+        assert sorted((c[1]) for c in fake.calls if c[0] == "send") == ["mine", "theirs"]
 
-        # Removing a member removes it from pending deliveries on the next sync.
+        # Removing a destination removes it from pending deliveries on the next sync.
         later = await make_event(sf, tenant, name="Later", anchor=datetime(2026, 10, 9).date())
-        async with sf() as s:
-            s.add(EventGroup(event_id=later, group_id=group_id))
-            await s.commit()
+        await change_audience(sf, later, everyone, True)
         await sync(sf, later)
         async with sf() as s:
-            await s.execute(AudienceGroupDestination.__table__.delete())
+            row = (await s.execute(select(AudienceDestination).where(AudienceDestination.channel_id == "theirs"))).scalar_one()
+            keep = (await s.execute(select(AudienceDestination).where(AudienceDestination.channel_id == "mine"))).scalar_one()
+            await s.delete(row)
+            keep_id = keep.id
             await s.commit()
         await sync(sf, later)
         pending = [r for r in await deliveries(sf, later, kind="reminder") if r.status == "pending"]
-        assert {r.destination_id for r in pending} == {mine}
+        assert {r.destination_id for r in pending} == {keep_id}
+
+    async def test_one_audience_linked_to_two_alliances_is_one_message(self, sf, fake, tenant, second_tenant):
+        shared = await add_audience(sf, tenant, "shared", "role-lead", label="Leadership")
+        await link_audience(sf, shared, second_tenant["id"])
+        event_id = await make_event(sf, tenant, audience=[tenant["id"], second_tenant["id"]], message="For {alliance_name}", mention_role=True)
+        await sync(sf, event_id)
+        await run_delivery_tick(sf, fake, AT)
+        sends = [c for c in fake.calls if c[0] == "send"]
+        assert len(sends) == 1 and sends[0][2] == "<@&role-lead> For MOD, NSR"
+
+    async def test_two_audiences_sharing_a_channel_are_one_message(self, sf, fake, tenant):
+        await add_audience(sf, tenant, "shared", label="One")
+        await add_audience(sf, tenant, "shared", label="Two")
+        event_id = await make_event(sf, tenant)
+        await sync(sf, event_id)
+        await run_delivery_tick(sf, fake, AT)
+        assert fake.count("send") == 1
 
     async def test_no_destination_records_why_nothing_was_sent(self, sf, fake, tenant):
         event_id = await make_event(sf, tenant)
@@ -141,8 +153,8 @@ class TestResolution:
 
 class TestLeadership:
     async def test_a_leadership_event_posts_only_to_leadership_only_destinations(self, sf, fake, tenant):
-        await add_destination(sf, tenant, "public")
-        await add_destination(sf, tenant, "leaders", label="Leaders", leadership=True, default=True)
+        await add_audience(sf, tenant, "public")
+        await add_audience(sf, tenant, "leaders", label="Leaders", leadership=True, default=True)
         event_id = await make_event(sf, tenant, leadership_only=True)
         await sync(sf, event_id)
         await run_delivery_tick(sf, fake, AT)
@@ -150,16 +162,16 @@ class TestLeadership:
         assert fake.count("create") == 0  # never a Scheduled Event
 
     async def test_an_ordinary_event_never_reaches_a_leadership_only_destination(self, sf, fake, tenant):
-        await add_destination(sf, tenant, "public")
-        leaders = await add_destination(sf, tenant, "leaders", label="Leaders", leadership=True)
+        await add_audience(sf, tenant, "public")
+        leaders = await add_audience(sf, tenant, "leaders", label="Leaders", leadership=True)
         event_id = await make_event(sf, tenant)
-        await change_destination(sf, event_id, leaders, True)  # even if asked for directly
+        await change_audience(sf, event_id, leaders, True)  # even if asked for directly
         await sync(sf, event_id)
         await run_delivery_tick(sf, fake, AT)
         assert [c[1] for c in fake.calls if c[0] == "send"] == ["public"]
 
     async def test_a_leadership_event_with_no_leadership_destination_errors_clearly(self, sf, fake, tenant):
-        await add_destination(sf, tenant, "public")
+        await add_audience(sf, tenant, "public")
         event_id = await make_event(sf, tenant, leadership_only=True)
         await sync(sf, event_id)
         await run_delivery_tick(sf, fake, AT)
@@ -215,7 +227,7 @@ class TestScheduledEvents:
         async with sf() as s:
             (await s.get(Tenant, second_tenant["id"])).server_id = tenant["server_id"]
             await s.commit()
-        await add_destination(sf, tenant, "chan")
+        await add_audience(sf, tenant, "chan")
         event_id = await make_event(sf, tenant, audience=[tenant["id"], second_tenant["id"]], reminders=(), interval=None)
         await sync(sf, event_id)
         await run_delivery_tick(sf, fake, NOW)
@@ -250,7 +262,7 @@ class TestAudienceNamesInScheduledEventDescription:
 
 
 async def test_delivery_rows_snapshot_where_they_were_planned(sf, tenant):
-    await add_destination(sf, tenant, "chan-snap")
+    await add_audience(sf, tenant, "chan-snap")
     event_id = await make_event(sf, tenant)
     await sync(sf, event_id)
     row = (await deliveries(sf, event_id, kind="reminder"))[0]

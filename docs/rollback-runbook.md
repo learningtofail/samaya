@@ -85,9 +85,19 @@ Additive, so `alembic downgrade a1f0c0de0003` is safe: it drops the new tables
 and delivery columns and restores the old unique constraint. Destinations,
 groups and secondary servers created since are lost, and the old per-event
 channel overrides are not restored (they were never deleted from
-`event_alliances`, so the old code still reads them). Revision `0005`, which
+`event_alliances`, so the old code still reads them). Revision `0006`, which
 drops those legacy columns, is destructive and has no downgrade: take a backup
 first.
+
+### Revision `a1f0c0de0005` (audiences)
+
+Merges identical per-alliance destinations into Kingdom-owned Audiences and
+turns audience groups into Audiences. Take an `ops/backup.sh` dump first.
+`alembic downgrade a1f0c0de0004` splits each Audience back into one destination
+per linked alliance and channel, but does **not** rebuild audience groups
+(a group that became an Audience returns as plain destinations), and a delivery
+whose alliance has no copy of its destination is pointed at the first copy.
+If the result is not acceptable, restore the backup instead.
 
 ## Restoring from backup
 

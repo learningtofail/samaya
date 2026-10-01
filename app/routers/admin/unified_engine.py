@@ -15,7 +15,7 @@ from sqlalchemy.orm import aliased
 
 from models import get_db
 from models.db import (
-    Delivery, Event, EventAlliance, EventDestination, EventGroup, EventOccurrence, EventReminder, Tenant, User,
+    Delivery, Event, EventAlliance, EventAudience, EventOccurrence, EventReminder, Tenant, User,
 )
 from services.audit import log_change
 from services.db_errors import raise_friendly_integrity_error
@@ -90,14 +90,14 @@ def _delivery_dict(d: Delivery, occ: EventOccurrence, event: Event, tenant: Tena
         "detail":             d.detail,
         "discord_event_id":   d.discord_event_id,
         "posted_at_utc":      _iso(d.posted_at_utc),
-        "destination_label":  d.destination.label if d.destination is not None else None,
+        "audience_label":     d.destination.audience.label if d.destination is not None else None,
         "channel_id":         d.channel_id or None,
         "guild_id":           d.guild_id or None,
         "merged_into_id":     d.merged_into_id,
         "members": [
             {
                 "id": m.id, "tenant_name": t.name, "status": m.status, "detail": m.detail,
-                "destination_label": m.destination.label if m.destination is not None else None,
+                "audience_label": m.destination.audience.label if m.destination is not None else None,
                 "channel_id": m.channel_id or None,
             }
             for m, t in members
@@ -291,9 +291,8 @@ async def split_event(
     new_event.alliances = [
         EventAlliance(tenant_id=a.tenant_id, message_override=a.message_override) for a in event.alliances
     ]
-    new_event.group_links = [EventGroup(group_id=g.group_id) for g in event.group_links]
-    new_event.destination_links = [
-        EventDestination(destination_id=d.destination_id, included=d.included) for d in event.destination_links
+    new_event.audience_links = [
+        EventAudience(audience_id=a.audience_id, included=a.included) for a in event.audience_links
     ]
     event.until_date = payload.from_date - timedelta(days=1)
     db.add(new_event)

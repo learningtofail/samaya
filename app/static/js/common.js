@@ -552,10 +552,3 @@ function isKingdomCoordinator(kingdomId) {
   return isSuperadmin() || !!(ME && ME.kingdom_ids && ME.kingdom_ids.includes(kingdomId));
 }
 
-// The servers an alliance may send to: its primary first, then secondaries.
-function allowedServers(tenant) {
-  if (!tenant) return [];
-  const list = [{ id: tenant.server_id, name: tenant.server_name, primary: true }];
-  (tenant.secondary_servers || []).forEach((s) => list.push({ id: s.id, name: s.name, primary: false }));
-  return list;
-}
