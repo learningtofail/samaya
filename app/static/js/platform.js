@@ -235,7 +235,7 @@ async function loadPlatformTenants() {
           ${platformCell('Alliance', `${t.icon_image_data ? `<img class="tenant-icon" src="${escapeHtml(t.icon_image_data)}" alt="">` : `<span class="type-chip__dot" data-color="${escapeHtml(t.color)}"></span>`} ${escapeHtml(t.name)}`)}
           ${platformCell('Slug', escapeHtml(t.slug))}
           ${platformCell('Kingdom', escapeHtml(names[t.kingdom_id] || String(t.kingdom_id)))}
-          ${platformCell('Discord server (primary)', `${escapeHtml(t.server_name)}<div class="samaya-muted">${escapeHtml(t.guild_id)}</div>`)}
+          ${platformCell('Discord server(s)', `<div><span class="samaya-muted">Primary:</span> ${escapeHtml(t.server_name)}</div><div class="samaya-muted">${escapeHtml(t.guild_id)}</div>`)}
           ${platformCell('Actions', actionButton('Edit', 'edit', { id: t.id }))}
         </tr>`).join('')
       : emptyRow(5, 'No alliances yet.');

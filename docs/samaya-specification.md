@@ -1760,7 +1760,7 @@ Routes (all under `/admin`, tenant by `X-Tenant-Slug`; `*` is read-only):
 - `GET /api/discord/channels` and `/roles` keep the existing fallback to a text field when Discord is unreachable.
 
 Console:
-- **Setup, alliances:** a Discord server (primary) field and a Secondary servers list (both editable by a superadmin, read-only for owners) and a Destinations table: label, server, channel, role, Post by default, Leadership only, with add, edit and delete.
+- **Setup, alliances:** a "Discord server(s)" column. Each alliance shows exactly one line "Primary: <name>" (guild ID beneath) and, when it has any, one "Secondary: <name>" line per secondary server, with no limit on how many. Editing an alliance sets the single primary and a multi-select of secondaries (a superadmin edits both; owners see them read-only) and a Destinations table: label, server, channel, role, Post by default, Leadership only, with add, edit and delete.
 - **Setup, audience groups** (visible to kingdom coordinators and superadmins): name, description and a destination picker grouped by alliance.
 - **Events form:** the audience stays; a Destinations panel lists the resolved destinations grouped by alliance (default ones ticked; unticking opts out; other destinations of audience alliances can be ticked in), a Groups multi-select, and a one-line summary "Posts to N destinations in M channels". Conflicts show inline.
 - **Events and Schedule:** one row per event or occurrence. Audience chips, a "N destinations" badge, a Leadership badge and a warning marker. No row per alliance or per channel.
