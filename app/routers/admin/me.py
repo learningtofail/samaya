@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
-from models.db import User, UserTenant
+from models.db import User, UserKingdom, UserTenant
 from services.audit import log_change
 
 from .deps import get_current_user
@@ -20,12 +20,14 @@ router = APIRouter()
 async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(UserTenant).where(UserTenant.user_id == user.id))
     grants = result.scalars().all()
+    kingdoms = (await db.execute(select(UserKingdom.kingdom_id).where(UserKingdom.user_id == user.id))).scalars().all()
     return {
         "id":               user.id,
         "discord_username": user.discord_username,
         "display_name":     user.display_name,
         "is_superadmin":    user.is_superadmin,
         "tenant_roles":      {g.tenant_id: g.role for g in grants},
+        "kingdom_ids":       sorted(kingdoms),
     }
 
 

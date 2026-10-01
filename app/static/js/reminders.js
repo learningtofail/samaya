@@ -35,7 +35,7 @@ function createReminderEditor(host, opts) {
           <button type="button" class="pf-v6-c-button pf-m-secondary" id="${p}AddCustom">Add</button>
         </div>
       </div>
-      <p class="reminders__help">Each reminder posts to the alliance's Notifications channel (or the event's override) that many minutes before the start. 0 means at the start. Up to ${REMINDER_MAX_COUNT}, at most 4 weeks ahead.</p>
+      <p class="reminders__help">Each reminder posts to each selected destination that many minutes before the start. 0 means at the start. Up to ${REMINDER_MAX_COUNT}, at most 4 weeks ahead.</p>
     </div>`;
 
   const chips = document.getElementById(p + 'Chips');

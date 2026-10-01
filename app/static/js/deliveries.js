@@ -1,6 +1,9 @@
-// Delivery log tab (#v-delivery, spec §66.7): a health card for the delivery
-// engine and a filterable table of every Discord post it has made or tried to
-// make, with the reason on each row and Retry for ones that failed.
+// Delivery log tab (#v-delivery, spec §66.7 and §67.3): a health card for the
+// delivery engine and a filterable table of every Discord post it has made or
+// tried to make, with the reason on each row and Retry for ones that failed.
+// One line is one send. When several alliances' destinations shared a channel
+// (or a Discord event) the engine sent once, and the line lists the merged
+// destinations underneath.
 // Depends on common.js.
 
 let DELIVERIES = [];
@@ -71,17 +74,26 @@ function deliveryStatusLabel(status) {
   return pfLabel(status, color);
 }
 
+function deliveryMembersHtml(d) {
+  if (!d.members || !d.members.length) return '';
+  const items = d.members.map((m) => `<li>${escapeHtml(m.tenant_name)}${m.destination_label ? `, ${escapeHtml(m.destination_label)}` : ''}: ${escapeHtml(m.status)}${m.detail ? ` (${escapeHtml(m.detail)})` : ''}</li>`).join('');
+  return `<details class="delivery-merged"><summary>Merged with ${d.members.length} other destination${d.members.length === 1 ? '' : 's'}</summary><ul class="delivery-members">${items}</ul></details>`;
+}
+
 function buildDeliveryRow(d) {
   const canRetry = d.status === 'error' && canWriteAnywhere();
   const action = canRetry
     ? `<button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="retry" data-id="${d.id}" data-slug="${escapeHtml(d.tenant_slug)}">Retry</button>`
     : '';
+  const merged = d.members && d.members.length;
+  const names = (d.alliance_names && d.alliance_names.length ? d.alliance_names : [d.tenant_name]).join(', ');
+  const target = d.destination_label ? `<div class="samaya-muted">${escapeHtml(d.destination_label)}</div>` : '';
   return `<tr class="pf-v6-c-table__tr">
     <td class="pf-v6-c-table__td" data-label="Due">${escapeHtml(fmtDateTime(d.due_at_utc))}</td>
     <td class="pf-v6-c-table__td" data-label="Event"><strong>${escapeHtml(d.event_name)}</strong><div class="samaya-muted">${escapeHtml(d.occurrence_date)}</div></td>
-    <td class="pf-v6-c-table__td" data-label="Alliance and kind">${escapeHtml(d.tenant_name)}<div class="samaya-muted">${escapeHtml(deliveryKindText(d))}</div></td>
+    <td class="pf-v6-c-table__td" data-label="Alliance and kind">${escapeHtml(names)}${merged ? ` ${pfLabel('Merged', 'pf-m-blue')}` : ''}${target}<div class="samaya-muted">${escapeHtml(deliveryKindText(d))}</div></td>
     <td class="pf-v6-c-table__td" data-label="Status">${deliveryStatusLabel(d.status)}</td>
-    <td class="pf-v6-c-table__td" data-label="Detail">${d.detail ? escapeHtml(d.detail) : '<span class="samaya-muted">None</span>'}</td>
+    <td class="pf-v6-c-table__td" data-label="Detail">${d.detail ? escapeHtml(d.detail) : '<span class="samaya-muted">None</span>'}${deliveryMembersHtml(d)}</td>
     <td class="pf-v6-c-table__td" data-label="Actions">${action}</td>
   </tr>`;
 }

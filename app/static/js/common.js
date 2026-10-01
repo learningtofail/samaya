@@ -505,14 +505,23 @@ function describeRecurrence(ev) {
 // ── Kingdom names (for the {kingdom_name} placeholder preview) ─
 let KINGDOM_NAMES_CACHE = null;
 
-async function ensureKingdomNamesLoaded() {
-  if (KINGDOM_NAMES_CACHE) return KINGDOM_NAMES_CACHE;
-  KINGDOM_NAMES_CACHE = {};
-  try {
-    const kingdoms = await api('GET', '/api/kingdoms', null, /*skipTenantHeader=*/true);
-    kingdoms.forEach((k) => { KINGDOM_NAMES_CACHE[k.id] = k.name; });
-  } catch { /* the preview just shows a blank kingdom name */ }
-  return KINGDOM_NAMES_CACHE;
+let KINGDOM_NAMES_PROMISE = null;
+
+// Caches the in-flight request, so two callers at once both wait for the names.
+function ensureKingdomNamesLoaded() {
+  if (KINGDOM_NAMES_CACHE) return Promise.resolve(KINGDOM_NAMES_CACHE);
+  if (!KINGDOM_NAMES_PROMISE) {
+    KINGDOM_NAMES_PROMISE = api('GET', '/api/kingdoms', null, /*skipTenantHeader=*/true)
+      .then((kingdoms) => {
+        const names = {};
+        kingdoms.forEach((k) => { names[k.id] = k.name; });
+        KINGDOM_NAMES_CACHE = names;
+        return names;
+      })
+      .catch(() => ({})) // the preview just shows a blank kingdom name
+      .finally(() => { KINGDOM_NAMES_PROMISE = null; });
+  }
+  return KINGDOM_NAMES_PROMISE;
 }
 
 // Reads an image file as a data URI for the cover image / alliance icon
@@ -530,4 +539,23 @@ function readImageFile(file, maxBytes) {
     reader.onerror = () => { toast('Could not read that image file', true); resolve(''); };
     reader.readAsDataURL(file);
   });
+}
+
+// ── Destinations (spec §67) ──────────────────────────────────
+// Text plus a BEM badge, never colour alone: primary is neutral, a secondary
+// server gets an outlined "secondary" badge.
+function serverBadgeHtml(serverName, isPrimary) {
+  return `<span class="server-badge${isPrimary ? '' : ' server-badge--secondary'}">${escapeHtml(serverName)}${isPrimary ? '' : ' <span class="server-badge__tag">secondary</span>'}</span>`;
+}
+
+function isKingdomCoordinator(kingdomId) {
+  return isSuperadmin() || !!(ME && ME.kingdom_ids && ME.kingdom_ids.includes(kingdomId));
+}
+
+// The servers an alliance may send to: its primary first, then secondaries.
+function allowedServers(tenant) {
+  if (!tenant) return [];
+  const list = [{ id: tenant.server_id, name: tenant.server_name, primary: true }];
+  (tenant.secondary_servers || []).forEach((s) => list.push({ id: s.id, name: s.name, primary: false }));
+  return list;
 }

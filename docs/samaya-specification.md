@@ -8,6 +8,8 @@
 
 This part describes Samaya as it exists now. It is rewritten when the system changes, so it is the place to start. The numbered sections in Part II explain why each piece was built and are not edited to track later changes, except for short corrections.
 
+**Destinations (§67).** Where an event posts is no longer a per-alliance Notifications channel with per-event overrides. An alliance owns destinations (server, channel, optional role), Kingdom coordinators define audience groups, reminders to the same guild, channel and offset merge into one message, and a server belongs to one Kingdom. Wherever Part I or Part II mention `notification_channel_id`, per-event channel overrides or `PUT /api/notification-destination`, §67 wins; the old columns stay until revision `a1f0c0de0005`.
+
 ## CS.1 What the system is
 
 A self-hosted, multi-tenant event scheduler for the Kingshot community on Kingdom 138. Each alliance is a tenant. Coordinators define **events** (a calendar event with a duration, or a plain message with none), each with one **event type** that sets its label and color. The delivery engine generates occurrences, creates Discord Scheduled Events for events with a duration, and sends reminders and messages to each alliance's notification channel. Public pages and ICS feeds show what is public, and a public feedback board takes requests and error reports. §66 is the design record.

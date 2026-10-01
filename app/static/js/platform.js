@@ -1,5 +1,6 @@
 // Setup tab, "Platform" sections (superadmin only): Kingdoms and their
-// coordinators, Discord servers, alliances (tenants) and users.
+// coordinators, Discord servers (each in one Kingdom), alliances (tenants) with
+// their primary and secondary servers, and users.
 // Depends on common.js.
 
 async function loadPlatform() {
@@ -22,48 +23,67 @@ let DISCORD_SERVERS = [];
 async function loadPlatformDiscordServers() {
   try {
     DISCORD_SERVERS = await api('GET', '/api/discord-servers', null, true);
+    const kingdomNames = await ensureKingdomNamesLoaded();
     byId('discordServersBody').innerHTML = DISCORD_SERVERS.length
       ? DISCORD_SERVERS.map((s) => `<tr class="pf-v6-c-table__tr">
           ${platformCell('Name', escapeHtml(s.name))}
+          ${platformCell('Kingdom', escapeHtml(kingdomNames[s.kingdom_id] || String(s.kingdom_id)))}
           ${platformCell('Guild ID', `<span class="samaya-muted">${escapeHtml(s.guild_id)}</span>`)}
           ${platformCell('Bot', s.has_own_bot_token ? 'Own bot' : 'Platform bot')}
           ${platformCell('Actions', actionButton('Edit', 'edit', { id: s.id }))}
         </tr>`).join('')
-      : emptyRow(4, 'No Discord servers yet.');
+      : emptyRow(5, 'No Discord servers yet.');
   } catch (e) { toast(e.message, true); }
 }
 
-async function createDiscordServer() {
-  const name = prompt('Discord server name (for example "HTD"):');
-  if (!name) return;
-  const guildId = prompt('Discord guild (server) ID:');
-  if (!guildId) return;
-  const botToken = prompt('Bot token for this server (leave blank to use the shared platform bot):', '');
-  try {
-    await api('POST', '/api/discord-servers', { name, guild_id: guildId, bot_token: botToken || null }, true);
-    toast('Discord server created. It can now be assigned to an alliance.');
-    loadPlatformDiscordServers();
-  } catch (e) { toast(e.message, true); }
+async function openServerForm(s) {
+  const kingdoms = await api('GET', '/api/kingdoms', null, true);
+  if (!kingdoms.length) { toast('Create a kingdom first', true); return; }
+  byId('serverModalTitleText').textContent = s ? 'Edit Discord server' : 'New Discord server';
+  byId('srvId').value = s ? s.id : '';
+  byId('srvName').value = s ? s.name : '';
+  byId('srvGuild').value = s ? s.guild_id : '';
+  byId('srvKingdom').innerHTML = optionsHtml(kingdoms.map((k) => ({ value: k.id, label: k.name })), s ? s.kingdom_id : kingdoms[0].id);
+  byId('srvToken').value = '';
+  byId('srvClearToken').checked = false;
+  byId('srvClearGroup').classList.toggle('hidden', !(s && s.has_own_bot_token));
+  byId('srvTokenHelp').textContent = s && s.has_own_bot_token
+    ? 'This server has its own bot token. Leave blank to keep it, or paste a new one.'
+    : 'Leave blank to use the shared platform bot, or paste a token to give this server its own. The token is never shown again.';
+  openModalById('serverModal');
 }
 
-// Cancel on any one field leaves it unchanged. bot_token is write-only (never
-// returned by the API), so it cannot be pre-filled.
-async function editDiscordServer(s) {
-  const name = prompt('Server name:', s.name);
-  const guildId = name !== null ? prompt('Discord guild (server) ID:', s.guild_id) : null;
-  const tokenNote = s.has_own_bot_token
-    ? 'This server has its own bot token. Leave blank to keep it, or type CLEAR to remove it and use the shared platform bot.'
-    : 'This server uses the shared platform bot. Leave blank to keep that, or paste a bot token to give it its own.';
-  const tokenInput = guildId !== null ? prompt(tokenNote, '') : null;
-  const payload = {};
-  if (name !== null && name !== s.name) payload.name = name;
-  if (guildId !== null && guildId !== s.guild_id) payload.guild_id = guildId;
-  if (tokenInput !== null && tokenInput !== '') payload.bot_token = tokenInput.trim().toUpperCase() === 'CLEAR' ? '' : tokenInput.trim();
-  if (!Object.keys(payload).length) { toast('No changes made'); return; }
+function closeServerModal() {
+  closeModalById('serverModal');
+}
+
+// bot_token is write-only (never returned by the API), so it cannot be
+// pre-filled. An empty string clears it back to the platform bot.
+async function saveServerModal() {
+  const id = byId('srvId').value;
+  const name = byId('srvName').value.trim();
+  const guildId = byId('srvGuild').value.trim();
+  const kingdomId = parseInt(byId('srvKingdom').value, 10);
+  const token = byId('srvToken').value.trim();
+  if (!name || !guildId) { toast('Name and guild ID are required', true); return; }
   try {
-    await api('PATCH', `/api/discord-servers/${s.id}`, payload, true);
-    toast('Discord server updated');
-    clearDiscordListCache();
+    if (id) {
+      const s = DISCORD_SERVERS.find((x) => x.id === parseInt(id, 10));
+      const payload = {};
+      if (s.name !== name) payload.name = name;
+      if (s.guild_id !== guildId) payload.guild_id = guildId;
+      if (s.kingdom_id !== kingdomId) payload.kingdom_id = kingdomId;
+      if (token) payload.bot_token = token;
+      else if (byId('srvClearToken').checked) payload.bot_token = '';
+      if (!Object.keys(payload).length) { toast('No changes made'); closeServerModal(); return; }
+      await api('PATCH', `/api/discord-servers/${id}`, payload, true);
+      toast('Discord server updated');
+      clearDiscordListCache();
+    } else {
+      await api('POST', '/api/discord-servers', { name, guild_id: guildId, kingdom_id: kingdomId, bot_token: token || null }, true);
+      toast('Discord server created. It can now be assigned to an alliance.');
+    }
+    closeServerModal();
     loadPlatformDiscordServers();
   } catch (e) { toast(e.message, true); }
 }
@@ -71,7 +91,7 @@ async function editDiscordServer(s) {
 bindActions(byId('discordServersBody'), {
   edit(btn) {
     const s = DISCORD_SERVERS.find((x) => x.id === parseInt(btn.dataset.id, 10));
-    if (s) editDiscordServer(s);
+    if (s) openServerForm(s);
   },
 });
 
@@ -235,7 +255,7 @@ async function loadPlatformTenants() {
           ${platformCell('Alliance', `${t.icon_image_data ? `<img class="tenant-icon" src="${escapeHtml(t.icon_image_data)}" alt="">` : `<span class="type-chip__dot" data-color="${escapeHtml(t.color)}"></span>`} ${escapeHtml(t.name)}`)}
           ${platformCell('Slug', escapeHtml(t.slug))}
           ${platformCell('Kingdom', escapeHtml(names[t.kingdom_id] || String(t.kingdom_id)))}
-          ${platformCell('Discord server(s)', `<div><span class="samaya-muted">Primary:</span> ${escapeHtml(t.server_name)}</div><div class="samaya-muted">${escapeHtml(t.guild_id)}</div>`)}
+          ${platformCell('Discord server(s)', `${serversLineHtml(t)}<div class="samaya-muted">${escapeHtml(t.guild_id)}</div>`)}
           ${platformCell('Actions', actionButton('Edit', 'edit', { id: t.id }))}
         </tr>`).join('')
       : emptyRow(5, 'No alliances yet.');
@@ -252,11 +272,37 @@ async function openTenantForm(t) {
   byId('tnName').value = t ? t.name : '';
   byId('tnSlug').value = t ? t.slug : '';
   byId('tnKingdom').innerHTML = optionsHtml(kingdoms.map((k) => ({ value: k.id, label: k.name })), t ? t.kingdom_id : '');
-  byId('tnServer').innerHTML = optionsHtml(DISCORD_SERVERS.map((s) => ({ value: s.id, label: `${s.name} (${s.guild_id})` })), t ? t.server_id : '');
+  byId('tnKingdom').disabled = !!t;
+  renderTenantServerChoices(kingdoms, t);
   setTenantIconPreview(t ? (t.icon_image_data || '') : '');
   byId('tnIconFile').value = '';
   openModalById('tenantModal');
 }
+
+// Servers must belong to the alliance's Kingdom, so both lists follow the
+// Kingdom select. The primary is excluded from the secondary choices.
+function renderTenantServerChoices(kingdoms, t, keepPrimary) {
+  const kingdomId = parseInt(byId('tnKingdom').value, 10) || (t && t.kingdom_id);
+  const pool = DISCORD_SERVERS.filter((s) => s.kingdom_id === kingdomId);
+  const primary = keepPrimary || (t && pool.some((s) => s.id === t.server_id) ? t.server_id : (pool[0] || {}).id);
+  byId('tnServer').innerHTML = optionsHtml(pool.map((s) => ({ value: s.id, label: `${s.name} (${s.guild_id})` })), primary);
+  const chosen = new Set(t ? (t.secondary_servers || []).map((s) => s.id) : []);
+  const others = pool.filter((s) => String(s.id) !== String(byId('tnServer').value));
+  byId('tnSecondary').innerHTML = others.length
+    ? others.map((s) => `<label class="check"><input type="checkbox" value="${s.id}"${chosen.has(s.id) ? ' checked' : ''}> ${escapeHtml(s.name)} (${escapeHtml(s.guild_id)})</label>`).join('')
+    : '<p class="samaya-muted">No other servers in this Kingdom.</p>';
+}
+
+function selectedSecondaryServerIds() {
+  return Array.from(byId('tnSecondary').querySelectorAll('input:checked')).map((i) => parseInt(i.value, 10));
+}
+
+byId('tnKingdom').addEventListener('change', () => renderTenantServerChoices(null, null));
+byId('tnServer').addEventListener('change', () => {
+  const keep = selectedSecondaryServerIds();
+  const t = { secondary_servers: keep.map((id) => ({ id })) };
+  renderTenantServerChoices(null, t, byId('tnServer').value);
+});
 
 function closeTenantModal() {
   closeModalById('tenantModal');
@@ -280,11 +326,13 @@ async function saveTenantModal() {
   if (!name || !slug) { toast('Name and slug are required', true); return; }
   try {
     if (id) {
-      await api('PATCH', `/api/tenants/${id}`, { name, slug, server_id: serverId, icon_image_data: iconData || '' }, true);
+      await api('PATCH', `/api/tenants/${id}`, {
+        name, slug, server_id: serverId, secondary_server_ids: selectedSecondaryServerIds(), icon_image_data: iconData || '',
+      }, true);
       toast('Alliance updated');
     } else {
       await api('POST', '/api/tenants', {
-        kingdom_id: parseInt(byId('tnKingdom').value, 10), name, slug, server_id: serverId, icon_image_data: iconData || null,
+        kingdom_id: parseInt(byId('tnKingdom').value, 10), name, slug, server_id: serverId, secondary_server_ids: selectedSecondaryServerIds(), icon_image_data: iconData || null,
       }, true);
       toast(`${name} created. Invite its leaders from the Access section.`);
     }
@@ -301,7 +349,8 @@ bindActions(byId('tenantsBody'), {
   },
 });
 byId('btnCreateKingdom').addEventListener('click', createKingdom);
-byId('btnCreateDiscordServer').addEventListener('click', createDiscordServer);
+byId('btnCreateDiscordServer').addEventListener('click', () => openServerForm(null));
+byId('btnSaveServerModal').addEventListener('click', saveServerModal);
 byId('btnCreateTenant').addEventListener('click', () => openTenantForm(null));
 byId('tnIconFile').addEventListener('change', async (e) => {
   const file = e.target.files && e.target.files[0];
