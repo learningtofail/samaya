@@ -109,6 +109,27 @@ trade-off before running this.
     docker compose start app
     curl -I http://127.0.0.1:8000/health
 
+## Unified event model cutover
+
+The cutover (`docs/cutover-runbook.md`) has two points of no return, and the
+rollback differs by which one you have passed.
+
+- **Before step 7 (`alembic upgrade head`) ran:** the database is unchanged.
+  Check out the previous commit, rebuild, start the app:
+
+      git checkout <previous-commit-sha>
+      docker compose up --build -d app
+
+  Any Discord events removed in step 6 are gone; the old system recreates
+  them on its next auto-post pass (daily, 16:00 UTC).
+
+- **After step 7 ran:** the old tables are dropped and `alembic downgrade`
+  refuses to run. Restore the step 1 backup using "Restoring from backup"
+  above, check out the previous commit, and rebuild. Do not run `alembic
+  upgrade head` after restoring: the restored database is at the old head and
+  must stay there while the old code runs. Everything created in the new
+  console after the cutover is lost with the restore.
+
 ## After any rollback
 
 - Check `docker compose logs app --tail 100` for startup errors — this

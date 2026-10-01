@@ -31,10 +31,11 @@ events are shared across every alliance in a Kingdom.
     docker compose logs app -f
     docker compose exec db psql -U taraka -d kingshot_scheduler
 
-Manually triggering a regeneration now requires a logged-in session and a
-tenant header — do this from the admin UI's Schedule tab rather than a bare
-curl; the endpoint itself is `POST /admin/api/scheduler/regenerate` with
-`X-Tenant-Slug: <slug>` and the session cookie a browser would already have.
+Occurrence generation (daily, UTC 00:00, and once at startup) and the
+per-minute delivery tick run in-process. If something looks stuck, open the
+admin console's Delivery log tab: it shows every Discord post, why a failed
+one failed, and has a Retry button. `GET /admin/api/delivery-health` reports
+whether the tick is keeping up.
 
 ### Adding a new public route
 
@@ -84,6 +85,12 @@ why upgrading instead of stamping would fail outright (it would try to
 
 A fresh install (no existing database) runs `alembic upgrade head` normally.
 
+## Cutover (unified event model)
+
+[`docs/cutover-runbook.md`](docs/cutover-runbook.md) is the one-time,
+destructive procedure for moving production from the old event and
+announcement system to the unified event model.
+
 ## Rollback
 
 See [`docs/rollback-runbook.md`](docs/rollback-runbook.md) — code-only
@@ -101,7 +108,7 @@ restoring from `ops/backup.sh`'s nightly dump.
 ## Notes
 
 - All times UTC
-- A tenant's own Discord bot token/guild ID/public key are managed via the admin UI's Platform tab (superadmin only), not the Config tab — Config now only lists a tenant's own channels/roles for the event-creation form
+- Discord bot tokens, guild IDs and each alliance's notification channel and role are managed in the admin console's Setup tab (bot credentials: superadmin only; the notification destination: alliance owner or superadmin)
 - The first superadmin(s) come from `SUPERADMIN_DISCORD_IDS` in `.env` (comma-separated Discord user IDs) — there's no other way to bootstrap platform admin access
 - Backup: add /opt/taraka/postgres/ to restic with pg_dump pre-hook
 - Docs: Samaya Self-Hosted Architecture PRD v2.0 (Google Drive) — predates the multi-tenant/auth rework; `CLAUDE.md` is the current source of truth for repo structure

@@ -1,12 +1,9 @@
 """Tests for spec §38: cross-alliance admin views, Tenant icon images,
 Kingdom branding titles, and the public last-activity endpoints.
 """
-from datetime import datetime, timedelta, timezone
 
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.db import Announcement, AnnouncementTarget, PostLog
 
 TINY_PNG_DATA_URI = (
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQV"
@@ -90,46 +87,6 @@ class TestKingdomBranding:
         await viewer_client.aclose()
 
 
-class TestCombinedDashboard:
-
-    async def test_status_combined_mode(self, client: AsyncClient, tenant: dict, second_tenant: dict):
-        r = await client.get("/admin/api/status", headers={"X-Tenant-Slug": "*"})
-        assert r.status_code == 200
-        slugs = {a["tenant_slug"] for a in r.json()["alliances"]}
-        assert {tenant["slug"], second_tenant["slug"]} <= slugs
-
-    async def test_delivery_health_combined_mode_per_alliance_rows(
-        self, client: AsyncClient, db_session: AsyncSession, tenant: dict, second_tenant: dict
-    ):
-        now = datetime.now(timezone.utc)
-        db_session.add(PostLog(
-            tenant_id=tenant["id"], event_name="Siege", occurrence_date=now.date(),
-            discord_guild_id="g", posted_at_utc=now, status="posted",
-        ))
-        await db_session.commit()
-
-        r = await client.get("/admin/api/delivery-health", headers={"X-Tenant-Slug": "*"})
-        rows = {a["tenant_slug"]: a for a in r.json()["alliances"]}
-        assert rows[tenant["slug"]]["event_posts"]["posted"] == 1
-        assert rows[second_tenant["slug"]]["event_posts"]["posted"] == 0
-
-
-class TestCombinedSync:
-
-    async def test_sync_combined_mode_returns_per_alliance_rows(
-        self, client: AsyncClient, tenant: dict, second_tenant: dict
-    ):
-        r = await client.get("/admin/api/sync/discord", headers={"X-Tenant-Slug": "*"})
-        assert r.status_code == 200
-        rows = r.json()["alliances"]
-        slugs = {a["tenant_slug"] for a in rows}
-        assert {tenant["slug"], second_tenant["slug"]} <= slugs
-        # Each row is self-contained (either a real "summary" or an
-        # "error", never a top-level exception) since one alliance's
-        # Discord/token trouble must not take down every other row.
-        assert all(("summary" in a) or ("error" in a) for a in rows)
-
-
 class TestDiscordConfigOverview:
 
     async def test_groups_by_server_not_by_tenant(
@@ -143,91 +100,3 @@ class TestDiscordConfigOverview:
         # each entry lists only tenants on that server.
         for s in servers:
             assert "tenants" in s and "server_name" in s
-
-
-class TestPublicLastActivity:
-
-    async def test_null_when_nothing_posted(self, client: AsyncClient, tenant: dict):
-        r = await client.get(f"/t/{tenant['slug']}/api/last-activity")
-        assert r.status_code == 200
-        assert r.json() is None
-
-    async def test_shows_latest_posted_event(
-        self, client: AsyncClient, db_session: AsyncSession, tenant: dict
-    ):
-        now = datetime.now(timezone.utc)
-        db_session.add(PostLog(
-            tenant_id=tenant["id"], event_name="Bear Hunt", occurrence_date=now.date(),
-            discord_guild_id="g", posted_at_utc=now, status="posted",
-        ))
-        await db_session.commit()
-
-        r = await client.get(f"/t/{tenant['slug']}/api/last-activity")
-        body = r.json()
-        assert body["kind"] == "event"
-        assert body["name"] == "Bear Hunt"
-
-    async def test_prefers_more_recent_announcement_over_older_event(
-        self, client: AsyncClient, db_session: AsyncSession, tenant: dict
-    ):
-        now = datetime.now(timezone.utc)
-        db_session.add(PostLog(
-            tenant_id=tenant["id"], event_name="Old Event", occurrence_date=now.date(),
-            discord_guild_id="g", posted_at_utc=now - timedelta(hours=2), status="posted",
-        ))
-        ann = Announcement(
-            owning_tenant_id=tenant["id"], title="Fresh Announcement", body_markdown="hi",
-            scheduled_for=now - timedelta(minutes=5), status="posted", posted_at=now - timedelta(minutes=5),
-        )
-        db_session.add(ann)
-        await db_session.commit()
-        await db_session.refresh(ann)
-        db_session.add(AnnouncementTarget(
-            announcement_id=ann.id, tenant_id=tenant["id"], discord_channel_id="c1", post_status="posted",
-        ))
-        await db_session.commit()
-
-        r = await client.get(f"/t/{tenant['slug']}/api/last-activity")
-        body = r.json()
-        assert body["kind"] == "announcement"
-        assert body["name"] == "Fresh Announcement"
-
-    async def test_ignores_announcement_that_failed_for_this_tenant(
-        self, client: AsyncClient, db_session: AsyncSession, tenant: dict, second_tenant: dict
-    ):
-        """A multi-target announcement that succeeded for second_tenant but
-        failed for tenant must not show as tenant's last activity."""
-        now = datetime.now(timezone.utc)
-        ann = Announcement(
-            owning_tenant_id=tenant["id"], title="Mixed Result", body_markdown="hi",
-            scheduled_for=now - timedelta(minutes=5), status="posted", posted_at=now - timedelta(minutes=5),
-        )
-        db_session.add(ann)
-        await db_session.commit()
-        await db_session.refresh(ann)
-        db_session.add_all([
-            AnnouncementTarget(announcement_id=ann.id, tenant_id=tenant["id"], discord_channel_id="c1", post_status="error"),
-            AnnouncementTarget(announcement_id=ann.id, tenant_id=second_tenant["id"], discord_channel_id="c2", post_status="posted"),
-        ])
-        await db_session.commit()
-
-        r = await client.get(f"/t/{tenant['slug']}/api/last-activity")
-        assert r.json() is None
-
-        r2 = await client.get(f"/t/{second_tenant['slug']}/api/last-activity")
-        assert r2.json()["name"] == "Mixed Result"
-
-    async def test_combined_last_activity_includes_tenant_name(
-        self, client: AsyncClient, db_session: AsyncSession, tenant: dict
-    ):
-        now = datetime.now(timezone.utc)
-        db_session.add(PostLog(
-            tenant_id=tenant["id"], event_name="Bear Hunt", occurrence_date=now.date(),
-            discord_guild_id="g", posted_at_utc=now, status="posted",
-        ))
-        await db_session.commit()
-
-        r = await client.get("/api/last-activity")
-        body = r.json()
-        assert body["tenant_slug"] == tenant["slug"]
-        assert body["name"] == "Bear Hunt"

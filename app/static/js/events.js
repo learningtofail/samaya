@@ -1,646 +1,789 @@
-// Events view (#v-events): the event definitions table, the create/edit
-// modal, and row actions (duplicate, activate/deactivate, permanent delete).
-// Depends on common.js (api, toast, escapeHtml, TENANT_COLORS).
+// Events tab (#v-events, spec §66.7): one list of every event and message, and
+// one form for create and edit. Depends on common.js, pickers.js, composer.js
+// and reminders.js; occurrence-level edits live in schedule.js.
+//
+// Editing a recurring event first asks for a scope (spec §66.4a):
+//   this occurrence only  -> PATCH /api/occurrences/{id}   (schedule.js)
+//   this and following    -> POST  /api/events/{id}/split
+//   all occurrences       -> PATCH /api/events/{id}
 
-// Cached so filterEventsTable() (spec §29) can re-render from a text
-// filter without a round trip — same pattern as ANNOUNCEMENTS/ANNOUNCEMENT_TEMPLATES.
-let EVENTS_CACHE = [];
+// ── State ────────────────────────────────────────────────────
+let EVENTS = [];
 
-function filterEventsTable() {
-  renderEventsTable(EVENTS_CACHE);
+// kingdom_id -> event types (types belong to a Kingdom, not an alliance).
+const EVENT_TYPES_BY_KINGDOM = {};
+
+async function loadEventTypesFor(slug) {
+  const tenant = tenantBySlug(slug);
+  const key = tenant ? tenant.kingdom_id : slug;
+  if (EVENT_TYPES_BY_KINGDOM[key]) return EVENT_TYPES_BY_KINGDOM[key];
+  const types = await api('GET', '/api/event-types', null, false, slug);
+  EVENT_TYPES_BY_KINGDOM[key] = types;
+  return types;
+}
+
+function invalidateEventTypes() {
+  Object.keys(EVENT_TYPES_BY_KINGDOM).forEach((k) => { delete EVENT_TYPES_BY_KINGDOM[k]; });
+}
+
+// ── List ─────────────────────────────────────────────────────
+
+function canWriteEvent(ev) {
+  const owner = tenantById(ev.owning_tenant_id);
+  if (owner) return canWriteTenant(owner);
+  return ev.scope === 'kingdom-wide' && canWriteAnywhere();
 }
 
 async function loadEvents() {
-  renderAllianceFilterSelect('eventsFilter', 'events', loadEvents);
+  renderAllianceFilterSelect('eventsAlliance', 'events', loadEvents);
+  document.getElementById('btnNewEvent').classList.toggle('hidden', !canWriteAnywhere());
+  document.getElementById('eventsViewerNote').classList.toggle('hidden', canWriteAnywhere());
   try {
-    const events = await api('GET', '/api/events', null, false, getTabFilter('events'));
-    EVENTS_CACHE = events;
-    renderEventsTable(events);
-  } catch(e) { toast(e.message, true); }
-}
-
-// spec §32 — bulk export/import, alliance-scope events only (see the
-// backend's _BULK_EVENT_COLUMNS comment for why kingdom-wide/targets are
-// excluded). Export follows the same fetch-blob-download pattern as
-// postlog.js's exportPostLogCsv(); import posts the chosen file as
-// multipart form data, outside the api() helper since api() always sends
-// JSON.
-async function exportEventsCsv() {
-  const slug = getTabFilter('events');
-  if (slug === COMBINED_SLUG) {
-    toast('Pick one alliance in the filter above before exporting — CSV export is per-alliance', true);
-    return;
-  }
-  try {
-    const res = await fetch('/admin/api/events/export.csv', {
-      headers: { 'X-Tenant-Slug': slug },
-      credentials: 'same-origin',
-    });
-    if (res.status === 401) { window.location.href = '/auth/login'; return; }
-    if (!res.ok) throw new Error('Export failed: ' + res.statusText);
-    const blob = await res.blob();
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url;
-    a.download = 'Events_Export.csv';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    EVENTS = await api('GET', '/api/events', null, false, getTabFilter('events'));
+    renderEventTypeFilter();
+    renderEventsTable();
   } catch (e) {
     toast(e.message, true);
+    document.getElementById('eventsBody').innerHTML = emptyRow(6, 'Could not load events: ' + e.message);
   }
 }
 
-async function importEventsCsv(file) {
-  if (!file) return;
-  const slug = getTabFilter('events');
-  if (slug === COMBINED_SLUG) {
-    toast('Pick one alliance in the filter above before importing — CSV import is per-alliance', true);
-    return;
+function renderEventTypeFilter() {
+  const select = document.getElementById('eventsType');
+  const current = select.value;
+  const seen = new Map();
+  EVENTS.forEach((ev) => { if (ev.type) seen.set(ev.type.id, ev.type.name); });
+  const options = [{ value: '', label: 'All types' }]
+    .concat(Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1])).map(([id, name]) => ({ value: id, label: name })));
+  select.innerHTML = optionsHtml(options, current);
+}
+
+function eventScheduleText(ev) {
+  const first = `${ev.anchor_date}T${ev.start_time_utc}:00Z`;
+  const when = dualTimeString(first);
+  let text;
+  if (ev.recurrence_kind === 'interval_days') {
+    text = `${describeRecurrence(ev)} at ${when}, from ${ev.anchor_date}`;
+    if (ev.until_date) text += ` until ${ev.until_date}`;
+  } else {
+    text = `${ev.anchor_date} at ${when}`;
   }
-  const formData = new FormData();
-  formData.append('file', file);
-  try {
-    const res = await fetch('/admin/api/events/import.csv', {
-      method: 'POST',
-      headers: { 'X-Tenant-Slug': slug },
-      credentials: 'same-origin',
-      body: formData,
-    });
-    if (res.status === 401) { window.location.href = '/auth/login'; return; }
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.detail || res.statusText);
-    if (body.errors && body.errors.length) {
-      toast(`Imported ${body.created} event(s), ${body.errors.length} row(s) failed — see console for details`, body.created === 0);
-      console.warn('Event import errors:', body.errors);
-    } else {
-      toast(`Imported ${body.created} event(s)`);
-    }
-    loadEvents();
-  } catch (e) {
-    toast(e.message, true);
-  } finally {
-    document.getElementById('eventsImportFile').value = '';
+  return text;
+}
+
+function shortReminder(m) {
+  if (m === 0) return 'start';
+  if (m % 1440 === 0) return (m / 1440) + 'd';
+  if (m % 60 === 0) return (m / 60) + 'h';
+  return m + 'm';
+}
+
+function eventAudienceHtml(ev) {
+  if (ev.scope === 'kingdom-wide') {
+    return pfLabel('Kingdom-wide', 'pf-m-purple') + ` <span class="samaya-muted">owned by ${escapeHtml(tenantName(ev.owning_tenant_id))}</span>`;
   }
+  const ids = new Set([ev.owning_tenant_id].concat(ev.alliances.map((a) => a.tenant_id)));
+  return Array.from(ids).map((id) => `<span class="audience-tag">${escapeHtml(tenantName(id))}</span>`).join(' ');
 }
 
-function renderEventsTable(allEvents) {
-    const filterText = (document.getElementById('eventsFilterInput')?.value || '').trim().toLowerCase();
-    const events = filterText
-      ? allEvents.filter(e =>
-          e.name.toLowerCase().includes(filterText) ||
-          tenantName(e.owning_tenant_id).toLowerCase().includes(filterText))
-      : allEvents;
-    const tbody = document.getElementById('eventsBody');
-    const tbodyLead = document.getElementById('eventsBodyLeadership');
-    if (!events.length) {
-      tbody.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">No events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
-      tbodyLead.innerHTML = '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
-      return;
-    }
-    function intervalLabel(i) {
-      if (i===1)  return 'Daily';
-      if (i===2)  return 'Every 2 days';
-      if (i===7)  return 'Weekly';
-      if (i===14) return 'Biweekly';
-      if (i===28) return 'Every 4 weeks';
-      return 'Every ' + i + ' days';
-    }
-    // Spec §49 — the Notification Targets column: the event's own primary
-    // channel (already a plain name, not an ID — see populateDiscordFields),
-    // its pre-event ping channel/role (real Discord snowflake IDs, shown
-    // as the bare ID until enhanceNotificationTargetLabels resolves them),
-    // and a summary of any extra EventTarget rows (spec §20).
-    function eventNotifTargetsHtml(e) {
-      const ownerSlug = tenantSlugFor(e.owning_tenant_id);
-      const parts = [];
-      if (e.discord_channel) {
-        parts.push('<span class="pf-v6-u-font-size-sm">#' + escapeHtml(e.discord_channel) + '</span>');
-      }
-      if (e.notification_channel_id) {
-        parts.push(
-          '<span class="pf-v6-u-font-size-sm" style="color:var(--muted)" title="Pre-event ping destination">🔔 '
-          + '<span data-notif-channel="' + escapeHtml(ownerSlug) + ':' + escapeHtml(e.notification_channel_id) + '">#' + escapeHtml(e.notification_channel_id) + '</span>'
-          + (e.notification_role_id ? ' <span data-notif-role="' + escapeHtml(ownerSlug) + ':' + escapeHtml(e.notification_role_id) + '">@' + escapeHtml(e.notification_role_id) + '</span>' : '')
-          + '</span>'
-        );
-      }
-      if (e.targets && e.targets.length) {
-        parts.push(e.targets.map(t => {
-          const slug = tenantSlugFor(t.tenant_id);
-          return '<span class="pf-v6-u-font-size-sm" style="color:var(--muted)">' + escapeHtml(tenantName(t.tenant_id)) + ': '
-            + '<span data-notif-channel="' + escapeHtml(slug) + ':' + escapeHtml(t.notification_channel_id) + '">#' + escapeHtml(t.notification_channel_id) + '</span></span>';
-        }).join('<br>'));
-      }
-      return parts.length ? parts.join('<br>') : '<span style="color:var(--muted)">—</span>';
-    }
-    function buildRow(e) {
-      var allyColor = TENANT_COLORS[e.owning_tenant_id] || '#475569';
-      // Spec §49 — the Alliance column names the actual owning alliance
-      // (or, for a kingdom-wide event, says so) instead of the previous
-      // bug where it just echoed the literal word "Alliance" for every
-      // non-kingdom-wide row.
-      var scopeLabel = e.scope === 'kingdom-wide'
-        ? '🌐 Kingdom-wide <span style="color:var(--muted);font-size:var(--fs-sm)">(via ' + escapeHtml(tenantName(e.owning_tenant_id)) + '’s Kingdom)</span>'
-        : '<span class="cat-dot" style="background:' + allyColor + '"></span>' + escapeHtml(tenantName(e.owning_tenant_id));
-      var statusLabel = pfLabel(e.active ? 'Active' : 'Inactive', e.active ? 'pf-m-green' : 'pf-m-gray');
-      var btnCls    = e.active ? 'pf-m-danger' : 'pf-m-secondary';
-      var btnTxt    = e.active ? 'Deactivate' : 'Activate';
-      var btnTitle  = e.active
-        ? 'Remove this event from schedule generation and Discord posting. The event remains in the database.'
-        : 'Re-enable this event for schedule generation and Discord posting.';
-      // escapeHtml (not a bare quote-replace) so the embedded JSON can't
-      // break out of the onclick="..." attribute via <, >, or & either.
-      var editData  = escapeHtml(JSON.stringify(e));
-      var deleteBtn = '';
-      if (!e.active) {
-        var safeName = escapeHtml(e.name);
-        deleteBtn = '<button class="pf-v6-c-button pf-m-danger pf-m-small" '
-          + 'title="Permanently delete this event. PostLog entries are preserved." '
-          + 'data-id="' + e.id + '" data-name="' + safeName + '" '
-          + 'onclick="permanentDelete(this)">Delete</button>';
-      }
-      // Spec §49 — the Alliance column (scopeLabel, above) now carries the
-      // owning alliance identity on its own, so the name column no longer
-      // needs a duplicate tenant tag appended to it.
-      return '<tr class="pf-v6-c-table__tr samaya-row-clickable" style="border-left:3px solid ' + allyColor + '" onclick="handleRowPreviewClick(event,\'eventdef\',' + editData + ')" title="Click to preview how this looks on Discord">'
-        + '<td class="pf-v6-c-table__td">' + escapeHtml(e.name) + '</td>'
-        + '<td class="pf-v6-c-table__td">' + scopeLabel + '</td>'
-        + '<td class="pf-v6-c-table__td">' + intervalLabel(e.interval_days) + '</td>'
-        + '<td class="pf-v6-c-table__td">' + e.start_time_utc + ' UTC</td>'
-        + '<td class="pf-v6-c-table__td">' + statusLabel + '</td>'
-        + '<td class="pf-v6-c-table__td">' + eventNotifTargetsHtml(e) + '</td>'
-        + '<td class="pf-v6-c-table__td">'
-        + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" title="Edit this event definition." onclick="openEventModal(' + editData + ')">Edit</button> '
-        + '<button class="pf-v6-c-button pf-m-secondary pf-m-small" title="Create a new event pre-filled with these settings." onclick="duplicateEvent(' + editData + ')">Duplicate</button> '
-        + '<button class="pf-v6-c-button ' + btnCls + ' pf-m-small" title="' + btnTitle + '" onclick="toggleActive(' + e.id + ',' + e.active + ')">' + btnTxt + '</button> '
-        + deleteBtn
-        + '</td>'
-        + '</tr>';
-    }
-    const community = events.filter(e => !e.leadership_only);
-    const leadership = events.filter(e => e.leadership_only);
-    tbody.innerHTML = community.length
-      ? community.map(buildRow).join('')
-      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">No events defined yet. Click &quot;+ Add Event&quot; to get started.</td></tr>';
-    tbodyLead.innerHTML = leadership.length
-      ? leadership.map(buildRow).join('')
-      : '<tr class="pf-v6-c-table__tr"><td class="pf-v6-c-table__td" colspan="7" style="color:var(--muted);padding:20px">No leadership events defined yet.</td></tr>';
-    enhanceNotificationTargetLabels();
+function seriesCount(ev) {
+  if (!ev.series_id) return 1;
+  return EVENTS.filter((e) => e.series_id === ev.series_id).length;
 }
 
-function tenantName(id) {
-  const t = TENANTS.find(t => t.id === id);
-  return t ? t.name : ('#' + id);
+function buildEventRow(ev) {
+  const writable = canWriteEvent(ev);
+  const labels = [];
+  labels.push(ev.active ? pfLabel('Active', 'pf-m-green') : pfLabel('Inactive', 'pf-m-gray'));
+  if (ev.leadership_only) labels.push(pfLabel('Leadership only', 'pf-m-orange'));
+  if (!ev.has_calendar_entry) labels.push(pfLabel('Message only', 'pf-m-blue'));
+  const parts = seriesCount(ev);
+  if (parts > 1) labels.push(pfLabel(`Series, ${parts} parts`, 'pf-m-gray'));
+  const reminders = ev.reminder_minutes.length
+    ? ev.reminder_minutes.map((m) => `<span class="audience-tag">${escapeHtml(shortReminder(m))}</span>`).join(' ')
+    : '<span class="samaya-muted">None</span>';
+  const duration = ev.has_calendar_entry
+    ? `<div class="samaya-muted">${ev.duration_hours} h calendar entry</div>`
+    : '<div class="samaya-muted">No calendar entry</div>';
+  const actions = writable
+    ? `<div class="row-actions">
+        <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="edit" data-id="${ev.id}">Edit</button>
+        <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="duplicate" data-id="${ev.id}">Duplicate</button>
+        <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="toggle" data-id="${ev.id}">${ev.active ? 'Deactivate' : 'Activate'}</button>
+        <button type="button" class="pf-v6-c-button pf-m-danger pf-m-small" data-action="delete" data-id="${ev.id}">Delete</button>
+      </div>`
+    : '<span class="samaya-muted">Read only</span>';
+  return `<tr class="pf-v6-c-table__tr">
+    <td class="pf-v6-c-table__td" data-label="Event"><strong>${escapeHtml(ev.name)}</strong><div>${typeChip(ev.type)}</div></td>
+    <td class="pf-v6-c-table__td" data-label="Schedule">${escapeHtml(eventScheduleText(ev))}${duration}</td>
+    <td class="pf-v6-c-table__td" data-label="Audience">${eventAudienceHtml(ev)}</td>
+    <td class="pf-v6-c-table__td" data-label="Reminders">${reminders}</td>
+    <td class="pf-v6-c-table__td" data-label="Status"><div class="label-stack">${labels.join(' ')}</div></td>
+    <td class="pf-v6-c-table__td" data-label="Actions">${actions}</td>
+  </tr>`;
 }
 
-function openEventModal(event) {
-  document.getElementById('modalTitle').textContent = event ? 'Edit Event' : 'Add Event';
-  document.getElementById('modalEventId').value = event && event.id ? event.id : '';
-
-  // Spec §49 — one combined "Owning Alliance" selector (alliance or that
-  // alliance's kingdom-wide option) for both create and edit; editing an
-  // existing event no longer locks its owning tenant/scope — picking a
-  // different option here reassigns it (see saveEvent()).
-  const ownerSelect = document.getElementById('mOwningTenant');
-  const resolvedTenantSlug = event ? tenantSlugFor(event.owning_tenant_id) : TENANTS[0]?.slug;
-  renderOwningTenantScopeSelect('mOwningTenant', resolvedTenantSlug, event?.scope || 'alliance');
-  ownerSelect.onchange = () => populateDiscordFields(event, parseOwningTenantScopeValue(ownerSelect.value).slug);
-
-  document.getElementById('mName').value        = event?.name || '';
-  document.getElementById('mInterval').value    = event?.interval_days || '';
-  document.getElementById('mStartTime').value   = event?.start_time_utc || '';
-  document.getElementById('mDuration').value    = event?.duration_hours || '';
-  document.getElementById('mAnchor').value      = event?.anchor_date || '';
-  document.getElementById('mDescription').value       = event?.description || '';
-  document.getElementById('mNotifMinutes').value      = event?.notify_minutes_before || '';
-  document.getElementById('mLeadershipOnly').checked  = !!event?.leadership_only;
-  setCoverImagePreview(event?.cover_image_data || '');
-  document.getElementById('mCoverImageFile').value = '';
-  toggleLeadershipNote();
-  document.getElementById('previewResult').textContent = '';
-  populateDiscordFields(event, resolvedTenantSlug);
-
-  document.getElementById('mTargetsList').innerHTML = '';
-  (event?.targets || []).forEach(t => addEventTargetRow(tenantSlugFor(t.tenant_id), t.notification_channel_id, t.notification_role_id));
-
-  document.getElementById('eventModal').classList.add('open');
-  focusModal(document.getElementById('eventModal'));
-  refreshPreviewTenantOptions('mPreviewTenant', null);
-  renderEventDescriptionPreview();
-}
-
-// Reverse of the tenant_id the API stores a target as — the target-row
-// UI keys off slug (same as TENANTS/the tenant picker everywhere else),
-// same reasoning as tenantName() just above.
-function tenantSlugFor(tenantId) {
-  const t = TENANTS.find(t => t.id === tenantId);
-  return t ? t.slug : '';
-}
-
-function duplicateEvent(event) {
-  const copy = Object.assign({}, event);
-  delete copy.id;
-  copy.name = event.name + ' (Copy)';
-  openEventModal(copy);
-  document.getElementById('modalTitle').textContent = 'Duplicate Event';
-}
-
-function toggleLeadershipNote() {
-  const checked = document.getElementById('mLeadershipOnly').checked;
-  document.getElementById('leadershipNote').classList.toggle('hidden', !checked);
-}
-
-// ── Time formatting ─────────────────────────────────────────
-// getDisplayTz()/setDisplayTz() and the header time zone picker live in
-// common.js (spec §15) — the control is global, not Events-specific,
-// so it moved out of this file's old buried-in-the-modal version.
-
-function toUtcDate(isoStr) {
-  const hasTz = /Z$|[+-]\d{2}:\d{2}$/.test(isoStr);
-  return new Date(hasTz ? isoStr : isoStr + 'Z');
-}
-
-// The building block for "show both" (spec §15.2): UTC stays in its
-// existing 24-hour HH:MM form (the value everything else in the app
-// already keys off); the local half uses 12-hour + a short zone
-// abbreviation (e.g. EDT, not the raw IANA name) so the two read as
-// visually distinct values rather than two numbers that only differ by
-// an hour count. Collapses to a single value when the display zone IS
-// UTC — "19:00 UTC · 19:00 UTC" would be noise, not information.
-function dualTimeString(utcIso) {
-  const d = toUtcDate(utcIso);
-  const utcPart = new Intl.DateTimeFormat('en-GB', { hour:'2-digit', minute:'2-digit', hour12:false, timeZone:'UTC' }).format(d) + ' UTC';
-  const tz = getDisplayTz();
-  if (tz === 'UTC') return utcPart;
-  const localPart = new Intl.DateTimeFormat('en-US', { hour:'numeric', minute:'2-digit', hour12:true, timeZoneName:'short', timeZone: tz }).format(d);
-  return utcPart + ' · ' + localPart;
-}
-
-function fmtTime(utcIso) {
-  return dualTimeString(utcIso);
-}
-
-function fmtTimeShort(utcIso) {
-  const d = toUtcDate(utcIso);
-  return new Intl.DateTimeFormat('en-GB', { hour:'2-digit', minute:'2-digit', hour12:false, timeZone: getDisplayTz() }).format(d);
-}
-
-// Post Log's "Posted At" column and Announcements' "Scheduled for"
-// column (spec §13.4/§15.2). Dates can differ across the UTC/local
-// split, not just times — an event at 01:00 UTC on the 28th is 9:00 PM
-// on the 27th in an American zone — so each half is computed against
-// its OWN correct calendar date rather than one date reused for both.
-// The local date prefix is shown only when it actually differs from the
-// UTC date, to avoid clutter in the (overwhelmingly common) case where
-// it doesn't.
-function fmtDateTime(utcIso) {
-  const d = toUtcDate(utcIso);
-
-  const utcParts = new Intl.DateTimeFormat('en-CA', {
-    year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false, timeZone:'UTC'
-  }).formatToParts(d).reduce((a,p) => (a[p.type]=p.value, a), {});
-  const utcDateKey = `${utcParts.year}-${utcParts.month}-${utcParts.day}`;
-  const utcStr = `${utcDateKey} ${utcParts.hour}:${utcParts.minute} UTC`;
-
-  const tz = getDisplayTz();
-  if (tz === 'UTC') return utcStr;
-
-  // en-CA reliably formats as YYYY-MM-DD regardless of locale display
-  // conventions — used here purely as a stable comparison key, not shown.
-  const localKeyParts = new Intl.DateTimeFormat('en-CA', {
-    year:'numeric', month:'2-digit', day:'2-digit', timeZone: tz
-  }).formatToParts(d).reduce((a,p) => (a[p.type]=p.value, a), {});
-  const localDateKey = `${localKeyParts.year}-${localKeyParts.month}-${localKeyParts.day}`;
-
-  const localTimeStr = new Intl.DateTimeFormat('en-US', {
-    hour:'numeric', minute:'2-digit', hour12:true, timeZoneName:'short', timeZone: tz
-  }).format(d);
-
-  if (localDateKey === utcDateKey) {
-    return `${utcStr} · ${localTimeStr}`;
-  }
-  const localDateStr = new Intl.DateTimeFormat('en-US', { month:'short', day:'numeric', timeZone: tz }).format(d);
-  return `${utcStr} · ${localDateStr}, ${localTimeStr}`;
-}
-
-// ── Discord channel/role dropdowns ─────────────────────────────
-
-async function populateDiscordFields(event, tenantSlug) {
-  const chanSelect = document.getElementById('mChannel');
-  const chanFallback = document.getElementById('mChannelFallback');
-  const notifChanSelect = document.getElementById('mNotifChannel');
-  const notifChanFallback = document.getElementById('mNotifChannelFallback');
-  const roleSelect = document.getElementById('mNotifRole');
-  const roleFallback = document.getElementById('mNotifRoleFallback');
-
-  [chanSelect, notifChanSelect, roleSelect].forEach(s => {
-    s.innerHTML = '<option>Loading…</option>';
-    s.disabled = true;
-    s.classList.remove('hidden');
+function renderEventsTable() {
+  const typeId = document.getElementById('eventsType').value;
+  const scope = document.getElementById('eventsScope').value;
+  const status = document.getElementById('eventsStatus').value;
+  const q = document.getElementById('eventsSearch').value.trim().toLowerCase();
+  const rows = EVENTS.filter((ev) => {
+    if (typeId && String(ev.type_id) !== typeId) return false;
+    if (scope && ev.scope !== scope) return false;
+    if (status === 'active' && !ev.active) return false;
+    if (status === 'inactive' && ev.active) return false;
+    if (q && !ev.name.toLowerCase().includes(q)) return false;
+    return true;
   });
-  [chanFallback, notifChanFallback, roleFallback].forEach(f => f.classList.add('hidden'));
+  const body = document.getElementById('eventsBody');
+  body.innerHTML = rows.length
+    ? rows.map(buildEventRow).join('')
+    : emptyRow(6, EVENTS.length ? 'No events match these filters.' : 'No events yet.');
+  applyTypeColors(body);
+  document.getElementById('eventsCount').textContent = `${rows.length} of ${EVENTS.length} shown`;
+}
 
+async function toggleEventActive(ev) {
+  const turningOff = ev.active;
+  if (turningOff && !confirm(`Deactivate "${ev.name}"? Its pending reminders are cancelled and any Discord events it created are removed. You can activate it again later.`)) return;
   try {
-    const [channels, roles] = await Promise.all([
-      api('GET', '/api/discord/channels', null, false, tenantSlug),
-      api('GET', '/api/discord/roles', null, false, tenantSlug),
-    ]);
-
-    fillSelect(chanSelect, channels.map(c => ({ value: c.name, label: '#' + c.name })), event?.discord_channel);
-    fillSelect(notifChanSelect, channels.map(c => ({ value: c.id, label: '#' + c.name })), event?.notification_channel_id);
-    fillSelect(roleSelect, roles.map(r => ({ value: r.id, label: '@' + r.name })), event?.notification_role_id);
-
-    [chanSelect, notifChanSelect, roleSelect].forEach(s => s.disabled = false);
-  } catch (e) {
-    [chanSelect, notifChanSelect, roleSelect].forEach(s => s.classList.add('hidden'));
-    chanFallback.classList.remove('hidden');
-    notifChanFallback.classList.remove('hidden');
-    roleFallback.classList.remove('hidden');
-    chanFallback.value = event?.discord_channel || '';
-    notifChanFallback.value = event?.notification_channel_id || '';
-    roleFallback.value = event?.notification_role_id || '';
-    toast('Could not load Discord channels/roles — enter values manually', true);
-  }
+    const res = await api('PATCH', `/api/events/${ev.id}`, { active: !ev.active }, false, writeSlugForEvent(ev));
+    toastDiscordErrors(res.discord_errors, turningOff ? 'Event deactivated.' : 'Event activated.');
+    loadEvents();
+  } catch (e) { toast(e.message, true); }
 }
 
-// ── Extra Notification Targets (spec §20) ───────────────────────
-// One target row = one (tenant, notification channel, notification
-// role) triple — an EXTRA destination beyond the owning tenant's own
-// bare notification fields above and beyond kingdom-wide's automatic
-// same-Kingdom fan-out (EventTenantNotification, set via the "ping
-// settings" action on a kingdom-wide event from another alliance).
-// Mirrors Announcements' addAnnouncementTargetRow (announcements.js)
-// with one addition: a role dropdown, since an event's ping always
-// carries a role mention where an announcement doesn't need one.
-function addEventTargetRow(tenantSlug, channelId, roleId) {
-  const list = document.getElementById('mTargetsList');
-  const row = document.createElement('div');
-  row.className = 'event-target-row';
-  row.style = 'display:flex;gap:8px;align-items:center';
-  const tenantOptions = TENANTS.map(t =>
-    `<option value="${escapeHtml(t.slug)}" ${t.slug === tenantSlug ? 'selected' : ''}>${escapeHtml(t.name)}</option>`
-  ).join('');
-  row.innerHTML = `
-    <select class="pf-v6-c-form-control target-tenant" style="flex:1">${tenantOptions}</select>
-    <select class="pf-v6-c-form-control target-channel" style="flex:1"><option>Loading…</option></select>
-    <input class="pf-v6-c-form-control target-channel-fallback" type="text" style="flex:1;display:none" placeholder="Channel ID">
-    <select class="pf-v6-c-form-control target-role" style="flex:1"><option>Loading…</option></select>
-    <input class="pf-v6-c-form-control target-role-fallback" type="text" style="flex:1;display:none" placeholder="Role ID (optional)">
-    <button type="button" class="pf-v6-c-button pf-m-danger pf-m-small" onclick="this.closest('.event-target-row').remove()">Remove</button>
-  `;
-  list.appendChild(row);
-  const select = row.querySelector('.target-tenant');
-  select.addEventListener('change', () => populateEventTargetFields(row, select.value));
-  // channelId is only passed for a real stored target (edit/duplicate) —
-  // a fresh row has none, so default to that tenant's last-used channel
-  // (spec §29), same convention as the announcement composer.
-  const initialTenantSlug = tenantSlug || select.value;
-  populateEventTargetFields(row, initialTenantSlug, channelId || getLastChannelForTenant(initialTenantSlug), roleId);
-}
-
-async function populateEventTargetFields(row, tenantSlug, channelId, roleId) {
-  const chanSelect   = row.querySelector('.target-channel');
-  const chanFallback = row.querySelector('.target-channel-fallback');
-  const roleSelect   = row.querySelector('.target-role');
-  const roleFallback = row.querySelector('.target-role-fallback');
-  [chanSelect, roleSelect].forEach(s => { s.innerHTML = '<option>Loading…</option>'; s.disabled = true; s.style.display = ''; });
-  [chanFallback, roleFallback].forEach(f => f.style.display = 'none');
+async function deleteEvent(ev) {
+  if (!confirm(`Delete "${ev.name}" permanently? This also removes the Discord events it created, cancels its pending reminders and deletes its schedule. This cannot be undone.`)) return;
   try {
-    const [channels, roles] = await Promise.all([
-      api('GET', '/api/discord/channels', null, false, tenantSlug),
-      api('GET', '/api/discord/roles', null, false, tenantSlug),
-    ]);
-    fillSelect(chanSelect, channels.map(c => ({ value: c.id, label: '#' + c.name })), channelId);
-    fillSelect(roleSelect, roles.map(r => ({ value: r.id, label: '@' + r.name })), roleId);
-    chanSelect.disabled = false;
-    roleSelect.disabled = false;
-    chanSelect.addEventListener('change', () => setLastChannelForTenant(tenantSlug, chanSelect.value));
-    if (chanSelect.value) setLastChannelForTenant(tenantSlug, chanSelect.value);
-  } catch (e) {
-    chanSelect.style.display = 'none';
-    roleSelect.style.display = 'none';
-    chanFallback.style.display = '';
-    roleFallback.style.display = '';
-    chanFallback.value = channelId || '';
-    roleFallback.value = roleId || '';
-    toast(`Could not load Discord channels/roles for ${tenantSlug} — enter values manually`, true);
+    await api('DELETE', `/api/events/${ev.id}`, null, false, writeSlugForEvent(ev));
+    toast('Event deleted.');
+    loadEvents();
+  } catch (e) { toast(e.message, true); }
+}
+
+function eventById(id) {
+  return EVENTS.find((e) => e.id === id) || null;
+}
+
+bindActions(document.getElementById('eventsBody'), {
+  edit(btn) { const ev = eventById(parseInt(btn.dataset.id, 10)); if (ev) startEditEvent(ev); },
+  duplicate(btn) {
+    const ev = eventById(parseInt(btn.dataset.id, 10));
+    if (ev) openEventForm({ mode: 'create', event: ev, duplicate: true });
+  },
+  toggle(btn) { const ev = eventById(parseInt(btn.dataset.id, 10)); if (ev) toggleEventActive(ev); },
+  delete(btn) { const ev = eventById(parseInt(btn.dataset.id, 10)); if (ev) deleteEvent(ev); },
+});
+
+['eventsType', 'eventsScope', 'eventsStatus'].forEach((id) => {
+  document.getElementById(id).addEventListener('change', renderEventsTable);
+});
+document.getElementById('eventsSearch').addEventListener('input', renderEventsTable);
+document.getElementById('btnNewEvent').addEventListener('click', () => openEventForm({ mode: 'create' }));
+
+// ── Edit scope (spec §66.4a) ─────────────────────────────────
+let SCOPE_EVENT = null;
+
+// The next dates a repeating event occurs on after today, from the recurrence
+// rule itself (generated occurrences only cover about four weeks ahead).
+function upcomingOccurrenceDates(ev, count) {
+  const out = [];
+  if (ev.recurrence_kind !== 'interval_days' || !ev.interval_days) return out;
+  const anchor = new Date(ev.anchor_date + 'T00:00:00Z');
+  const today = new Date(utcDateKey(new Date()) + 'T00:00:00Z');
+  const step = ev.interval_days * 86400000;
+  let k = Math.max(1, Math.ceil((today.getTime() - anchor.getTime()) / step));
+  const until = ev.until_date ? new Date(ev.until_date + 'T00:00:00Z') : null;
+  while (out.length < count) {
+    const d = new Date(anchor.getTime() + k * step);
+    if (until && d > until) break;
+    out.push(utcDateKey(d));
+    k += 1;
   }
+  return out;
 }
 
-function eventTargetRowValue(row) {
-  const chanSelect   = row.querySelector('.target-channel');
-  const chanFallback = row.querySelector('.target-channel-fallback');
-  const roleSelect   = row.querySelector('.target-role');
-  const roleFallback = row.querySelector('.target-role-fallback');
-  return {
-    tenant_slug:              row.querySelector('.target-tenant').value,
-    notification_channel_id:  (chanSelect.style.display !== 'none' ? chanSelect.value : chanFallback.value).trim(),
-    notification_role_id:     (roleSelect.style.display !== 'none' ? roleSelect.value : roleFallback.value).trim(),
-  };
-}
-
-function fillSelect(selectEl, options, currentValue) {
-  let matched = false;
-  let optionsHtml = options.map(o => {
-    const isSelected = currentValue != null && String(o.value) === String(currentValue);
-    if (isSelected) matched = true;
-    return `<option value="${o.value}" ${isSelected ? 'selected' : ''}>${o.label}</option>`;
-  }).join('');
-  if (currentValue && !matched) {
-    optionsHtml = `<option value="${currentValue}" selected>${currentValue} (not found — kept as-is)</option>` + optionsHtml;
+function startEditEvent(ev) {
+  if (ev.recurrence_kind !== 'interval_days') {
+    openEventForm({ mode: 'edit', event: ev });
+    return;
   }
-  if (!currentValue) {
-    optionsHtml = `<option value="">— none —</option>` + optionsHtml;
+  SCOPE_EVENT = ev;
+  document.getElementById('scopeEventName').textContent = ev.name;
+  document.getElementById('scopeAll').checked = true;
+  const dates = upcomingOccurrenceDates(ev, 26);
+  const followingRadio = document.getElementById('scopeFollowing');
+  followingRadio.disabled = dates.length === 0;
+  document.getElementById('scopeFollowingHelp').textContent = dates.length
+    ? ''
+    : 'There is no later occurrence to start from, so this choice is not available.';
+  document.getElementById('scopeFollowingDate').innerHTML = optionsHtml(dates.map((d) => ({ value: d, label: d })), dates[0]);
+  syncScopeChoice();
+  openModalById('scopeModal');
+}
+
+function syncScopeChoice() {
+  const following = document.getElementById('scopeFollowing').checked;
+  document.getElementById('scopeFollowingPick').classList.toggle('hidden', !following);
+}
+
+function closeScopeModal() {
+  closeModalById('scopeModal');
+}
+
+document.querySelectorAll('input[name="editScope"]').forEach((r) => r.addEventListener('change', syncScopeChoice));
+
+document.getElementById('btnScopeContinue').addEventListener('click', async () => {
+  const ev = SCOPE_EVENT;
+  if (!ev) return;
+  const choice = document.querySelector('input[name="editScope"]:checked').value;
+  closeScopeModal();
+  if (choice === 'all') {
+    openEventForm({ mode: 'edit', event: ev });
+  } else if (choice === 'following') {
+    openEventForm({ mode: 'split', event: ev, splitFrom: document.getElementById('scopeFollowingDate').value });
+  } else {
+    openOccurrenceModal({ eventId: ev.id });
   }
-  selectEl.innerHTML = optionsHtml;
+});
+
+// ── Event form ───────────────────────────────────────────────
+
+const EVF = {
+  mode: 'create',        // create | edit | split
+  event: null,           // the event being edited or split, or the source of a duplicate
+  splitFrom: null,       // YYYY-MM-DD, split mode only
+  touched: new Set(),    // fields the user changed, so a type's defaults never overwrite them
+  composer: null,
+  reminders: null,
+  types: [],
+  aud: new Map(),        // slug -> audience row state
+  cover: { original: '', current: '' },
+  saving: false,
+};
+
+
+function ownerSlugValue() {
+  return byId('evOwner').value;
 }
 
-function fieldValue(selectId, fallbackId) {
-  const sel = document.getElementById(selectId);
-  const fb = document.getElementById(fallbackId);
-  return !sel.classList.contains('hidden') ? sel.value : fb.value;
+function ownerTenant() {
+  return tenantBySlug(ownerSlugValue());
 }
 
-// Event cover image (spec §33) — read client-side as a data URI via
-// FileReader and stored as-is (no server-side re-encoding needed, since
-// that's exactly the format Discord's own Scheduled Event "image" field
-// takes). #mCoverImageData is the value saveEvent() actually reads;
-// #mCoverImageFile is just the picker, reset on every modal open so a
-// stale filename never lingers after a save.
-const COVER_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+function eventStartDate() {
+  const d = byId('evAnchor').value;
+  const t = normalizeTime(byId('evStart').value);
+  if (!d || !t) return null;
+  const dt = new Date(`${d}T${t}:00Z`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
 
-function setCoverImagePreview(dataUri) {
-  document.getElementById('mCoverImageData').value = dataUri || '';
-  const img = document.getElementById('mCoverImagePreview');
-  const removeBtn = document.getElementById('mCoverImageRemove');
+// "9:30" -> "09:30"; anything else that is not a 24-hour time -> ''.
+function normalizeTime(value) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim());
+  if (!m) return '';
+  const h = parseInt(m[1], 10);
+  const mi = parseInt(m[2], 10);
+  if (h > 23 || mi > 59) return '';
+  return String(h).padStart(2, '0') + ':' + String(mi).padStart(2, '0');
+}
+
+function showFormErrors(errors) {
+  const box = byId('evErrors');
+  document.querySelectorAll('#eventForm [aria-invalid="true"]').forEach((n) => n.removeAttribute('aria-invalid'));
+  if (!errors.length) {
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = '<p class="form-errors__title">Please fix the following:</p><ul>'
+    + errors.map((x) => `<li>${escapeHtml(x.msg)}</li>`).join('') + '</ul>';
+  box.classList.remove('hidden');
+  errors.forEach((x) => { if (x.field && byId(x.field)) byId(x.field).setAttribute('aria-invalid', 'true'); });
+  const first = errors.find((x) => x.field && byId(x.field));
+  if (first) byId(first.field).focus();
+  else box.scrollIntoView({ block: 'nearest' });
+}
+
+function syncCalendarGroup() {
+  byId('evDurationGroup').classList.toggle('hidden', !byId('evHasCalendar').checked);
+}
+
+function syncRecurrenceGroups() {
+  const repeats = byId('evRecurrence').value === 'interval_days';
+  byId('evIntervalGroup').classList.toggle('hidden', !repeats);
+  byId('evUntilGroup').classList.toggle('hidden', !repeats);
+}
+
+function syncScopeGroups() {
+  const kingdomWide = byId('evScope').value === 'kingdom-wide';
+  byId('evKingdomNote').classList.toggle('hidden', !kingdomWide);
+  byId('evAudienceLegend').textContent = kingdomWide ? 'Per-alliance overrides' : 'Alliances';
+  byId('evAudienceIntro').textContent = kingdomWide
+    ? 'Every alliance in the Kingdom takes part. You can still give an alliance its own message, channel or role.'
+    : 'Pick the alliances that take part. The owning alliance is always included.';
+  renderAudience();
+}
+
+function syncLeadershipNote() {
+  byId('evLeadershipNote').classList.toggle('hidden', !byId('evLeadershipOnly').checked);
+}
+
+function setCoverPreview(dataUri) {
+  EVF.cover.current = dataUri || '';
+  const img = byId('evCoverPreview');
   if (dataUri) {
     img.src = dataUri;
     img.classList.remove('hidden');
-    removeBtn.classList.remove('hidden');
+    byId('btnRemoveCover').classList.remove('hidden');
   } else {
+    img.removeAttribute('src');
     img.classList.add('hidden');
-    img.src = '';
-    removeBtn.classList.add('hidden');
+    byId('btnRemoveCover').classList.add('hidden');
   }
 }
 
-function handleCoverImageFile(input) {
-  const file = input.files && input.files[0];
-  if (!file) return;
-  if (file.size > COVER_IMAGE_MAX_BYTES) {
-    toast('Cover image is too large (max 8MB) — pick a smaller file', true);
-    input.value = '';
-    return;
+function applyTypeDefaults() {
+  const type = EVF.types.find((t) => String(t.id) === byId('evType').value);
+  if (!type) return;
+  if (!EVF.touched.has('message')) EVF.composer.setValue(type.default_message || '');
+  if (!EVF.touched.has('calendar')) {
+    byId('evHasCalendar').checked = type.default_duration_hours != null;
+    byId('evDuration').value = type.default_duration_hours != null ? type.default_duration_hours : '';
+    syncCalendarGroup();
   }
-  const reader = new FileReader();
-  reader.onload = () => setCoverImagePreview(reader.result);
-  reader.onerror = () => toast('Could not read that image file', true);
-  reader.readAsDataURL(file);
-}
-
-function removeCoverImage() {
-  setCoverImagePreview('');
-  document.getElementById('mCoverImageFile').value = '';
-}
-
-function closeModal() {
-  document.getElementById('eventModal').classList.remove('open');
-  unfocusModal();
-}
-
-async function saveEvent() {
-  const id = document.getElementById('modalEventId').value;
-  const startTime = document.getElementById('mStartTime').value.trim();
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime)) {
-    toast('Start time must be 24-hour HH:MM (e.g. 19:00)', true);
-    return;
+  if (!EVF.touched.has('recurrence')) {
+    const repeats = type.default_interval_days != null;
+    byId('evRecurrence').value = repeats ? 'interval_days' : 'none';
+    byId('evInterval').value = repeats ? type.default_interval_days : '';
+    syncRecurrenceGroups();
   }
-  const owningSelection = parseOwningTenantScopeValue(document.getElementById('mOwningTenant').value);
-  const payload = {
-    name:            document.getElementById('mName').value,
-    scope:           owningSelection.scope,
-    leadership_only: document.getElementById('mLeadershipOnly').checked,
-    interval_days:   parseInt(document.getElementById('mInterval').value),
-    start_time_utc:  startTime,
-    duration_hours:  parseFloat(document.getElementById('mDuration').value),
-    anchor_date:     document.getElementById('mAnchor').value,
-    discord_channel:         fieldValue('mChannel', 'mChannelFallback'),
-    notification_channel_id: fieldValue('mNotifChannel', 'mNotifChannelFallback'),
-    notification_role_id:    fieldValue('mNotifRole', 'mNotifRoleFallback'),
-    notify_minutes_before:   document.getElementById('mNotifMinutes').value
-                             ? parseInt(document.getElementById('mNotifMinutes').value)
-                             : null,
-    // Always sent, even empty — the modal shows the full current target
-    // list every time it's opened (see openEventModal), so the full list
-    // is what gets saved back, same convention as every other field here.
-    targets: Array.from(document.querySelectorAll('#mTargetsList .event-target-row'))
-      .map(eventTargetRowValue)
-      .filter(t => t.notification_channel_id),
-    description:     document.getElementById('mDescription').value,
-    cover_image_data: document.getElementById('mCoverImageData').value,
+  if (!EVF.touched.has('reminders')) EVF.reminders.setValue(type.default_reminder_minutes || []);
+  if (!EVF.touched.has('mention')) byId('evMentionRole').checked = !!type.default_mention_role;
+}
+
+// ── Audience rows ────────────────────────────────────────────
+
+function audienceTenants() {
+  const owner = ownerTenant();
+  const kingdomId = owner ? owner.kingdom_id : (TENANTS[0] ? TENANTS[0].kingdom_id : null);
+  return TENANTS.filter((t) => t.kingdom_id === kingdomId);
+}
+
+function newAudRow(slug) {
+  return {
+    slug, included: false, open: false, message: '', channel: '', role: '',
+    composer: null, channelPicker: null, rolePicker: null,
   };
-  // Spec §49 — a create sends the modal's selection straight as the
-  // X-Tenant-Slug header (that tenant becomes the owner). An edit's
-  // header must stay the event's ORIGINAL owning tenant (update_event
-  // looks the row up by that, and needs it to authorize a reassignment);
-  // the modal's (possibly different) selection goes in the payload as
-  // owning_tenant_slug instead, so the backend can move it.
-  let owningTenantOverride;
-  if (id) {
-    owningTenantOverride = tenantSlugFor((EVENTS_CACHE.find(e => String(e.id) === String(id)) || {}).owning_tenant_id);
-    payload.owning_tenant_slug = owningSelection.slug;
+}
+
+// Reads the live override widgets back into the row state before the list is
+// rebuilt or saved.
+function syncAudRow(row) {
+  if (row.composer) row.message = row.composer.value();
+  if (row.channelPicker) row.channel = row.channelPicker.value();
+  if (row.rolePicker) row.role = row.rolePicker.value();
+}
+
+function audRowHasOverrides(row) {
+  return !!(row.message.trim() || row.channel || row.role);
+}
+
+function renderAudience() {
+  const list = byId('evAudienceList');
+  const kingdomWide = byId('evScope').value === 'kingdom-wide';
+  const ownerSlug = ownerSlugValue();
+  const tenants = audienceTenants();
+  tenants.forEach((t) => { if (!EVF.aud.has(t.slug)) EVF.aud.set(t.slug, newAudRow(t.slug)); });
+  EVF.aud.forEach((row) => {
+    syncAudRow(row);
+    // The widgets are about to be rebuilt; their values now live in the row state.
+    row.composer = null; row.channelPicker = null; row.rolePicker = null;
+  });
+  list.innerHTML = tenants.map((t) => {
+    const row = EVF.aud.get(t.slug);
+    const isOwner = t.slug === ownerSlug;
+    const included = isOwner || row.included;
+    const count = [row.message.trim(), row.channel, row.role].filter(Boolean).length;
+    const checkbox = kingdomWide
+      ? ''
+      : `<input type="checkbox" id="audInc_${escapeHtml(t.slug)}" data-slug="${escapeHtml(t.slug)}" ${included ? 'checked' : ''} ${isOwner ? 'disabled' : ''}>`;
+    const name = kingdomWide
+      ? `<span class="audience__name">${escapeHtml(t.name)}</span>`
+      : `<label class="audience__name" for="audInc_${escapeHtml(t.slug)}">${escapeHtml(t.name)}${isOwner ? ' <span class="samaya-muted">(owner, always included)</span>' : ''}</label>`;
+    return `<li class="audience__item" data-slug="${escapeHtml(t.slug)}">
+      <div class="audience__head">${checkbox}${name}</div>
+      <details class="audience__overrides" data-slug="${escapeHtml(t.slug)}" ${row.open ? 'open' : ''}>
+        <summary>Overrides for ${escapeHtml(t.name)}${count ? ` (${count} set)` : ''}</summary>
+        <div class="audience__body" id="audBody_${escapeHtml(t.slug)}"></div>
+      </details>
+    </li>`;
+  }).join('');
+  list.querySelectorAll('details.audience__overrides').forEach((d) => {
+    const slug = d.dataset.slug;
+    if (d.open) mountAudRow(EVF.aud.get(slug));
+    d.addEventListener('toggle', () => {
+      const row = EVF.aud.get(slug);
+      row.open = d.open;
+      if (d.open && !row.composer) mountAudRow(row);
+    });
+  });
+  const unknown = EVF.event ? EVF.event.alliances.filter((a) => !tenantById(a.tenant_id)).length : 0;
+  const note = byId('evAudienceNote');
+  note.textContent = unknown
+    ? `This event also includes ${unknown} alliance${unknown === 1 ? '' : 's'} you cannot see. Changing the audience here removes ${unknown === 1 ? 'it' : 'them'}.`
+    : '';
+  note.classList.toggle('hidden', !unknown);
+}
+
+function mountAudRow(row) {
+  const prefix = 'evOv' + row.slug.replace(/[^a-zA-Z0-9]/g, '');
+  const body = byId('audBody_' + row.slug);
+  if (!body) return;
+  body.innerHTML = `
+    <div id="${prefix}MsgHost"></div>
+    <div class="audience__pickers">
+      <div id="${prefix}ChanHost"></div>
+      <div id="${prefix}RoleHost"></div>
+    </div>`;
+  row.composer = createComposer(byId(prefix + 'MsgHost'), {
+    idPrefix: prefix + 'Msg', label: 'Message for this alliance', value: row.message, rows: 4,
+    helper: 'Leave empty to use the event message.',
+    previewSlug: () => row.slug,
+    eventStart: eventStartDate,
+  });
+  row.composer.setPreviewSlug(row.slug);
+  row.channelPicker = mountDiscordPicker(byId(prefix + 'ChanHost'), {
+    kind: 'channel', slug: row.slug, id: prefix + 'Chan', label: 'Notification channel',
+    value: row.channel, emptyLabel: "Use the alliance's default channel",
+  });
+  row.rolePicker = mountDiscordPicker(byId(prefix + 'RoleHost'), {
+    kind: 'role', slug: row.slug, id: prefix + 'Role', label: 'Notification role',
+    value: row.role, emptyLabel: "Use the alliance's default role",
+  });
+}
+
+byId('evAudienceList').addEventListener('change', (e) => {
+  const box = e.target.closest('input[type="checkbox"][data-slug]');
+  if (!box) return;
+  EVF.aud.get(box.dataset.slug).included = box.checked;
+});
+
+// The audience rows to send. An alliance event lists every included alliance
+// (the owner always); a Kingdom-wide event only lists alliances with overrides.
+function collectAudience(scope) {
+  const ownerSlug = ownerSlugValue();
+  const out = [];
+  audienceTenants().forEach((t) => {
+    const row = EVF.aud.get(t.slug);
+    if (!row) return;
+    syncAudRow(row);
+    const included = t.slug === ownerSlug || row.included;
+    const has = audRowHasOverrides(row);
+    if (scope === 'kingdom-wide' ? !has : !included) return;
+    out.push({
+      tenant_slug: t.slug,
+      message_override: row.message.trim() || null,
+      notification_channel_id: row.channel || null,
+      notification_role_id: row.role || null,
+    });
+  });
+  return out;
+}
+
+// ── Open the form ────────────────────────────────────────────
+
+async function openEventForm({ mode, event, splitFrom, duplicate }) {
+  EVF.mode = mode;
+  EVF.event = event || null;
+  EVF.splitFrom = splitFrom || null;
+  EVF.aud = new Map();
+  EVF.touched = new Set();
+  const editing = mode === 'edit' || mode === 'split';
+  if (editing || duplicate) ['message', 'calendar', 'recurrence', 'reminders', 'mention'].forEach((f) => EVF.touched.add(f));
+
+  showFormErrors([]);
+  byId('eventForm').reset();
+  byId('eventModalTitle').textContent = editing ? 'Edit event' : (duplicate ? 'Duplicate event' : 'New event');
+  const banner = byId('evBanner');
+  if (mode === 'split') {
+    banner.textContent = `This change applies from ${splitFrom} onward. The current series ends the day before, and a new series starts on ${splitFrom} with your changes. Earlier dates stay as they are.`;
+  } else if (mode === 'edit' && event.recurrence_kind === 'interval_days') {
+    banner.textContent = 'This change applies to every occurrence. Dates that already happened stay as history; upcoming reminders and Discord events are rebuilt.';
   } else {
-    owningTenantOverride = owningSelection.slug;
+    banner.textContent = '';
+  }
+  banner.classList.toggle('hidden', !banner.textContent);
+  byId('btnSaveEvent').textContent = mode === 'split' ? 'Split and save' : (editing ? 'Save changes' : 'Create event');
+
+  // Owner. An existing event keeps its owner; a new one picks among the
+  // alliances the caller can write for.
+  const ownerSelect = byId('evOwner');
+  if (editing) {
+    const owner = tenantById(event.owning_tenant_id);
+    ownerSelect.innerHTML = optionsHtml([{ value: owner ? owner.slug : writeSlugForEvent(event), label: owner ? owner.name : tenantName(event.owning_tenant_id) }], '');
+    ownerSelect.disabled = true;
+  } else {
+    const filter = getTabFilter('events');
+    const writable = writableTenants();
+    const defaultOwner = (duplicate && tenantById(event.owning_tenant_id) && canWriteTenant(tenantById(event.owning_tenant_id)))
+      ? tenantById(event.owning_tenant_id).slug
+      : (writable.find((t) => t.slug === filter) || writable[0] || {}).slug;
+    ownerSelect.innerHTML = optionsHtml(writable.map((t) => ({ value: t.slug, label: t.name })), defaultOwner);
+    ownerSelect.disabled = false;
   }
 
   try {
-    if (id) {
-      await api('PATCH', `/api/events/${id}`, payload, false, owningTenantOverride);
-      toast('Event updated');
-    } else {
-      await api('POST', '/api/events', payload, false, owningTenantOverride);
-      toast('Event created');
+    EVF.types = await loadEventTypesFor(ownerSlugValue());
+  } catch (e) {
+    toast('Could not load event types: ' + e.message, true);
+    return;
+  }
+  byId('evType').innerHTML = optionsHtml(EVF.types.map((t) => ({ value: t.id, label: t.name })),
+    event ? event.type_id : (EVF.types[0] && EVF.types[0].id));
+
+  EVF.composer = createComposer(byId('evMessageHost'), {
+    idPrefix: 'evMsg', label: 'Message', value: event ? event.message : '', rows: 6,
+    helper: 'Posted at each reminder. If empty, reminders say "{name} starts {event_time_relative}".',
+    previewSlug: ownerSlugValue,
+    eventStart: eventStartDate,
+  });
+  EVF.composer.setPreviewSlug(ownerSlugValue());
+  byId('evMsgBody').addEventListener('input', () => EVF.touched.add('message'));
+
+  EVF.reminders = createReminderEditor(byId('evReminderHost'), {
+    idPrefix: 'evRem', value: event ? event.reminder_minutes : [],
+    onChange: () => EVF.touched.add('reminders'),
+  });
+
+  // Plain fields.
+  byId('evName').value = event ? (duplicate ? event.name + ' (copy)' : event.name) : '';
+  byId('evLocation').value = event ? (event.location || '') : '';
+  byId('evAnchor').value = event ? event.anchor_date : utcDateKey(new Date());
+  byId('evStart').value = event ? event.start_time_utc : '';
+  byId('evHasCalendar').checked = event ? event.has_calendar_entry : false;
+  byId('evDuration').value = event && event.duration_hours != null ? event.duration_hours : '';
+  byId('evRecurrence').value = event && event.recurrence_kind === 'interval_days' ? 'interval_days' : 'none';
+  byId('evInterval').value = event && event.interval_days ? event.interval_days : '';
+  byId('evUntil').value = event && event.until_date ? event.until_date : '';
+  byId('evScope').value = event ? event.scope : 'alliance';
+  byId('evMentionRole').checked = event ? event.mention_role : false;
+  byId('evLeadershipOnly').checked = event ? event.leadership_only : false;
+  byId('evCoverFile').value = '';
+  EVF.cover.original = event && !duplicate ? (event.cover_image_data || '') : '';
+  setCoverPreview(event ? (event.cover_image_data || '') : '');
+  if (mode === 'split') {
+    byId('evAnchor').value = splitFrom;
+    byId('evAnchor').disabled = true;
+    byId('evAnchorHelp').textContent = 'Fixed to the date this change starts from.';
+  } else {
+    byId('evAnchor').disabled = false;
+    byId('evAnchorHelp').textContent = 'The first (or only) date. Repeats count from here.';
+  }
+  // A series cannot be turned into a one-off while splitting it, and a one-off cannot split.
+  byId('evScope').disabled = false;
+
+  // Audience state from the event's own rows.
+  if (event) {
+    event.alliances.forEach((a) => {
+      const t = tenantById(a.tenant_id);
+      if (!t) return;
+      const row = newAudRow(t.slug);
+      row.included = true;
+      row.message = a.message_override || '';
+      row.channel = a.notification_channel_id || '';
+      row.role = a.notification_role_id || '';
+      row.open = audRowHasOverrides(row);
+      EVF.aud.set(t.slug, row);
+    });
+  }
+
+  syncCalendarGroup();
+  syncRecurrenceGroups();
+  syncLeadershipNote();
+  syncScopeGroups();
+  if (!editing && !duplicate) applyTypeDefaults();
+  openModalById('eventModal');
+}
+
+function closeEventModal() {
+  closeModalById('eventModal');
+}
+
+// Wire the static form controls once.
+byId('evType').addEventListener('change', applyTypeDefaults);
+byId('evOwner').addEventListener('change', async () => {
+  const slug = ownerSlugValue();
+  EVF.composer.setPreviewSlug(slug);
+  try {
+    const types = await loadEventTypesFor(slug);
+    const keep = byId('evType').value;
+    EVF.types = types;
+    byId('evType').innerHTML = optionsHtml(types.map((t) => ({ value: t.id, label: t.name })), keep);
+    applyTypeDefaults();
+  } catch (e) { toast('Could not load event types: ' + e.message, true); }
+  renderAudience();
+});
+byId('evScope').addEventListener('change', syncScopeGroups);
+byId('evHasCalendar').addEventListener('change', () => { EVF.touched.add('calendar'); syncCalendarGroup(); });
+byId('evDuration').addEventListener('input', () => EVF.touched.add('calendar'));
+byId('evRecurrence').addEventListener('change', () => { EVF.touched.add('recurrence'); syncRecurrenceGroups(); });
+byId('evInterval').addEventListener('input', () => EVF.touched.add('recurrence'));
+byId('evMentionRole').addEventListener('change', () => EVF.touched.add('mention'));
+byId('evLeadershipOnly').addEventListener('change', syncLeadershipNote);
+['evAnchor', 'evStart'].forEach((id) => byId(id).addEventListener('input', () => {
+  if (EVF.composer) EVF.composer.refresh();
+}));
+byId('evCoverFile').addEventListener('change', async (e) => {
+  const dataUri = await readImageFile(e.target.files && e.target.files[0], 8 * 1024 * 1024);
+  if (dataUri) setCoverPreview(dataUri);
+  else e.target.value = '';
+});
+byId('btnRemoveCover').addEventListener('click', () => { setCoverPreview(''); byId('evCoverFile').value = ''; });
+byId('eventForm').addEventListener('input', (e) => { if (e.target.removeAttribute) e.target.removeAttribute('aria-invalid'); });
+byId('eventForm').addEventListener('submit', (e) => { e.preventDefault(); saveEventForm(); });
+byId('btnSaveEvent').addEventListener('click', saveEventForm);
+
+// ── Read, validate, diff, save ───────────────────────────────
+
+// Returns the form's values, or null after showing what is wrong.
+function collectEventForm() {
+  const errors = [];
+  const name = byId('evName').value.trim();
+  if (!name) errors.push({ field: 'evName', msg: 'Give the event a name.' });
+  const typeId = parseInt(byId('evType').value, 10);
+  if (Number.isNaN(typeId)) errors.push({ field: 'evType', msg: 'Pick an event type.' });
+  const anchor = byId('evAnchor').value;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor)) errors.push({ field: 'evAnchor', msg: 'Enter the first date as YYYY-MM-DD.' });
+  const start = normalizeTime(byId('evStart').value);
+  if (!start) errors.push({ field: 'evStart', msg: 'Enter the start time in UTC as 24-hour HH:MM, for example 19:00.' });
+
+  const hasCalendar = byId('evHasCalendar').checked;
+  let duration = null;
+  if (hasCalendar) {
+    duration = parseFloat(byId('evDuration').value);
+    if (!(duration > 0)) errors.push({ field: 'evDuration', msg: 'A calendar entry needs a duration greater than 0 hours.' });
+  }
+  const repeats = byId('evRecurrence').value === 'interval_days';
+  let interval = null;
+  let until = null;
+  if (repeats) {
+    interval = parseInt(byId('evInterval').value, 10);
+    if (!(interval >= 1)) errors.push({ field: 'evInterval', msg: 'A repeating event needs an interval of at least 1 day.' });
+    until = byId('evUntil').value || null;
+    if (until && /^\d{4}-\d{2}-\d{2}$/.test(anchor) && until < anchor) {
+      errors.push({ field: 'evUntil', msg: 'The end date cannot be before the first date.' });
     }
-    closeModal();
-    loadEvents();
-  } catch(e) { toast(e.message, true); }
-}
-
-async function permanentDelete(btn) {
-  var id   = btn.getAttribute('data-id');
-  var name = btn.getAttribute('data-name');
-
-  if (!confirm('Permanently delete "' + name + '"?\n\nThis will:\n- Remove the event definition\n- Delete all future occurrences\n- Preserve PostLog history\n\nThis cannot be undone.')) return;
-
-  var input = prompt('Type the event name to confirm:\n\n' + name);
-  if (input === null) return;
-  if (input.trim() !== name.trim()) {
-    alert('Name did not match. Deletion cancelled.');
-    return;
   }
+  const scope = byId('evScope').value;
+  const audience = collectAudience(scope);
+  const tooLong = audience.find((a) => a.message_override && a.message_override.length > COMPOSER_MAX_CHARS);
+  if (tooLong) errors.push({ msg: `The message for ${tooLong.tenant_slug} is longer than ${COMPOSER_MAX_CHARS} characters.` });
+  const badId = audience.find((a) => [a.notification_channel_id, a.notification_role_id].some((v) => v && !/^\d+$/.test(v)));
+  if (badId) errors.push({ msg: `A channel or role ID for ${badId.tenant_slug} must be digits only.` });
 
-  const tenantSlug = tenantSlugFor((EVENTS_CACHE.find(e => String(e.id) === String(id)) || {}).owning_tenant_id);
-  try {
-    var data = await api('DELETE', '/api/events/' + id + '/permanent', null, false, tenantSlug);
-    toast('Deleted "' + data.event_name + '". ' + data.post_log_entries_preserved + ' PostLog entries preserved.');
-    loadEvents();
-  } catch(e) { toast(e.message, true); }
-}
-
-async function toggleActive(id, current) {
-  const tenantSlug = tenantSlugFor((EVENTS_CACHE.find(e => String(e.id) === String(id)) || {}).owning_tenant_id);
-  try {
-    await api('PATCH', `/api/events/${id}`, { active: !current }, false, tenantSlug);
-    toast(current ? 'Event deactivated' : 'Event activated');
-    loadEvents();
-  } catch(e) { toast(e.message, true); }
-}
-
-async function previewOccurrences() {
-  const payload = {
-    name:           document.getElementById('mName').value || 'preview',
-    interval_days:  parseInt(document.getElementById('mInterval').value),
-    start_time_utc: document.getElementById('mStartTime').value || '00:00',
-    duration_hours: parseFloat(document.getElementById('mDuration').value) || 1,
-    anchor_date:    document.getElementById('mAnchor').value,
-    discord_channel:'', description:'',
+  if (errors.length) { showFormErrors(errors); return null; }
+  showFormErrors([]);
+  return {
+    type_id: typeId, name, location: byId('evLocation').value.trim(), scope,
+    leadership_only: byId('evLeadershipOnly').checked, mention_role: byId('evMentionRole').checked,
+    message: EVF.composer.value(), anchor_date: anchor, start_time_utc: start,
+    duration_hours: duration, recurrence_kind: repeats ? 'interval_days' : 'none',
+    interval_days: interval, until_date: until, reminder_minutes: EVF.reminders.value(),
+    alliances: audience, ownerSlug: ownerSlugValue(),
   };
-  if (!payload.anchor_date || !payload.interval_days) {
-    document.getElementById('previewResult').textContent = 'Enter interval and anchor date first.';
-    return;
+}
+
+function audienceKey(rows) {
+  return JSON.stringify(rows.map((r) => [r.tenantId, r.message || '', r.channel || '', r.role || '']).sort());
+}
+
+function origAudienceKey(ev, scope) {
+  const rows = ev.alliances.map((a) => ({
+    tenantId: a.tenant_id, message: a.message_override, channel: a.notification_channel_id, role: a.notification_role_id,
+  })).filter((r) => scope !== 'kingdom-wide' || r.message || r.channel || r.role);
+  return audienceKey(rows);
+}
+
+function formAudienceKey(f) {
+  const rows = f.alliances.map((a) => {
+    const t = tenantBySlug(a.tenant_slug);
+    return { tenantId: t ? t.id : 0, message: a.message_override, channel: a.notification_channel_id, role: a.notification_role_id };
+  });
+  return audienceKey(rows);
+}
+
+// The EventPatch fields that differ from the event as loaded.
+function buildEventChanges(orig, f, skipAnchor) {
+  const c = {};
+  if (f.type_id !== orig.type_id) c.type_id = f.type_id;
+  if (f.name !== orig.name) c.name = f.name;
+  if (f.location !== (orig.location || '')) c.location = f.location;
+  if (f.scope !== orig.scope) c.scope = f.scope;
+  if (f.leadership_only !== orig.leadership_only) c.leadership_only = f.leadership_only;
+  if (f.mention_role !== orig.mention_role) c.mention_role = f.mention_role;
+  if (f.message !== (orig.message || '')) c.message = f.message;
+  if (!skipAnchor && f.anchor_date !== orig.anchor_date) c.anchor_date = f.anchor_date;
+  if (f.start_time_utc !== orig.start_time_utc) c.start_time_utc = f.start_time_utc;
+  if (f.duration_hours !== orig.duration_hours) c.duration_hours = f.duration_hours;
+  if (f.recurrence_kind !== orig.recurrence_kind || f.interval_days !== orig.interval_days) {
+    c.recurrence_kind = f.recurrence_kind;
+    c.interval_days = f.interval_days;
   }
+  if ((f.until_date || null) !== (orig.until_date || null)) c.until_date = f.until_date;
+  if (JSON.stringify(f.reminder_minutes) !== JSON.stringify(orig.reminder_minutes)) c.reminder_minutes = f.reminder_minutes;
+  if (formAudienceKey(f) !== origAudienceKey(orig, f.scope)) c.alliances = f.alliances;
+  if (EVF.cover.current !== (orig.cover_image_data || '')) c.cover_image_data = EVF.cover.current;
+  return c;
+}
+
+async function saveEventForm() {
+  if (EVF.saving) return;
+  const f = collectEventForm();
+  if (!f) return;
+  const saveBtn = byId('btnSaveEvent');
+  EVF.saving = true;
+  saveBtn.disabled = true;
   try {
-    const dates = await api('POST', '/api/scheduler/preview', payload);
-    document.getElementById('previewResult').textContent =
-      dates.map(d => `${d.date} (${d.day})`).join('  ·  ');
-  } catch(e) {
-    document.getElementById('previewResult').textContent = e.message;
+    if (EVF.mode === 'create') {
+      const payload = {
+        type_id: f.type_id, name: f.name, scope: f.scope, leadership_only: f.leadership_only,
+        start_time_utc: f.start_time_utc, anchor_date: f.anchor_date, location: f.location,
+        message: f.message, duration_hours: f.duration_hours, recurrence_kind: f.recurrence_kind,
+        interval_days: f.interval_days, until_date: f.until_date, mention_role: f.mention_role,
+        reminder_minutes: f.reminder_minutes, alliances: f.alliances,
+      };
+      if (EVF.cover.current) payload.cover_image_data = EVF.cover.current;
+      await api('POST', '/api/events', payload, false, f.ownerSlug);
+      toast('Event created.');
+    } else if (EVF.mode === 'edit') {
+      const changes = buildEventChanges(EVF.event, f, false);
+      if (!Object.keys(changes).length) { toast('Nothing was changed.'); closeEventModal(); return; }
+      const res = await api('PATCH', `/api/events/${EVF.event.id}`, changes, false, writeSlugForEvent(EVF.event));
+      toastDiscordErrors(res.discord_errors, 'Changes saved to every occurrence.');
+    } else {
+      const changes = buildEventChanges(EVF.event, f, true);
+      if (!Object.keys(changes).length) {
+        showFormErrors([{ msg: 'Change at least one field. Otherwise there is nothing to split.' }]);
+        return;
+      }
+      const res = await api('POST', `/api/events/${EVF.event.id}/split`,
+        { from_date: EVF.splitFrom, changes }, false, writeSlugForEvent(EVF.event));
+      toastDiscordErrors(res.discord_errors, `Series split. The new version starts on ${EVF.splitFrom}.`);
+    }
+    closeEventModal();
+    invalidateEventTypes();
+    loadEvents();
+  } catch (e) {
+    showFormErrors([{ msg: e.message }]);
+    toast(e.message, true);
+  } finally {
+    EVF.saving = false;
+    saveBtn.disabled = false;
   }
 }
 
-
-// Wire the Event modal's markdown toolbar once at load (see common.js's
-// wireMarkdownToolbar) — the modal itself is hidden until openEventModal()
-// shows it, but its markup (and this toolbar) exist in the static page
-// from the start, so this can run immediately rather than waiting for a
-// first open.
-wireMarkdownToolbar('mDescriptionToolbar');
-
-// Wire the Events view/modal's own controls — replaces their onclick/
-// onchange/oninput attributes (Phase 3 audit remediation).
-document.getElementById('btnAddEvent')?.addEventListener('click', () => openEventModal());
-document.getElementById('btnExportEventsCsv')?.addEventListener('click', () => exportEventsCsv());
-document.getElementById('btnImportEventsCsv')?.addEventListener('click', () => document.getElementById('eventsImportFile').click());
-document.getElementById('eventsImportFile')?.addEventListener('change', function () { importEventsCsv(this.files[0]); });
-document.getElementById('mStartTime')?.addEventListener('input', () => renderEventDescriptionPreview());
-document.getElementById('mAnchor')?.addEventListener('change', () => renderEventDescriptionPreview());
-document.getElementById('mDescription')?.addEventListener('input', () => renderEventDescriptionPreview());
-document.getElementById('mPreviewTenant')?.addEventListener('change', () => renderEventDescriptionPreview());
-document.getElementById('mCoverImageFile')?.addEventListener('change', function () { handleCoverImageFile(this); });
-document.getElementById('mCoverImageRemove')?.addEventListener('click', () => removeCoverImage());
-document.getElementById('mLeadershipOnly')?.addEventListener('change', () => toggleLeadershipNote());
-document.getElementById('btnAddEventTarget')?.addEventListener('click', () => addEventTargetRow());
-document.getElementById('btnPreviewOccurrences')?.addEventListener('click', () => previewOccurrences());
-document.getElementById('btnSaveEvent')?.addEventListener('click', () => saveEvent());
+VIEW_LOADERS.events = loadEvents;

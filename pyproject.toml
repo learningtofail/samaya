@@ -2,6 +2,10 @@
 line-length = 160
 
 [tool.ruff.lint]
+# Pinned explicitly: ruff 0.16 widened its default rule set (451 findings on
+# this codebase), and requirements-dev.txt only says ruff>=0.15, so CI picked
+# the new defaults up on its own. This is the long-standing default.
+select = ["E4", "E7", "E9", "F"]
 # Default select (E, F) plus the codebase's own conventions accounted for
 # below — see CLAUDE.md's "Conventions worth knowing before editing" for
 # the repo-wide context these three ignores are pulled from.

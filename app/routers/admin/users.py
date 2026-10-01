@@ -23,6 +23,7 @@ def _user_dict(u: User) -> dict:
         "id":               u.id,
         "discord_id":       u.discord_id,
         "discord_username": u.discord_username,
+        "display_name":     u.display_name,
         "is_superadmin":    u.is_superadmin,
         "created_at":       u.created_at.isoformat() if u.created_at else None,
         "last_login_at":    u.last_login_at.isoformat() if u.last_login_at else None,
@@ -48,15 +49,18 @@ async def update_user(
     # next request would 403 on require_superadmin with no one able to
     # undo it short of direct database access. Someone *else* can still
     # demote them.
-    if target.id == user.id and not payload.is_superadmin:
+    if target.id == user.id and payload.is_superadmin is False:
         raise HTTPException(status_code=400, detail="You can't remove your own superadmin access")
 
-    before = target.is_superadmin
-    target.is_superadmin = payload.is_superadmin
+    before = {"is_superadmin": target.is_superadmin, "display_name": target.display_name}
+    if payload.is_superadmin is not None:
+        target.is_superadmin = payload.is_superadmin
+    if "display_name" in payload.model_fields_set:
+        target.display_name = (payload.display_name or "").strip() or None
     await log_change(
         db, user_id=user.id, tenant_id=None,
         table_name="users", row_id=target.id, action="update",
-        before={"is_superadmin": before}, after={"is_superadmin": target.is_superadmin},
+        before=before, after={"is_superadmin": target.is_superadmin, "display_name": target.display_name},
     )
     await db.commit()
     await db.refresh(target)

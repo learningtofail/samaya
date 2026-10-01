@@ -219,3 +219,56 @@ class TestBuildStartDatetime:
         result = build_start_datetime(date(2025, 5, 1), dtime(0, 0))
         assert result.tzinfo is not None
         assert result.utcoffset().total_seconds() == 0
+
+
+class TestUnifiedRecurrence:
+    """Spec §66.5: one predicate for 'none' and 'interval_days', with an
+    optional last date (set when a series is split)."""
+
+    def test_none_is_only_the_anchor_date(self):
+        from datetime import date
+        from services.recurrence import occurs_on
+        anchor = date(2026, 10, 5)
+        assert occurs_on("none", anchor, None, None, anchor)
+        assert not occurs_on("none", anchor, None, None, date(2026, 10, 6))
+        assert not occurs_on("none", anchor, None, None, date(2026, 10, 4))
+
+    def test_interval_days_matches_existing_predicate(self):
+        from datetime import date, timedelta
+        from services.recurrence import does_occur_on, occurs_on
+        anchor = date(2026, 10, 1)
+        for offset in range(-3, 40):
+            target = anchor + timedelta(days=offset)
+            assert occurs_on("interval_days", anchor, 7, None, target) == does_occur_on(anchor, 7, target)
+
+    def test_until_is_inclusive_and_stops_the_series(self):
+        from datetime import date
+        from services.recurrence import occurs_on
+        anchor, until = date(2026, 10, 1), date(2026, 10, 15)
+        assert occurs_on("interval_days", anchor, 7, until, date(2026, 10, 15))
+        assert not occurs_on("interval_days", anchor, 7, until, date(2026, 10, 22))
+
+    def test_until_applies_to_one_off_too(self):
+        from datetime import date
+        from services.recurrence import occurs_on
+        assert not occurs_on("none", date(2026, 10, 5), None, date(2026, 10, 4), date(2026, 10, 5))
+
+    def test_unknown_kind_raises(self):
+        import pytest
+        from datetime import date
+        from services.recurrence import occurs_on
+        with pytest.raises(ValueError):
+            occurs_on("monthly_day", date(2026, 10, 1), None, None, date(2026, 10, 1))
+
+    def test_missing_interval_never_matches(self):
+        from datetime import date
+        from services.recurrence import occurs_on
+        assert not occurs_on("interval_days", date(2026, 10, 1), None, None, date(2026, 10, 1))
+
+    def test_dates_in_window(self):
+        from datetime import date
+        from services.recurrence import event_dates_in_window
+        got = event_dates_in_window("interval_days", date(2026, 10, 1), 7, date(2026, 10, 20), date(2026, 10, 1), 28)
+        assert got == [date(2026, 10, 1), date(2026, 10, 8), date(2026, 10, 15)]
+        assert event_dates_in_window("none", date(2026, 10, 9), None, None, date(2026, 10, 1), 28) == [date(2026, 10, 9)]
+        assert event_dates_in_window("none", date(2026, 12, 9), None, None, date(2026, 10, 1), 28) == []

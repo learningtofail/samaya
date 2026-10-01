@@ -20,11 +20,14 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy.orm import selectinload
+
 from models import get_db
-from services.static_assets import bust_static_cache
-from models.db import Announcement, Occurrence, Tenant, Ticket, TicketVote
+from models.db import EventOccurrence, Tenant, Ticket, TicketVote
 from services.rate_limit import RateLimiter
 from services.sessions import SECRET_KEY
+from services.static_assets import bust_static_cache
+from services.ticket_views import ACTIVE_STATUSES, ARCHIVED_STATUSES, occurrence_names, response_dict
 
 router = APIRouter()
 
@@ -44,13 +47,6 @@ _KINDS = ("feedback", "event_request", "announcement_request", "error")
 _FEEDBACK_CATEGORIES = ("Bug", "Suggestion", "Other")
 _ERROR_TYPES = ("Wrong date or time", "Wrong channel", "Duplicate posting", "Didn't happen as scheduled", "Other")
 
-# Tickets not yet declined show on the public board (spec §43.3) — 'open'
-# is the natural default, and 'done'/'planned'/'in_progress' still stay
-# visible so the community can see triage progress, not just the raw
-# unsorted inbox.
-_PUBLIC_STATUSES = ("open", "planned", "in_progress", "done")
-
-
 def _hash_voter_id(raw_voter_id: str) -> str:
     """Spec §43.2 — never store the client-supplied X-Voter-Id verbatim.
     SECRET_KEY doubles as the server-side pepper here; it's already the
@@ -68,7 +64,6 @@ class TicketIn(BaseModel):
     description: str = Field(max_length=_DESCRIPTION_MAX)
     tenant_slug: str | None = None
     related_occurrence_id: int | None = None
-    related_announcement_id: int | None = None
     submitter_contact: str | None = None
 
     @field_validator("kind")
@@ -86,13 +81,7 @@ class TicketIn(BaseModel):
         return v.strip()
 
 
-def _ticket_public_dict(t: Ticket, tenant_by_id: dict, occ_by_id: dict, ann_by_id: dict, voted_ticket_ids: set) -> dict:
-    related_name = None
-    if t.related_occurrence_id and t.related_occurrence_id in occ_by_id:
-        related_name = occ_by_id[t.related_occurrence_id]
-    elif t.related_announcement_id and t.related_announcement_id in ann_by_id:
-        related_name = ann_by_id[t.related_announcement_id]
-
+def _ticket_public_dict(t: Ticket, tenant_by_id: dict, occ_names: dict, voted_ticket_ids: set) -> dict:
     tenant = tenant_by_id.get(t.tenant_id) if t.tenant_id else None
     return {
         "id": t.id,
@@ -105,7 +94,8 @@ def _ticket_public_dict(t: Ticket, tenant_by_id: dict, occ_by_id: dict, ann_by_i
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "tenant_name": tenant.name if tenant else None,
         "tenant_slug": tenant.slug if tenant else None,
-        "related_name": related_name,
+        "related_name": occ_names.get(t.related_occurrence_id),
+        "responses": [response_dict(r) for r in t.responses],
         # Never submitter_contact — admin-only, see routers/admin/tickets.py.
         "voted_by_me": t.id in voted_ticket_ids,
     }
@@ -115,49 +105,35 @@ def _ticket_public_dict(t: Ticket, tenant_by_id: dict, occ_by_id: dict, ann_by_i
 async def list_tickets(
     x_voter_id: str = Header(default=""), db: AsyncSession = Depends(get_db), _rl: None = Depends(_list_tickets_limit)
 ):
-    """Public board listing (spec §43.3) — every non-declined ticket,
-    sorted by upvote_count descending. No submitter_contact anywhere in
-    this response shape."""
+    """Public board (spec §66.10): `active` (open, planned, in progress,
+    most upvoted first) and `archived` (done and declined, newest first,
+    read-only). Dismissed tickets are in neither. No submitter_contact."""
     result = await db.execute(
-        select(Ticket).where(Ticket.status.in_(_PUBLIC_STATUSES)).order_by(Ticket.upvote_count.desc(), Ticket.created_at.desc())
+        select(Ticket).options(selectinload(Ticket.responses))
+        .where(Ticket.status.in_(ACTIVE_STATUSES + ARCHIVED_STATUSES))
+        .order_by(Ticket.upvote_count.desc(), Ticket.created_at.desc(), Ticket.id.desc())
     )
-    tickets = result.scalars().all()
+    tickets = result.scalars().unique().all()
 
     tenant_ids = {t.tenant_id for t in tickets if t.tenant_id}
     tenant_by_id = {}
     if tenant_ids:
         tres = await db.execute(select(Tenant).where(Tenant.id.in_(tenant_ids)))
-        tenant_by_id = {t.id: t for t in tres.scalars().all()}
+        tenant_by_id = {t.id: t for t in tres.scalars().unique().all()}
+    occ_names = await occurrence_names(db, tickets)
 
-    occ_ids = {t.related_occurrence_id for t in tickets if t.related_occurrence_id}
-    occ_by_id = {}
-    if occ_ids:
-        # Occurrence has no bare name column — go through its EventDefinition.
-        from models.db import EventDefinition
-        ores = await db.execute(
-            select(Occurrence.id, EventDefinition.name)
-            .join(EventDefinition, Occurrence.event_id == EventDefinition.id)
-            .where(Occurrence.id.in_(occ_ids))
-        )
-        occ_by_id = {row[0]: row[1] for row in ores.all()}
-
-    ann_ids = {t.related_announcement_id for t in tickets if t.related_announcement_id}
-    ann_by_id = {}
-    if ann_ids:
-        ares = await db.execute(select(Announcement.id, Announcement.title).where(Announcement.id.in_(ann_ids)))
-        ann_by_id = {row[0]: row[1] for row in ares.all()}
-
-    voter_hash = _hash_voter_id(x_voter_id) if x_voter_id else None
     voted_ticket_ids = set()
-    if voter_hash and tickets:
+    if x_voter_id and tickets:
         vres = await db.execute(
             select(TicketVote.ticket_id).where(
-                TicketVote.voter_key == voter_hash, TicketVote.ticket_id.in_([t.id for t in tickets])
+                TicketVote.voter_key == _hash_voter_id(x_voter_id), TicketVote.ticket_id.in_([t.id for t in tickets])
             )
         )
         voted_ticket_ids = {row[0] for row in vres.all()}
 
-    return JSONResponse([_ticket_public_dict(t, tenant_by_id, occ_by_id, ann_by_id, voted_ticket_ids) for t in tickets])
+    rows = [_ticket_public_dict(t, tenant_by_id, occ_names, voted_ticket_ids) for t in tickets]
+    archived = sorted((r for r in rows if r["status"] in ARCHIVED_STATUSES), key=lambda r: r["created_at"] or "", reverse=True)
+    return JSONResponse({"active": [r for r in rows if r["status"] in ACTIVE_STATUSES], "archived": archived})
 
 
 @router.post("/api/tickets")
@@ -170,11 +146,10 @@ async def create_ticket(payload: TicketIn, db: AsyncSession = Depends(get_db), _
             raise HTTPException(status_code=404, detail=f"No such alliance: {payload.tenant_slug}")
         tenant_id = tenant.id
 
-    if payload.related_occurrence_id and payload.related_announcement_id:
-        raise HTTPException(status_code=422, detail="A ticket can reference an occurrence or an announcement, not both")
-
-    if payload.kind == "error" and not payload.related_occurrence_id and not payload.related_announcement_id:
-        raise HTTPException(status_code=422, detail="An error report must reference the event or announcement it's about")
+    if payload.kind == "error" and not payload.related_occurrence_id:
+        raise HTTPException(status_code=422, detail="An error report must reference the event it's about")
+    if payload.related_occurrence_id and await db.get(EventOccurrence, payload.related_occurrence_id) is None:
+        raise HTTPException(status_code=422, detail="That event no longer exists")
 
     if payload.error_type is not None:
         valid_types = _FEEDBACK_CATEGORIES if payload.kind == "feedback" else _ERROR_TYPES
@@ -188,7 +163,6 @@ async def create_ticket(payload: TicketIn, db: AsyncSession = Depends(get_db), _
         description=payload.description,
         tenant_id=tenant_id,
         related_occurrence_id=payload.related_occurrence_id,
-        related_announcement_id=payload.related_announcement_id,
         submitter_contact=(payload.submitter_contact or "").strip() or None,
         status="open",
         upvote_count=1,
@@ -223,8 +197,10 @@ async def vote_ticket(
         raise HTTPException(status_code=400, detail="X-Voter-Id header is required")
 
     ticket = await db.get(Ticket, ticket_id)
-    if not ticket:
+    if not ticket or ticket.status == "dismissed":
         raise HTTPException(status_code=404, detail="Ticket not found")
+    if ticket.status in ARCHIVED_STATUSES:
+        raise HTTPException(status_code=409, detail="This ticket is archived and can no longer be voted on")
 
     voter_hash = _hash_voter_id(x_voter_id)
     existing = await db.execute(
