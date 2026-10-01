@@ -8,12 +8,17 @@ built:
   Occurrence, PostLog                    — events and Discord posting
   Announcement, AnnouncementTarget       — scheduled announcements (Phase 5)
   SchedulerState                         — background job status, per tenant
+  EventType, Event, EventAlliance,
+  EventReminder, EventOccurrence,
+  Delivery                               — the unified event model (spec §66)
 
 Every table has its own docstring explaining what it's for and why it's
 shaped the way it is — this header is just the map."""
+import uuid
+
 from sqlalchemy import (
-    Boolean, CheckConstraint, Column, Date, DateTime,
-    ForeignKey, Integer, Numeric, Text, Time,
+    JSON, Boolean, CheckConstraint, Column, Date, DateTime,
+    ForeignKey, Index, Integer, Numeric, Text, Time,
     UniqueConstraint, func
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -66,7 +71,9 @@ class DiscordServer(Base):
     guild_id   = Column(Text, nullable=False, unique=True)
     bot_token  = Column(Text, nullable=True)
     public_key = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # NOT NULL since spec §66.8: production's hand-written scripts always
+    # created this column NOT NULL, so the model now says the same.
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     tenants = relationship("Tenant", back_populates="server")
 
@@ -100,6 +107,13 @@ class Tenant(Base):
     # unaffected.
     icon_image_data = Column(Text, nullable=True)
 
+    # Spec §66.1 — the alliance's one named Notifications destination: where
+    # reminder deliveries go unless an event overrides it. Empty means "no
+    # destination configured" (the delivery is recorded as an error rather
+    # than silently skipped).
+    notification_channel_id = Column(Text, nullable=False, default="", server_default="")
+    notification_role_id    = Column(Text, nullable=False, default="", server_default="")
+
     # Eager by default (lazy="joined") on both: a single cheap FK join
     # each, needed wherever a Tenant's Discord credentials (server) or
     # Kingdom name (kingdom, for the {kingdom_name} announcement-template
@@ -126,6 +140,9 @@ class User(Base):
     is_superadmin  = Column(Boolean, nullable=False, default=False)
     created_at     = Column(DateTime(timezone=True), server_default=func.now())
     last_login_at  = Column(DateTime(timezone=True))
+    # Spec §66.1 — the name shown publicly next to a coordinator's feedback
+    # responses; NULL/empty falls back to discord_username.
+    display_name   = Column(Text, nullable=True)
 
 
 class UserTenant(Base):
@@ -496,7 +513,7 @@ class AnnouncementTemplate(Base):
     body_template         = Column(Text, nullable=False)
     leadership_only       = Column(Boolean, nullable=False, default=False)
     event_offset_minutes  = Column(Integer, nullable=False, default=0)
-    created_at            = Column(DateTime(timezone=True), server_default=func.now())
+    created_at            = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
         UniqueConstraint("owning_tenant_id", "name", name="uq_announcement_template_name"),
@@ -591,3 +608,197 @@ class SchedulerState(Base):
     last_result  = Column(Text)
     last_detail  = Column(Text)
     next_run_utc = Column(DateTime(timezone=True))
+
+
+# ---------------------------------------------------------------------------
+# Unified event model (spec §66). These tables sit beside the older
+# event_definitions/announcements tables until the closure phase drops those;
+# the occurrences table is named event_occurrences here because "occurrences"
+# is still taken by the old model until then.
+# ---------------------------------------------------------------------------
+
+class EventType(Base):
+    """A reusable template for events: the one label that replaces any
+    separate importance/frequency/category (spec §66 decisions). The
+    default_* columns are copied onto a new Event when its own fields are
+    left out of the create request; editing a type later never changes
+    events that already exist."""
+    __tablename__ = "event_types"
+
+    id                       = Column(Integer, primary_key=True)
+    kingdom_id               = Column(Integer, ForeignKey("kingdoms.id"), nullable=False)
+    name                     = Column(Text, nullable=False)
+    color                    = Column(Text, nullable=False, default="#475569")
+    default_duration_hours   = Column(Numeric(4, 1), nullable=True)
+    default_interval_days    = Column(Integer, nullable=True)
+    default_message          = Column(Text, nullable=False, default="")
+    default_reminder_minutes = Column(JSON, nullable=False, default=list)
+    default_mention_role     = Column(Boolean, nullable=False, default=False)
+    sort_order               = Column(Integer, nullable=False, default=0)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("kingdom_id", "name", name="uq_event_type_name"),
+        CheckConstraint(
+            "default_duration_hours IS NULL OR default_duration_hours > 0",
+            name="ck_event_type_duration_positive",
+        ),
+        CheckConstraint(
+            "default_interval_days IS NULL OR default_interval_days > 0",
+            name="ck_event_type_interval_positive",
+        ),
+    )
+
+
+class Event(Base):
+    """The definition of something that happens once or repeats. An
+    announcement is an Event with no duration (spec §66): a calendar entry
+    exists exactly when duration_hours is set. series_id is shared by every
+    part of a series that was split by a "this and following" edit (§66.4a)
+    so the admin list can show them as one."""
+    __tablename__ = "events"
+
+    id               = Column(Integer, primary_key=True)
+    owning_tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    type_id          = Column(Integer, ForeignKey("event_types.id"), nullable=False)
+    series_id        = Column(Text, nullable=False, default=lambda: uuid.uuid4().hex)
+    name             = Column(Text, nullable=False)
+    scope            = Column(Text, nullable=False, default="alliance")
+    leadership_only  = Column(Boolean, nullable=False, default=False)
+    message          = Column(Text, nullable=False, default="")
+    location         = Column(Text, nullable=False, default="")
+    start_time_utc   = Column(Time, nullable=False)
+    duration_hours   = Column(Numeric(4, 1), nullable=True)
+    recurrence_kind  = Column(Text, nullable=False, default="none")
+    interval_days    = Column(Integer, nullable=True)
+    anchor_date      = Column(Date, nullable=False)
+    until_date       = Column(Date, nullable=True)
+    mention_role     = Column(Boolean, nullable=False, default=False)
+    active           = Column(Boolean, nullable=False, default=True)
+    cover_image_data = Column(Text, nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at       = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    event_type = relationship("EventType", lazy="joined")
+    alliances  = relationship("EventAlliance", back_populates="event", cascade="all, delete-orphan")
+    reminders  = relationship("EventReminder", back_populates="event", cascade="all, delete-orphan")
+    occurrences = relationship("EventOccurrence", back_populates="event", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        CheckConstraint("scope IN ('alliance', 'kingdom-wide')", name="ck_event_scope_valid"),
+        CheckConstraint("recurrence_kind IN ('none', 'interval_days')", name="ck_event_recurrence_kind"),
+        CheckConstraint(
+            "(recurrence_kind = 'none' AND interval_days IS NULL) OR "
+            "(recurrence_kind = 'interval_days' AND interval_days IS NOT NULL AND interval_days > 0)",
+            name="ck_event_recurrence_consistent",
+        ),
+        CheckConstraint("duration_hours IS NULL OR duration_hours > 0", name="ck_event_duration_positive"),
+        CheckConstraint("until_date IS NULL OR until_date >= anchor_date", name="ck_event_until_after_anchor"),
+    )
+
+
+class EventAlliance(Base):
+    """Audience. For an 'alliance' event, one row per participating
+    alliance (the owner included). For a 'kingdom-wide' event every
+    alliance in the Kingdom takes part and rows exist only to carry an
+    override. message_override and the destination columns are NULL to
+    mean "use the event's message / the alliance's own default"."""
+    __tablename__ = "event_alliances"
+
+    id                      = Column(Integer, primary_key=True)
+    event_id                = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    tenant_id               = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    message_override        = Column(Text, nullable=True)
+    notification_channel_id = Column(Text, nullable=True)
+    notification_role_id    = Column(Text, nullable=True)
+
+    event = relationship("Event", back_populates="alliances")
+
+    __table_args__ = (
+        UniqueConstraint("event_id", "tenant_id", name="uq_event_alliance"),
+    )
+
+
+class EventReminder(Base):
+    """A delivery rule: send a reminder this many minutes before the event
+    starts (0 means at the start). Copied from the type's defaults when the
+    event is created, so editing a type later does not silently change
+    existing events."""
+    __tablename__ = "event_reminders"
+
+    id             = Column(Integer, primary_key=True)
+    event_id       = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    minutes_before = Column(Integer, nullable=False)
+
+    event = relationship("Event", back_populates="reminders")
+
+    __table_args__ = (
+        UniqueConstraint("event_id", "minutes_before", name="uq_event_reminder"),
+        CheckConstraint("minutes_before >= 0", name="ck_event_reminder_minutes"),
+    )
+
+
+class EventOccurrence(Base):
+    """One dated instance of an Event. The two *_override columns and the
+    'cancelled' status are the per-occurrence edits of spec §66.4a;
+    regeneration never overwrites an occurrence that has an override or is
+    cancelled."""
+    __tablename__ = "event_occurrences"
+
+    id                           = Column(Integer, primary_key=True)
+    event_id                     = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    occurrence_date              = Column(Date, nullable=False)
+    start_datetime_utc           = Column(DateTime(timezone=True), nullable=False)
+    end_datetime_utc             = Column(DateTime(timezone=True), nullable=True)
+    status                       = Column(Text, nullable=False, default="scheduled")
+    start_datetime_utc_override  = Column(DateTime(timezone=True), nullable=True)
+    message_override             = Column(Text, nullable=True)
+    generated_at                 = Column(DateTime(timezone=True), server_default=func.now())
+
+    event = relationship("Event", back_populates="occurrences")
+    deliveries = relationship("Delivery", back_populates="occurrence", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("event_id", "occurrence_date", name="uq_event_occurrence"),
+        CheckConstraint("status IN ('scheduled', 'cancelled')", name="ck_event_occurrence_status"),
+    )
+
+
+class Delivery(Base):
+    """One thing the engine must send for one (occurrence, alliance): either
+    the Discord Scheduled Event itself or one timed reminder. Replaces
+    post_log, announcement target status and reminder_sent (spec §66.4).
+    reminder_minutes is a snapshot of the rule that produced the row (-1 for
+    a discord_event delivery) rather than a foreign key, so the unique
+    constraint works without NULLs and later edits to an event's reminders
+    never rewrite delivery history."""
+    __tablename__ = "deliveries"
+
+    id                 = Column(Integer, primary_key=True)
+    occurrence_id      = Column(Integer, ForeignKey("event_occurrences.id", ondelete="CASCADE"), nullable=False)
+    tenant_id          = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    kind               = Column(Text, nullable=False)
+    reminder_minutes   = Column(Integer, nullable=False, default=-1)
+    due_at_utc         = Column(DateTime(timezone=True), nullable=False)
+    status             = Column(Text, nullable=False, default="pending")
+    claimed_at_utc     = Column(DateTime(timezone=True), nullable=True)
+    discord_event_id   = Column(Text, nullable=True)
+    discord_message_id = Column(Text, nullable=True)
+    detail             = Column(Text, nullable=True)
+    posted_at_utc      = Column(DateTime(timezone=True), nullable=True)
+
+    occurrence = relationship("EventOccurrence", back_populates="deliveries")
+
+    __table_args__ = (
+        UniqueConstraint("occurrence_id", "tenant_id", "kind", "reminder_minutes", name="uq_delivery"),
+        CheckConstraint("kind IN ('discord_event', 'reminder')", name="ck_delivery_kind"),
+        CheckConstraint(
+            "status IN ('pending', 'sending', 'posted', 'error', 'cancelled')",
+            name="ck_delivery_status",
+        ),
+        CheckConstraint(
+            "(kind = 'discord_event' AND reminder_minutes = -1) OR (kind = 'reminder' AND reminder_minutes >= 0)",
+            name="ck_delivery_reminder_minutes",
+        ),
+        Index("ix_deliveries_status_due", "status", "due_at_utc"),
+    )

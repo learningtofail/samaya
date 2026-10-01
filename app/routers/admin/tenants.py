@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from models import get_db
-from models.db import DiscordServer, Kingdom, Tenant, User, UserTenant
+from models.db import DiscordServer, EventType, Kingdom, Tenant, User, UserTenant
 from services.audit import log_change
 from services.db_errors import raise_friendly_integrity_error
 from services.discord_api import verify_token
@@ -89,6 +89,9 @@ async def create_kingdom(
     kingdom = Kingdom(name=payload.name, slug=payload.slug)
     db.add(kingdom)
     try:
+        await db.flush()
+        # Every Kingdom starts with a default event type (spec §66.1).
+        db.add(EventType(kingdom_id=kingdom.id, name="General"))
         await db.commit()
         await db.refresh(kingdom)
     except IntegrityError as e:

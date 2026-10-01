@@ -10,6 +10,8 @@ update). That's the only real difference, so it's pulled out here as an
 import re
 from datetime import date as _date
 
+from services.recurrence import RECURRENCE_KINDS
+
 
 def parse_interval_days(v, allow_none: bool = False):
     if v is None and allow_none:
@@ -115,3 +117,76 @@ def parse_cover_image_data(v, allow_none: bool = False):
     if not _COVER_IMAGE_RE.match(v):
         raise ValueError("Cover image must be a PNG, JPEG, or GIF image")
     return v
+
+
+# --- unified event model (spec §66) -----------------------------------------
+
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+MAX_REMINDERS = 10
+MAX_REMINDER_MINUTES = 28 * 24 * 60  # four weeks
+
+
+def parse_hex_color(v, allow_none: bool = False):
+    if v is None and allow_none:
+        return v
+    v = str(v).strip()
+    if not _HEX_COLOR_RE.match(v):
+        raise ValueError("Color must be a 6-digit hex value like #E65100")
+    return v.upper()
+
+
+def parse_optional_duration_hours(v, allow_none: bool = True):
+    """A duration is optional in the unified model: None means 'no calendar
+    entry, a plain message'. A present value must be a positive number."""
+    if v is None:
+        return None
+    return parse_duration_hours(v)
+
+
+def parse_optional_interval_days(v, allow_none: bool = True):
+    if v is None:
+        return None
+    return parse_interval_days(v)
+
+
+def parse_recurrence_kind(v, allow_none: bool = False):
+    if v is None and allow_none:
+        return v
+    v = str(v).strip()
+    if v not in RECURRENCE_KINDS:
+        raise ValueError("Recurrence must be 'none' or 'interval_days'")
+    return v
+
+
+def parse_reminder_minutes(v, allow_none: bool = False):
+    if v is None and allow_none:
+        return v
+    if not isinstance(v, (list, tuple)):
+        raise ValueError("Reminders must be a list of minute offsets")
+    out: list[int] = []
+    for item in v:
+        try:
+            minutes = int(item)
+        except (TypeError, ValueError):
+            raise ValueError("Each reminder must be a whole number of minutes")
+        if minutes < 0:
+            raise ValueError("A reminder cannot be negative (0 means at the start)")
+        if minutes > MAX_REMINDER_MINUTES:
+            raise ValueError("A reminder cannot be more than 4 weeks ahead")
+        out.append(minutes)
+    if len(set(out)) != len(out):
+        raise ValueError("Reminder offsets must be unique")
+    if len(out) > MAX_REMINDERS:
+        raise ValueError(f"At most {MAX_REMINDERS} reminders per event")
+    return sorted(out, reverse=True)
+
+
+def check_recurrence_shape(kind: str, interval_days, anchor, until):
+    """Cross-field rules shared by create and the merged result of a patch.
+    Raises ValueError with a message safe to show a user."""
+    if kind == "none" and interval_days is not None:
+        raise ValueError("A one-off event cannot have an interval")
+    if kind == "interval_days" and interval_days is None:
+        raise ValueError("A repeating event needs an interval in days")
+    if until is not None and anchor is not None and until < anchor:
+        raise ValueError("The end date cannot be before the first date")

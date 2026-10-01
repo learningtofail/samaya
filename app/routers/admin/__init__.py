@@ -9,7 +9,7 @@ from fastapi import APIRouter
 from . import (
     ui, status, events, occurrences, scheduler_control,
     post_log, discord_config, discord_sync, tenants, invites, me,
-    announcements, announcement_templates, users, audit_log, tickets,
+    announcements, announcement_templates, users, audit_log, tickets, unified_events,
 )
 
 router = APIRouter()
@@ -30,3 +30,4 @@ router.include_router(announcement_templates.router)
 router.include_router(users.router)
 router.include_router(audit_log.router)
 router.include_router(tickets.router)
+router.include_router(unified_events.router)
