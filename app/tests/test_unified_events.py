@@ -121,12 +121,11 @@ class TestCreateEvent:
     async def test_audience_subset_with_override(self, client, tenant, second_tenant):
         etype = await _make_type(client)
         resp = await client.post(f"{BASE}/events", json=_event_body(
-            etype["id"], alliances=[{"tenant_slug": "nsr", "message_override": "NSR wording", "notification_role_id": "99"}]))
+            etype["id"], alliances=[{"tenant_slug": "nsr", "message_override": "NSR wording"}]))
         assert resp.status_code == 201, resp.text
         by_tenant = {a["tenant_id"]: a for a in resp.json()["alliances"]}
         assert set(by_tenant) == {tenant["id"], second_tenant["id"]}
         assert by_tenant[second_tenant["id"]]["message_override"] == "NSR wording"
-        assert by_tenant[second_tenant["id"]]["notification_role_id"] == "99"
         assert by_tenant[tenant["id"]]["message_override"] is None
 
     async def test_kingdom_wide_needs_no_audience_rows(self, client):
@@ -139,7 +138,7 @@ class TestCreateEvent:
         k2 = Kingdom(name="K2", slug="k2")
         db_session.add(k2)
         await db_session.flush()
-        srv = DiscordServer(name="s", guild_id="g-other")
+        srv = DiscordServer(kingdom_id=k2.id, name="s", guild_id="g-other")
         db_session.add(srv)
         await db_session.flush()
         db_session.add(Tenant(kingdom_id=k2.id, server_id=srv.id, name="Far", slug="far"))

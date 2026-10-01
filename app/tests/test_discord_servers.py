@@ -34,8 +34,8 @@ class TestDiscordServerCrud:
         server = next(s for s in r.json() if s["guild_id"] == "test-guild-mod")
         assert server["tenant_names"] == ["MOD"]
 
-    async def test_create_discord_server(self, client: AsyncClient):
-        r = await client.post("/admin/api/discord-servers", json={"name": "HTD", "guild_id": "g-htd"})
+    async def test_create_discord_server(self, client: AsyncClient, tenant):
+        r = await client.post("/admin/api/discord-servers", json={"kingdom_id": tenant["kingdom_id"], "name": "HTD", "guild_id": "g-htd"})
         assert r.status_code == 201, r.text
         body = r.json()
         assert body["name"] == "HTD"
@@ -43,9 +43,9 @@ class TestDiscordServerCrud:
         assert body["has_own_bot_token"] is False
         assert body["tenant_names"] == []
 
-    async def test_create_discord_server_never_returns_bot_token(self, client: AsyncClient, fake_verified_bot_token):
+    async def test_create_discord_server_never_returns_bot_token(self, client: AsyncClient, tenant, fake_verified_bot_token):
         r = await client.post(
-            "/admin/api/discord-servers", json={"name": "HTD", "guild_id": "g-htd2", "bot_token": "secret-token"}
+            "/admin/api/discord-servers", json={"kingdom_id": tenant["kingdom_id"], "name": "HTD", "guild_id": "g-htd2", "bot_token": "secret-token"}
         )
         assert r.status_code == 201, r.text
         assert "bot_token" not in r.json()
@@ -80,7 +80,7 @@ class TestDiscordServerSuperadminOnly:
         self, make_user_and_client, tenant: dict
     ):
         client, _ = await make_user_and_client(tenant_grants=[(tenant["id"], "owner")])
-        r = await client.post("/admin/api/discord-servers", json={"name": "HTD", "guild_id": "g-htd"})
+        r = await client.post("/admin/api/discord-servers", json={"kingdom_id": tenant["kingdom_id"], "name": "HTD", "guild_id": "g-htd"})
         assert r.status_code == 403
         await client.aclose()
 
@@ -105,7 +105,7 @@ class TestTenantServerAssignment:
         assert r.status_code == 404
 
     async def test_update_tenant_server_id(self, client: AsyncClient, tenant: dict):
-        r = await client.post("/admin/api/discord-servers", json={"name": "HTD", "guild_id": "g-htd-move"})
+        r = await client.post("/admin/api/discord-servers", json={"kingdom_id": tenant["kingdom_id"], "name": "HTD", "guild_id": "g-htd-move"})
         new_server_id = r.json()["id"]
 
         r = await client.patch(f"/admin/api/tenants/{tenant['id']}", json={"server_id": new_server_id})
@@ -185,7 +185,7 @@ class TestDuplicateConstraintMessages:
         assert r.json()["detail"] == "A tenant with that slug already exists"
 
     async def test_duplicate_discord_server_guild_id_on_create(self, client: AsyncClient, tenant: dict):
-        r = await client.post("/admin/api/discord-servers", json={"name": "Copycat", "guild_id": "test-guild-mod"})
+        r = await client.post("/admin/api/discord-servers", json={"kingdom_id": tenant["kingdom_id"], "name": "Copycat", "guild_id": "test-guild-mod"})
         assert r.status_code == 422
         assert r.json()["detail"] == "A Discord server with that guild ID already exists"
 

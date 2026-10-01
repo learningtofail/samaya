@@ -70,10 +70,14 @@ function occWriteSlug(occ) {
   return ev ? writeSlugForEvent(ev) : (writableTenants()[0] || TENANTS[0] || {}).slug;
 }
 
-function occAudienceText(occ) {
+// One chip per audience alliance (a Kingdom-wide event lists them all), with
+// the destination count and any warning from the engine (spec §67.6).
+function occAudienceHtml(occ) {
   const ev = SCHED_EVENTS[occ.event_id];
-  if (!ev) return '';
-  return ev.scope === 'kingdom-wide' ? 'Kingdom-wide' : tenantName(ev.owning_tenant_id);
+  const ids = occ.audience_tenant_ids || (ev ? [ev.owning_tenant_id] : []);
+  const chips = ids.map((id) => `<span class="audience-tag">${escapeHtml(tenantName(id))}</span>`).join(' ');
+  const kingdom = ev && ev.scope === 'kingdom-wide' ? `${pfLabel('Kingdom-wide', 'pf-m-purple')} ` : '';
+  return `<div class="audience-chips">${kingdom}${chips}</div>${destinationBadgeHtml(occ)}`;
 }
 
 const DELIVERY_STATUS_COLOR = {
@@ -110,7 +114,7 @@ function buildScheduleRow(occ) {
   return `<tr class="pf-v6-c-table__tr${cancelled ? ' is-cancelled' : ''}">
     <td class="pf-v6-c-table__td" data-label="When">${escapeHtml(fmtDateTime(occ.start_datetime_utc))}</td>
     <td class="pf-v6-c-table__td" data-label="Event"><strong>${escapeHtml(occ.event_name)}</strong><div>${typeChip(occ.type)}</div></td>
-    <td class="pf-v6-c-table__td" data-label="Alliance">${escapeHtml(occAudienceText(occ))}</td>
+    <td class="pf-v6-c-table__td" data-label="Alliance">${occAudienceHtml(occ)}</td>
     <td class="pf-v6-c-table__td" data-label="Status">${occStatusHtml(occ)}</td>
     <td class="pf-v6-c-table__td" data-label="Deliveries">${deliveryCountsHtml(occ.delivery_counts)}</td>
     <td class="pf-v6-c-table__td" data-label="Actions">${actions}</td>
@@ -163,9 +167,10 @@ function renderTimeline() {
         if (cancelled) cls.push('is-cancelled');
         if (o.is_moved) cls.push('is-moved');
         const state = cancelled ? 'cancelled' : (o.is_moved ? 'moved' : 'scheduled');
-        const label = `${o.event_name} on ${d} at ${time} UTC, ${state}`;
+        const warned = (o.warnings || []).length > 0;
+        const label = `${o.event_name} on ${d} at ${time} UTC, ${state}${warned ? ', has a warning' : ''}`;
         const attrs = occWritable(o) ? `data-action="edit" data-id="${o.id}"` : 'disabled';
-        return `<button type="button" class="${cls.join(' ')}" data-accent="${escapeHtml(g.type ? g.type.color : '#475569')}" ${attrs} aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${time}</button>`;
+        return `<button type="button" class="${cls.join(' ')}" data-accent="${escapeHtml(g.type ? g.type.color : '#475569')}" ${attrs} aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${time}${warned ? ' !' : ''}</button>`;
       }).join('');
       const cls = d === today ? ' class="is-today"' : '';
       return `<td${cls}>${marks}</td>`;

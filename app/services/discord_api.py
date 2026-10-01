@@ -9,6 +9,29 @@ logger = logging.getLogger(__name__)
 DISCORD_API_BASE = "https://discord.com/api/v10"
 INTER_CALL_DELAY = 0.5  # seconds between API calls
 MAX_RETRIES = 3
+#: One rate-limited call never waits longer than this per attempt, so a slow
+#: 429 cannot stall the delivery tick (spec §67.7). Past the last attempt the
+#: caller records an error and a person retries by hand.
+MAX_RETRY_WAIT = 15.0
+
+
+def _retry_wait(response: httpx.Response, attempt: int) -> float:
+    """Seconds to wait after a 429: Discord's `retry_after` from the JSON body,
+    else the Retry-After header (a Cloudflare 429 has no JSON body), else
+    exponential backoff. Capped at MAX_RETRY_WAIT."""
+    wait: float | None = None
+    try:
+        wait = float(response.json().get("retry_after"))
+    except (ValueError, TypeError, AttributeError):
+        pass
+    if wait is None:
+        try:
+            wait = float(response.headers.get("Retry-After", ""))
+        except ValueError:
+            wait = None
+    if wait is None:
+        wait = float(2 ** attempt)
+    return min(max(wait, 0.0), MAX_RETRY_WAIT)
 
 
 def _auth_headers(token: str) -> dict:
@@ -82,9 +105,8 @@ async def create_discord_event(
                 return "", f"400 {detail}"
 
             if response.status_code == 429:
-                retry_after = response.json().get("retry_after", 2 ** attempt)
                 if attempt < MAX_RETRIES - 1:
-                    await asyncio.sleep(float(retry_after))
+                    await asyncio.sleep(_retry_wait(response, attempt))
                     continue
                 logger.warning(f"create_discord_event: 429 rate limited in guild {guild_id} after {MAX_RETRIES} attempts")
                 return "", "429 Rate limited — retry later"
@@ -177,9 +199,8 @@ async def update_discord_event(
                 return False, f"400 {detail}"
 
             if response.status_code == 429:
-                retry_after = response.json().get("retry_after", 2 ** attempt)
                 if attempt < MAX_RETRIES - 1:
-                    await asyncio.sleep(float(retry_after))
+                    await asyncio.sleep(_retry_wait(response, attempt))
                     continue
                 logger.warning(f"update_discord_event: 429 rate limited for {discord_event_id} in guild {guild_id} after {MAX_RETRIES} attempts")
                 return False, "429 Rate limited — retry later"
@@ -204,32 +225,48 @@ async def cancel_discord_event(
     discord_event_id: str,
 ) -> tuple[bool, str]:
     """
-    Deletes a Discord Scheduled Event.
+    Deletes a Discord Scheduled Event. Retries a 429 (honouring Discord's
+    wait, capped), a 5xx and a network error, like create/update/send.
     Returns (success, error_message).
     """
     url = f"{DISCORD_API_BASE}/guilds/{guild_id}/scheduled-events/{discord_event_id}"
 
     async with httpx.AsyncClient() as client:
-        try:
-            response = await client.delete(url, headers=_auth_headers(token))
-        except httpx.RequestError as e:
-            logger.warning(f"cancel_discord_event: network error for {discord_event_id} in guild {guild_id} — {e}")
-            return False, f"Network error: {e}"
+        for attempt in range(MAX_RETRIES):
+            last = attempt == MAX_RETRIES - 1
+            try:
+                response = await client.delete(url, headers=_auth_headers(token))
+            except httpx.RequestError as e:
+                if not last:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                logger.warning(f"cancel_discord_event: network error for {discord_event_id} in guild {guild_id} — {e}")
+                return False, f"Network error: {e}"
 
-    if response.status_code in (200, 204):
-        logger.info(f"cancel_discord_event: cancelled {discord_event_id} in guild {guild_id}")
-        return True, ""
-    if response.status_code == 404:
-        logger.warning(f"cancel_discord_event: 404 for {discord_event_id} in guild {guild_id} — may already be cancelled")
-        return False, "404 Event not found — may already be cancelled"
-    if response.status_code == 401:
-        logger.warning(f"cancel_discord_event: 401 for {discord_event_id} in guild {guild_id}")
-        return False, "401 Unauthorized"
-    if response.status_code == 403:
-        logger.warning(f"cancel_discord_event: 403 for {discord_event_id} in guild {guild_id}")
-        return False, "403 Forbidden"
-    logger.warning(f"cancel_discord_event: unexpected HTTP {response.status_code} for {discord_event_id} in guild {guild_id}")
-    return False, f"HTTP {response.status_code}"
+            if response.status_code in (200, 204):
+                logger.info(f"cancel_discord_event: cancelled {discord_event_id} in guild {guild_id}")
+                return True, ""
+            if response.status_code == 404:
+                logger.warning(f"cancel_discord_event: 404 for {discord_event_id} in guild {guild_id} — may already be cancelled")
+                return False, "404 Event not found — may already be cancelled"
+            if response.status_code == 401:
+                logger.warning(f"cancel_discord_event: 401 for {discord_event_id} in guild {guild_id}")
+                return False, "401 Unauthorized"
+            if response.status_code == 403:
+                logger.warning(f"cancel_discord_event: 403 for {discord_event_id} in guild {guild_id}")
+                return False, "403 Forbidden"
+            if response.status_code == 429:
+                if not last:
+                    await asyncio.sleep(_retry_wait(response, attempt))
+                    continue
+                logger.warning(f"cancel_discord_event: 429 rate limited for {discord_event_id} in guild {guild_id} after {MAX_RETRIES} attempts")
+                return False, "429 Rate limited — retry later"
+            if response.status_code >= 500 and not last:
+                await asyncio.sleep(2)
+                continue
+            logger.warning(f"cancel_discord_event: unexpected HTTP {response.status_code} for {discord_event_id} in guild {guild_id}")
+            return False, f"HTTP {response.status_code}"
+    return False, "Max retries exceeded"
 
 
 async def get_guild_events(token: str, guild_id: str) -> list[dict]:
@@ -382,12 +419,11 @@ async def send_channel_message(
                 logger.warning(f"send_channel_message: 403 for channel {channel_id} — bot missing Send Messages")
                 return False, "403 Missing permissions — bot needs Send Messages permission in the channel"
             if response.status_code == 404:
-                logger.warning(f"send_channel_message: 404 for channel {channel_id} — check notification_channel_id")
-                return False, "404 Channel not found — check notification_channel_id"
+                logger.warning(f"send_channel_message: 404 for channel {channel_id} — check the destination channel")
+                return False, "404 Channel not found — check the destination channel"
             if response.status_code == 429:
-                retry_after = response.json().get("retry_after", 2 ** attempt)
                 if attempt < MAX_RETRIES - 1:
-                    await asyncio.sleep(float(retry_after))
+                    await asyncio.sleep(_retry_wait(response, attempt))
                     continue
                 logger.warning(f"send_channel_message: 429 rate limited for channel {channel_id} after {MAX_RETRIES} attempts")
                 return False, "429 Rate limited"

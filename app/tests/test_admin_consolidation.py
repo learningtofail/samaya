@@ -15,7 +15,7 @@ class TestTenantIcon:
 
     async def test_create_tenant_with_icon(self, client: AsyncClient, tenant: dict):
         server = (await client.post("/admin/api/discord-servers", json={
-            "name": "Test Server 2", "guild_id": "999888777",
+            "kingdom_id": tenant["kingdom_id"], "name": "Test Server 2", "guild_id": "999888777",
         })).json()
         r = await client.post("/admin/api/tenants", json={
             "kingdom_id": tenant["kingdom_id"], "name": "New Alliance", "slug": "newall",
@@ -26,7 +26,7 @@ class TestTenantIcon:
 
     async def test_patch_can_clear_icon(self, client: AsyncClient, tenant: dict):
         server = (await client.post("/admin/api/discord-servers", json={
-            "name": "Test Server 3", "guild_id": "999888776",
+            "kingdom_id": tenant["kingdom_id"], "name": "Test Server 3", "guild_id": "999888776",
         })).json()
         created = (await client.post("/admin/api/tenants", json={
             "kingdom_id": tenant["kingdom_id"], "name": "Icon Alliance", "slug": "iconall",
@@ -38,7 +38,7 @@ class TestTenantIcon:
 
     async def test_rejects_non_image_icon(self, client: AsyncClient, tenant: dict):
         server = (await client.post("/admin/api/discord-servers", json={
-            "name": "Test Server 4", "guild_id": "999888775",
+            "kingdom_id": tenant["kingdom_id"], "name": "Test Server 4", "guild_id": "999888775",
         })).json()
         r = await client.post("/admin/api/tenants", json={
             "kingdom_id": tenant["kingdom_id"], "name": "Bad Icon", "slug": "badicon",

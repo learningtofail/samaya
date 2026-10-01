@@ -78,12 +78,23 @@ function shortReminder(m) {
   return m + 'm';
 }
 
+// Audience chips plus a destination count and any warning (spec §67.6).
+// `audience_tenant_ids` already expands a Kingdom-wide event to every alliance.
 function eventAudienceHtml(ev) {
-  if (ev.scope === 'kingdom-wide') {
-    return pfLabel('Kingdom-wide', 'pf-m-purple') + ` <span class="samaya-muted">owned by ${escapeHtml(tenantName(ev.owning_tenant_id))}</span>`;
-  }
-  const ids = new Set([ev.owning_tenant_id].concat(ev.alliances.map((a) => a.tenant_id)));
-  return Array.from(ids).map((id) => `<span class="audience-tag">${escapeHtml(tenantName(id))}</span>`).join(' ');
+  const ids = ev.audience_tenant_ids && ev.audience_tenant_ids.length
+    ? ev.audience_tenant_ids
+    : Array.from(new Set([ev.owning_tenant_id].concat(ev.alliances.map((a) => a.tenant_id))));
+  const chips = ids.map((id) => `<span class="audience-tag">${escapeHtml(tenantName(id))}</span>`).join(' ');
+  const kingdom = ev.scope === 'kingdom-wide' ? `${pfLabel('Kingdom-wide', 'pf-m-purple')} ` : '';
+  return `<div class="audience-chips">${kingdom}${chips}</div>${destinationBadgeHtml(ev)}`;
+}
+
+function destinationBadgeHtml(o) {
+  if (o.destination_count === undefined) return '';
+  const text = `${o.destination_count} destination${o.destination_count === 1 ? '' : 's'}`
+    + (o.channel_count !== o.destination_count ? `, ${o.channel_count} channel${o.channel_count === 1 ? '' : 's'}` : '');
+  const warn = (o.warnings || []).map((w) => `<div class="warn-mark" role="note">Warning: ${escapeHtml(w)}</div>`).join('');
+  return `<div class="samaya-muted">${escapeHtml(text)}</div>${warn}`;
 }
 
 function seriesCount(ev) {
@@ -260,6 +271,10 @@ const EVF = {
   reminders: null,
   types: [],
   aud: new Map(),        // slug -> audience row state
+  destAll: [],           // every destination in the Kingdom (spec §67)
+  destChecked: new Map(), // destination id -> ticked, only for ones the user touched or the event stored
+  groups: [],            // audience groups of the Kingdom
+  groupIds: new Set(),
   cover: { original: '', current: '' },
   saving: false,
 };
@@ -321,9 +336,9 @@ function syncRecurrenceGroups() {
 function syncScopeGroups() {
   const kingdomWide = byId('evScope').value === 'kingdom-wide';
   byId('evKingdomNote').classList.toggle('hidden', !kingdomWide);
-  byId('evAudienceLegend').textContent = kingdomWide ? 'Per-alliance overrides' : 'Alliances';
+  byId('evAudienceLegend').textContent = kingdomWide ? 'Per-alliance messages' : 'Alliances';
   byId('evAudienceIntro').textContent = kingdomWide
-    ? 'Every alliance in the Kingdom takes part. You can still give an alliance its own message, channel or role.'
+    ? 'Every alliance in the Kingdom takes part. You can still give an alliance its own message.'
     : 'Pick the alliances that take part. The owning alliance is always included.';
   renderAudience();
 }
@@ -374,22 +389,17 @@ function audienceTenants() {
 }
 
 function newAudRow(slug) {
-  return {
-    slug, included: false, open: false, message: '', channel: '', role: '',
-    composer: null, channelPicker: null, rolePicker: null,
-  };
+  return { slug, included: false, open: false, message: '', composer: null };
 }
 
-// Reads the live override widgets back into the row state before the list is
+// Reads the live message widget back into the row state before the list is
 // rebuilt or saved.
 function syncAudRow(row) {
   if (row.composer) row.message = row.composer.value();
-  if (row.channelPicker) row.channel = row.channelPicker.value();
-  if (row.rolePicker) row.role = row.rolePicker.value();
 }
 
 function audRowHasOverrides(row) {
-  return !!(row.message.trim() || row.channel || row.role);
+  return !!row.message.trim();
 }
 
 function renderAudience() {
@@ -400,14 +410,14 @@ function renderAudience() {
   tenants.forEach((t) => { if (!EVF.aud.has(t.slug)) EVF.aud.set(t.slug, newAudRow(t.slug)); });
   EVF.aud.forEach((row) => {
     syncAudRow(row);
-    // The widgets are about to be rebuilt; their values now live in the row state.
-    row.composer = null; row.channelPicker = null; row.rolePicker = null;
+    // The widget is about to be rebuilt; its value now lives in the row state.
+    row.composer = null;
   });
   list.innerHTML = tenants.map((t) => {
     const row = EVF.aud.get(t.slug);
     const isOwner = t.slug === ownerSlug;
     const included = isOwner || row.included;
-    const count = [row.message.trim(), row.channel, row.role].filter(Boolean).length;
+    const count = row.message.trim() ? 1 : 0;
     const checkbox = kingdomWide
       ? ''
       : `<input type="checkbox" id="audInc_${escapeHtml(t.slug)}" data-slug="${escapeHtml(t.slug)}" ${included ? 'checked' : ''} ${isOwner ? 'disabled' : ''}>`;
@@ -417,7 +427,7 @@ function renderAudience() {
     return `<li class="audience__item" data-slug="${escapeHtml(t.slug)}">
       <div class="audience__head">${checkbox}${name}</div>
       <details class="audience__overrides" data-slug="${escapeHtml(t.slug)}" ${row.open ? 'open' : ''}>
-        <summary>Overrides for ${escapeHtml(t.name)}${count ? ` (${count} set)` : ''}</summary>
+        <summary>Own message for ${escapeHtml(t.name)}${count ? ' (set)' : ''}</summary>
         <div class="audience__body" id="audBody_${escapeHtml(t.slug)}"></div>
       </details>
     </li>`;
@@ -437,43 +447,34 @@ function renderAudience() {
     ? `This event also includes ${unknown} alliance${unknown === 1 ? '' : 's'} you cannot see. Changing the audience here removes ${unknown === 1 ? 'it' : 'them'}.`
     : '';
   note.classList.toggle('hidden', !unknown);
+  renderDestinations();
 }
 
 function mountAudRow(row) {
   const prefix = 'evOv' + row.slug.replace(/[^a-zA-Z0-9]/g, '');
   const body = byId('audBody_' + row.slug);
   if (!body) return;
-  body.innerHTML = `
-    <div id="${prefix}MsgHost"></div>
-    <div class="audience__pickers">
-      <div id="${prefix}ChanHost"></div>
-      <div id="${prefix}RoleHost"></div>
-    </div>`;
+  body.innerHTML = `<div id="${prefix}MsgHost"></div>`;
   row.composer = createComposer(byId(prefix + 'MsgHost'), {
     idPrefix: prefix + 'Msg', label: 'Message for this alliance', value: row.message, rows: 4,
-    helper: 'Leave empty to use the event message.',
+    helper: 'Leave empty to use the event message. Two alliances that share a channel must not have different messages.',
     previewSlug: () => row.slug,
     eventStart: eventStartDate,
   });
   row.composer.setPreviewSlug(row.slug);
-  row.channelPicker = mountDiscordPicker(byId(prefix + 'ChanHost'), {
-    kind: 'channel', slug: row.slug, id: prefix + 'Chan', label: 'Notification channel',
-    value: row.channel, emptyLabel: "Use the alliance's default channel",
-  });
-  row.rolePicker = mountDiscordPicker(byId(prefix + 'RoleHost'), {
-    kind: 'role', slug: row.slug, id: prefix + 'Role', label: 'Notification role',
-    value: row.role, emptyLabel: "Use the alliance's default role",
-  });
 }
 
 byId('evAudienceList').addEventListener('change', (e) => {
   const box = e.target.closest('input[type="checkbox"][data-slug]');
   if (!box) return;
   EVF.aud.get(box.dataset.slug).included = box.checked;
+  renderDestinations();
 });
+byId('evAudienceList').addEventListener('input', () => schedulePreview());
 
 // The audience rows to send. An alliance event lists every included alliance
-// (the owner always); a Kingdom-wide event only lists alliances with overrides.
+// (the owner always); a Kingdom-wide event only lists alliances with their own
+// message.
 function collectAudience(scope) {
   const ownerSlug = ownerSlugValue();
   const out = [];
@@ -484,14 +485,156 @@ function collectAudience(scope) {
     const included = t.slug === ownerSlug || row.included;
     const has = audRowHasOverrides(row);
     if (scope === 'kingdom-wide' ? !has : !included) return;
-    out.push({
-      tenant_slug: t.slug,
-      message_override: row.message.trim() || null,
-      notification_channel_id: row.channel || null,
-      notification_role_id: row.role || null,
-    });
+    out.push({ tenant_slug: t.slug, message_override: row.message.trim() || null });
   });
   return out;
+}
+
+// ── Destinations and groups (spec §67) ───────────────────────
+
+// Alliances whose destinations the event can use: everyone in a Kingdom-wide
+// event, otherwise the owner and the ticked alliances.
+function audienceTenantIds() {
+  const kingdomWide = byId('evScope').value === 'kingdom-wide';
+  const ownerSlug = ownerSlugValue();
+  return audienceTenants()
+    .filter((t) => kingdomWide || t.slug === ownerSlug || (EVF.aud.get(t.slug) && EVF.aud.get(t.slug).included))
+    .map((t) => t.id);
+}
+
+function destChecked(d) {
+  return EVF.destChecked.has(d.id) ? EVF.destChecked.get(d.id) : d.post_by_default;
+}
+
+// A leadership event only posts to leadership-only destinations, and the
+// reverse, so the other kind is shown but cannot be ticked.
+function destUsable(d) {
+  return d.leadership_only === byId('evLeadershipOnly').checked;
+}
+
+function renderGroups() {
+  const host = byId('evGroupList');
+  host.innerHTML = EVF.groups.length
+    ? EVF.groups.map((g) => `<label class="check"><input type="checkbox" data-group="${g.id}" ${EVF.groupIds.has(g.id) ? 'checked' : ''}> ${escapeHtml(g.name)} <span class="samaya-muted">${g.destinations.length} destination${g.destinations.length === 1 ? '' : 's'}</span></label>`).join('')
+    : '<p class="samaya-muted">No audience groups yet. A Kingdom coordinator can create them in Setup.</p>';
+}
+
+function renderDestinations() {
+  const host = byId('evDestPanel');
+  if (!host) return;
+  const ids = new Set(audienceTenantIds());
+  const byTenant = new Map();
+  EVF.destAll.filter((d) => ids.has(d.tenant_id)).forEach((d) => {
+    if (!byTenant.has(d.tenant_id)) byTenant.set(d.tenant_id, []);
+    byTenant.get(d.tenant_id).push(d);
+  });
+  const html = Array.from(byTenant.entries()).map(([tenantId, list]) => {
+    const t = tenantById(tenantId);
+    const items = list.map((d) => {
+      const usable = destUsable(d);
+      const primary = !t || d.server_id === t.server_id;
+      const note = usable ? '' : `<span class="samaya-muted">${d.leadership_only ? 'Leadership events only' : 'Not used by a leadership event'}</span>`;
+      return `<li class="dest-list__item">
+        <label class="check"><input type="checkbox" data-dest="${d.id}" ${usable && destChecked(d) ? 'checked' : ''} ${usable ? '' : 'disabled'}> ${escapeHtml(d.label)}</label>
+        ${serverBadgeHtml(d.server_name, primary)}
+        <span class="samaya-muted dest-channel" data-server="${d.server_id}" data-slug="${escapeHtml(d.alliance_slug)}" data-channel="${escapeHtml(d.channel_id)}">${escapeHtml(d.channel_id)}</span>
+        ${note}
+        <span class="samaya-muted" id="evDestShare${d.id}"></span>
+      </li>`;
+    }).join('');
+    return `<div class="dest-group"><p class="dest-group__title">${escapeHtml(tenantName(tenantId))}</p><ul class="dest-list">${items}</ul></div>`;
+  }).join('');
+  host.innerHTML = html || '<p class="samaya-muted">The selected alliances have no destinations yet. Add one in Setup.</p>';
+  host.querySelectorAll('.dest-channel').forEach((el) => {
+    loadDiscordList('channel', el.dataset.slug, serverArg(el.dataset.slug, el.dataset.server)).then(({ items }) => {
+      const hit = items.find((c) => String(c.id) === el.dataset.channel);
+      if (hit) el.textContent = '#' + hit.name;
+    });
+  });
+  schedulePreview();
+}
+
+byId('evDestPanel').addEventListener('change', (e) => {
+  const box = e.target.closest('input[data-dest]');
+  if (!box) return;
+  EVF.destChecked.set(parseInt(box.dataset.dest, 10), box.checked);
+  schedulePreview();
+});
+byId('evGroupList').addEventListener('change', (e) => {
+  const box = e.target.closest('input[data-group]');
+  if (!box) return;
+  const id = parseInt(box.dataset.group, 10);
+  if (box.checked) EVF.groupIds.add(id); else EVF.groupIds.delete(id);
+  schedulePreview();
+});
+
+// The destination rows that differ from each destination's default, plus any
+// rows for destinations this user cannot see (kept so a save does not drop them).
+function collectDestinationChanges() {
+  const visible = new Set(EVF.destAll.map((d) => d.id));
+  const ids = new Set(audienceTenantIds());
+  const out = [];
+  EVF.destAll.filter((d) => ids.has(d.tenant_id) && destUsable(d)).forEach((d) => {
+    const on = destChecked(d);
+    if (on !== d.post_by_default) out.push({ destination_id: d.id, included: on });
+  });
+  (EVF.event ? EVF.event.destination_changes : []).forEach((c) => {
+    if (!visible.has(c.destination_id)) out.push({ destination_id: c.destination_id, included: c.included });
+  });
+  return out.sort((a, b) => a.destination_id - b.destination_id);
+}
+
+function collectGroupIds() {
+  const known = new Set(EVF.groups.map((g) => g.id));
+  const keep = (EVF.event ? EVF.event.group_ids : []).filter((id) => !known.has(id));
+  return Array.from(EVF.groupIds).concat(keep).sort((a, b) => a - b);
+}
+
+let PREVIEW_TIMER = null;
+let PREVIEW_SEQ = 0;
+
+function schedulePreview() {
+  if (PREVIEW_TIMER) clearTimeout(PREVIEW_TIMER);
+  PREVIEW_TIMER = setTimeout(runPreview, 300);
+}
+
+async function runPreview() {
+  PREVIEW_TIMER = null;
+  if (!byId('eventModal').classList.contains('open')) return;
+  const seq = ++PREVIEW_SEQ;
+  const scope = byId('evScope').value;
+  const body = {
+    scope, leadership_only: byId('evLeadershipOnly').checked, message: EVF.composer ? EVF.composer.value() : '',
+    alliances: collectAudience(scope), group_ids: collectGroupIds(), destination_changes: collectDestinationChanges(),
+  };
+  try {
+    const res = await api('POST', '/api/events/preview-destinations', body, false, ownerSlugValue());
+    if (seq === PREVIEW_SEQ) renderPreview(res);
+  } catch (e) {
+    if (seq === PREVIEW_SEQ) renderPreview({ destinations: [], channel_count: 0, conflicts: [], problems: [e.message], dropped: [] });
+  }
+}
+
+function renderPreview(res) {
+  const n = res.destinations.length;
+  byId('evDestSummary').textContent = n
+    ? `Posts to ${n} destination${n === 1 ? '' : 's'} in ${res.channel_count} channel${res.channel_count === 1 ? '' : 's'}.`
+    : 'Posts nowhere yet.';
+  const issues = res.problems.concat(res.conflicts);
+  const box = byId('evDestProblems');
+  box.innerHTML = issues.map((m) => `<p class="dest-warning" role="alert">${escapeHtml(m)}</p>`).join('');
+  box.classList.toggle('hidden', !issues.length);
+  EVF.destAll.forEach((d) => { const el = byId('evDestShare' + d.id); if (el) el.textContent = ''; });
+  res.destinations.forEach((d) => {
+    const el = byId('evDestShare' + d.id);
+    if (el && d.shares_channel_with.length) el.textContent = `Same channel as ${d.shares_channel_with.join(', ')}: one message, roles combined.`;
+  });
+  const own = new Set(EVF.destAll.map((d) => d.id));
+  const extra = res.destinations.filter((d) => !own.has(d.id) || !EVF.destAll.some((x) => x.id === d.id && audienceTenantIds().includes(x.tenant_id)));
+  const hostExtra = byId('evDestExtra');
+  hostExtra.innerHTML = extra.length
+    ? `<p class="dest-group__title">Also from groups</p><ul class="dest-list">${extra.map((d) => `<li class="dest-list__item">${escapeHtml(d.alliance)}: ${escapeHtml(d.label)} ${serverBadgeHtml(d.server_name, true)}</li>`).join('')}</ul>`
+    : '';
 }
 
 // ── Open the form ────────────────────────────────────────────
@@ -502,6 +645,9 @@ async function openEventForm({ mode, event, splitFrom, duplicate }) {
   EVF.splitFrom = splitFrom || null;
   EVF.aud = new Map();
   EVF.touched = new Set();
+  EVF.destChecked = new Map();
+  EVF.groupIds = new Set(event ? event.group_ids : []);
+  if (event) event.destination_changes.forEach((c) => EVF.destChecked.set(c.destination_id, c.included));
   const editing = mode === 'edit' || mode === 'split';
   if (editing || duplicate) ['message', 'calendar', 'recurrence', 'reminders', 'mention'].forEach((f) => EVF.touched.add(f));
 
@@ -538,8 +684,9 @@ async function openEventForm({ mode, event, splitFrom, duplicate }) {
 
   try {
     EVF.types = await loadEventTypesFor(ownerSlugValue());
+    await loadDestinationChoices();
   } catch (e) {
-    toast('Could not load event types: ' + e.message, true);
+    toast('Could not load the form: ' + e.message, true);
     return;
   }
   byId('evType').innerHTML = optionsHtml(EVF.types.map((t) => ({ value: t.id, label: t.name })),
@@ -594,8 +741,6 @@ async function openEventForm({ mode, event, splitFrom, duplicate }) {
       const row = newAudRow(t.slug);
       row.included = true;
       row.message = a.message_override || '';
-      row.channel = a.notification_channel_id || '';
-      row.role = a.notification_role_id || '';
       row.open = audRowHasOverrides(row);
       EVF.aud.set(t.slug, row);
     });
@@ -607,6 +752,15 @@ async function openEventForm({ mode, event, splitFrom, duplicate }) {
   syncScopeGroups();
   if (!editing && !duplicate) applyTypeDefaults();
   openModalById('eventModal');
+}
+
+async function loadDestinationChoices() {
+  const slug = ownerSlugValue();
+  [EVF.destAll, EVF.groups] = await Promise.all([
+    api('GET', '/api/destinations?kingdom=true', null, false, slug),
+    api('GET', '/api/audience-groups', null, false, slug),
+  ]);
+  renderGroups();
 }
 
 function closeEventModal() {
@@ -624,7 +778,10 @@ byId('evOwner').addEventListener('change', async () => {
     EVF.types = types;
     byId('evType').innerHTML = optionsHtml(types.map((t) => ({ value: t.id, label: t.name })), keep);
     applyTypeDefaults();
+    await loadDestinationChoices();
   } catch (e) { toast('Could not load event types: ' + e.message, true); }
+  EVF.groupIds = new Set();
+  EVF.destChecked = new Map();
   renderAudience();
 });
 byId('evScope').addEventListener('change', syncScopeGroups);
@@ -633,7 +790,7 @@ byId('evDuration').addEventListener('input', () => EVF.touched.add('calendar'));
 byId('evRecurrence').addEventListener('change', () => { EVF.touched.add('recurrence'); syncRecurrenceGroups(); });
 byId('evInterval').addEventListener('input', () => EVF.touched.add('recurrence'));
 byId('evMentionRole').addEventListener('change', () => EVF.touched.add('mention'));
-byId('evLeadershipOnly').addEventListener('change', syncLeadershipNote);
+byId('evLeadershipOnly').addEventListener('change', () => { syncLeadershipNote(); renderDestinations(); });
 ['evAnchor', 'evStart'].forEach((id) => byId(id).addEventListener('input', () => {
   if (EVF.composer) EVF.composer.refresh();
 }));
@@ -682,8 +839,6 @@ function collectEventForm() {
   const audience = collectAudience(scope);
   const tooLong = audience.find((a) => a.message_override && a.message_override.length > COMPOSER_MAX_CHARS);
   if (tooLong) errors.push({ msg: `The message for ${tooLong.tenant_slug} is longer than ${COMPOSER_MAX_CHARS} characters.` });
-  const badId = audience.find((a) => [a.notification_channel_id, a.notification_role_id].some((v) => v && !/^\d+$/.test(v)));
-  if (badId) errors.push({ msg: `A channel or role ID for ${badId.tenant_slug} must be digits only.` });
 
   if (errors.length) { showFormErrors(errors); return null; }
   showFormErrors([]);
@@ -693,25 +848,25 @@ function collectEventForm() {
     message: EVF.composer.value(), anchor_date: anchor, start_time_utc: start,
     duration_hours: duration, recurrence_kind: repeats ? 'interval_days' : 'none',
     interval_days: interval, until_date: until, reminder_minutes: EVF.reminders.value(),
-    alliances: audience, ownerSlug: ownerSlugValue(),
+    alliances: audience, group_ids: collectGroupIds(), destination_changes: collectDestinationChanges(),
+    ownerSlug: ownerSlugValue(),
   };
 }
 
 function audienceKey(rows) {
-  return JSON.stringify(rows.map((r) => [r.tenantId, r.message || '', r.channel || '', r.role || '']).sort());
+  return JSON.stringify(rows.map((r) => [r.tenantId, r.message || '']).sort());
 }
 
 function origAudienceKey(ev, scope) {
-  const rows = ev.alliances.map((a) => ({
-    tenantId: a.tenant_id, message: a.message_override, channel: a.notification_channel_id, role: a.notification_role_id,
-  })).filter((r) => scope !== 'kingdom-wide' || r.message || r.channel || r.role);
+  const rows = ev.alliances.map((a) => ({ tenantId: a.tenant_id, message: a.message_override }))
+    .filter((r) => scope !== 'kingdom-wide' || r.message);
   return audienceKey(rows);
 }
 
 function formAudienceKey(f) {
   const rows = f.alliances.map((a) => {
     const t = tenantBySlug(a.tenant_slug);
-    return { tenantId: t ? t.id : 0, message: a.message_override, channel: a.notification_channel_id, role: a.notification_role_id };
+    return { tenantId: t ? t.id : 0, message: a.message_override };
   });
   return audienceKey(rows);
 }
@@ -736,6 +891,8 @@ function buildEventChanges(orig, f, skipAnchor) {
   if ((f.until_date || null) !== (orig.until_date || null)) c.until_date = f.until_date;
   if (JSON.stringify(f.reminder_minutes) !== JSON.stringify(orig.reminder_minutes)) c.reminder_minutes = f.reminder_minutes;
   if (formAudienceKey(f) !== origAudienceKey(orig, f.scope)) c.alliances = f.alliances;
+  if (JSON.stringify(f.group_ids) !== JSON.stringify(orig.group_ids)) c.group_ids = f.group_ids;
+  if (JSON.stringify(f.destination_changes) !== JSON.stringify(orig.destination_changes)) c.destination_changes = f.destination_changes;
   if (EVF.cover.current !== (orig.cover_image_data || '')) c.cover_image_data = EVF.cover.current;
   return c;
 }
@@ -755,6 +912,7 @@ async function saveEventForm() {
         message: f.message, duration_hours: f.duration_hours, recurrence_kind: f.recurrence_kind,
         interval_days: f.interval_days, until_date: f.until_date, mention_role: f.mention_role,
         reminder_minutes: f.reminder_minutes, alliances: f.alliances,
+        group_ids: f.group_ids, destination_changes: f.destination_changes,
       };
       if (EVF.cover.current) payload.cover_image_data = EVF.cover.current;
       await api('POST', '/api/events', payload, false, f.ownerSlug);

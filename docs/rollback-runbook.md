@@ -79,6 +79,16 @@ guess about on a live database; restoring the pre-migration backup and
 replaying anything worth keeping by hand is slower but doesn't compound
 the mistake.
 
+### Revision `a1f0c0de0004` (destinations, groups, secondary servers)
+
+Additive, so `alembic downgrade a1f0c0de0003` is safe: it drops the new tables
+and delivery columns and restores the old unique constraint. Destinations,
+groups and secondary servers created since are lost, and the old per-event
+channel overrides are not restored (they were never deleted from
+`event_alliances`, so the old code still reads them). Revision `0005`, which
+drops those legacy columns, is destructive and has no downgrade: take a backup
+first.
+
 ## Restoring from backup
 
 `ops/backup.sh` runs nightly (03:00 server time, see its own header for

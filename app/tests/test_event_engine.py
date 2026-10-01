@@ -12,14 +12,14 @@ import pytest
 from sqlalchemy import select
 
 from models.db import (
-    Delivery, DiscordServer, Event, EventAlliance, EventOccurrence, Tenant,
+    Delivery, Destination, DiscordServer, Event, EventAlliance, EventOccurrence, Tenant,
 )
 from services.discord_client import get_discord
 from services.event_engine import (
     STALE_CLAIM_AFTER, process_delivery, run_delivery_tick, run_generation,
 )
 
-from tests.unified_helpers import NOW, UTC, deliveries, make_event, sync
+from tests.unified_helpers import NOW, UTC, add_destination, change_destination, deliveries, make_event, sync
 
 BASE = "/admin/api"
 
@@ -159,23 +159,26 @@ class TestReminders:
         await run_delivery_tick(sf, fake, at)
         assert next(c for c in fake.calls if c[0] == "send")[2] == "occurrence message"
 
-    async def test_alliance_destination_override(self, sf, fake, configured):
+    async def test_event_can_swap_the_default_destination_for_another(self, sf, fake, configured):
         event_id = await make_event(sf, configured, mention_role=True)
+        leaders = await add_destination(sf, configured, "leaders", "leader-role", label="Leaders", default=False)
         async with sf() as s:
-            row = (await s.execute(select(EventAlliance).where(EventAlliance.event_id == event_id))).scalar_one()
-            row.notification_channel_id, row.notification_role_id = "leaders", "leader-role"
-            await s.commit()
+            default = (await s.execute(select(Destination).where(Destination.label == "Notifications"))).scalar_one()
+            default_id = default.id
+        await change_destination(sf, event_id, leaders, True)
+        await change_destination(sf, event_id, default_id, False)
         await sync(sf, event_id)
         await run_delivery_tick(sf, fake, datetime(2026, 10, 2, 18, 0, 30, tzinfo=UTC))
-        _, channel, content = next(c for c in fake.calls if c[0] == "send")
-        assert channel == "leaders" and "<@&leader-role>" in content
+        sends = [c for c in fake.calls if c[0] == "send"]
+        assert len(sends) == 1
+        assert sends[0][1] == "leaders" and "<@&leader-role>" in sends[0][2]
 
     async def test_missing_channel_is_an_error_not_a_silent_skip(self, sf, fake, tenant):
         event_id = await make_event(sf, tenant)
         await sync(sf, event_id)
         await run_delivery_tick(sf, fake, datetime(2026, 10, 2, 18, 0, 30, tzinfo=UTC))
         reminder = (await deliveries(sf, event_id, kind="reminder"))[0]
-        assert reminder.status == "error" and "notification channel" in reminder.detail
+        assert reminder.status == "error" and "No destination" in reminder.detail
         assert fake.count("send") == 0
 
     async def test_late_reminder_still_sends_before_the_event_starts(self, sf, fake, configured):
@@ -222,10 +225,7 @@ class TestTickSafety:
         assert fake.count("send") == 1
 
     async def test_one_failing_delivery_does_not_block_the_rest(self, sf, fake, configured, second_tenant):
-        async with sf() as s:
-            t = await s.get(Tenant, second_tenant["id"])
-            t.notification_channel_id = "chan-nsr"
-            await s.commit()
+        await add_destination(sf, second_tenant, "chan-nsr")
         fake.raise_on_send_to = {"chan-mod"}
         event_id = await make_event(sf, configured, scope="kingdom-wide", interval=None, duration=None)
         await sync(sf, event_id)

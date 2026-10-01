@@ -10,7 +10,8 @@ IDs). Inside the app container:
 
 Only IDs recorded in post_log are touched; events created by hand in Discord
 are never deleted. A 404 means the event is already gone and counts as
-success. After each successful delete the ID is cleared from post_log, which
+success. Deletes are paced and a 429 is retried (waiting as Discord asks), so one run
+normally completes. After each successful delete the ID is cleared from post_log, which
 is what lets the migration's guard pass, so a partial run is safe to repeat.
 """
 import asyncio
@@ -21,7 +22,7 @@ from collections import defaultdict
 from sqlalchemy import text
 
 from models import AsyncSessionLocal
-from services.discord_api import cancel_discord_event
+from services.discord_api import INTER_CALL_DELAY, cancel_discord_event
 
 QUERY = text("""
     SELECT p.id AS log_id, p.discord_event_id, p.event_name, p.occurrence_date,
@@ -60,6 +61,7 @@ async def main(apply: bool) -> int:
                 failures += 1
                 continue
             ok, error = await cancel_discord_event(token, guild, event_id)
+            await asyncio.sleep(INTER_CALL_DELAY)  # pace the deletes (spec §67.7)
             if not ok and not error.startswith("404"):
                 print(f"  FAILED guild {guild} event {event_id}: {error}")
                 failures += 1

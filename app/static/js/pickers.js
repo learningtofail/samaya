@@ -1,9 +1,9 @@
-// Discord channel and role pickers, used by the Setup tab (an alliance's
-// Notifications destination) and the event form (per-alliance overrides).
-// Depends on common.js.
+// Discord channel and role pickers, used by the destination form on the Setup
+// tab (spec §67). Depends on common.js.
 //
 // Each picker is a <select> filled from GET /api/discord/channels or
-// /api/discord/roles for one alliance. If Discord cannot be reached (no bot
+// /api/discord/roles for one alliance and one of its servers (the primary, or
+// a secondary when `serverId` is given). If Discord cannot be reached (no bot
 // token, network, permissions) the select is replaced by a plain text input
 // for the numeric ID, so a value can always be typed in.
 
@@ -12,16 +12,18 @@ const _DISCORD_OK_TTL_MS = 5 * 60 * 1000;
 const _DISCORD_FAIL_TTL_MS = 60 * 1000;
 
 // Resolves to { items: [{id, name, ...}], error: string|null }. Never rejects.
-function loadDiscordList(kind, slug) {
+function loadDiscordList(kind, slug, serverId) {
   const cache = _DISCORD_LIST_CACHE[kind];
-  const hit = cache[slug];
+  const cacheKey = serverId ? `${slug}#${serverId}` : slug;
+  const hit = cache[cacheKey];
   if (hit && Date.now() - hit.at < (hit.failed ? _DISCORD_FAIL_TTL_MS : _DISCORD_OK_TTL_MS)) return hit.promise;
-  const path = kind === 'channel' ? '/api/discord/channels' : '/api/discord/roles';
+  const base = kind === 'channel' ? '/api/discord/channels' : '/api/discord/roles';
+  const path = serverId ? `${base}?server_id=${encodeURIComponent(serverId)}` : base;
   const entry = { at: Date.now(), failed: false, promise: null };
   entry.promise = api('GET', path, null, false, slug)
     .then((items) => ({ items, error: null }))
     .catch((e) => { entry.failed = true; return { items: [], error: e.message }; });
-  cache[slug] = entry;
+  cache[cacheKey] = entry;
   return entry.promise;
 }
 
@@ -41,7 +43,7 @@ function _roleLabel(r) {
 // Renders a labelled picker into `host` and returns a controller:
 //   value()    the chosen ID ('' for "none")
 //   setValue(v)
-// opts: { kind: 'channel'|'role', slug, id, label, value, emptyLabel, helper }
+// opts: { kind: 'channel'|'role', slug, serverId, id, label, value, emptyLabel, helper }
 function mountDiscordPicker(host, opts) {
   const kind = opts.kind;
   const id = opts.id;
@@ -76,7 +78,7 @@ function mountDiscordPicker(host, opts) {
   select.addEventListener('change', () => { current = select.value; });
   text.addEventListener('input', () => { current = text.value.trim(); });
 
-  loadDiscordList(kind, opts.slug).then(({ items, error }) => {
+  loadDiscordList(kind, opts.slug, opts.serverId).then(({ items, error }) => {
     loaded = true;
     if (error) { useText(error); return; }
     const options = [{ value: '', label: opts.emptyLabel || 'None' }]

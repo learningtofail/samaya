@@ -11,14 +11,17 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from models import get_db
-from models.db import Delivery, Event, EventAlliance, EventOccurrence, EventReminder, Tenant, User
+from models.db import (
+    Delivery, Event, EventAlliance, EventDestination, EventGroup, EventOccurrence, EventReminder, Tenant, User,
+)
 from services.audit import log_change
 from services.db_errors import raise_friendly_integrity_error
 from services.discord_client import get_discord
 from services.event_engine import (
-    DISCORD_EVENT_FLOOR, effective_end, effective_start, refresh_posted_discord_events,
+    DISCORD_EVENT_FLOOR, effective_end, event_overview, effective_start, refresh_posted_discord_events,
     remove_posted_discord_events, sync_event_occurrences, apply_event_change, cancel_pending_deliveries,
 )
 from services.recurrence import occurs_on
@@ -43,9 +46,11 @@ def _iso(dt: datetime | None) -> str | None:
     return ensure_utc(dt).isoformat() if dt is not None else None
 
 
-def _occurrence_dict(occ: EventOccurrence, event: Event, delivery_counts: dict[str, int] | None = None) -> dict:
+def _occurrence_dict(occ: EventOccurrence, event: Event, delivery_counts: dict[str, int] | None = None,
+                     overview: dict | None = None) -> dict:
     end = effective_end(occ)
     return {
+        **(overview or {}),
         "id":                   occ.id,
         "event_id":             occ.event_id,
         "event_name":           event.name,
@@ -62,7 +67,13 @@ def _occurrence_dict(occ: EventOccurrence, event: Event, delivery_counts: dict[s
     }
 
 
-def _delivery_dict(d: Delivery, occ: EventOccurrence, event: Event, tenant: Tenant) -> dict:
+def _delivery_dict(d: Delivery, occ: EventOccurrence, event: Event, tenant: Tenant,
+                   members: list[tuple[Delivery, Tenant]] | None = None) -> dict:
+    """One send in the delivery log. `members` are the deliveries merged into
+    it (spec §67.3): other destinations that share the channel, or alliances
+    that share a Scheduled Event."""
+    members = members or []
+    names = sorted({tenant.name, *(t.name for _, t in members)}, key=str.lower)
     return {
         "id":                 d.id,
         "occurrence_id":      d.occurrence_id,
@@ -71,6 +82,7 @@ def _delivery_dict(d: Delivery, occ: EventOccurrence, event: Event, tenant: Tena
         "occurrence_date":    str(occ.occurrence_date),
         "tenant_slug":        tenant.slug,
         "tenant_name":        tenant.name,
+        "alliance_names":     names,
         "kind":               d.kind,
         "reminder_minutes":   d.reminder_minutes if d.kind == "reminder" else None,
         "due_at_utc":         _iso(d.due_at_utc),
@@ -78,6 +90,18 @@ def _delivery_dict(d: Delivery, occ: EventOccurrence, event: Event, tenant: Tena
         "detail":             d.detail,
         "discord_event_id":   d.discord_event_id,
         "posted_at_utc":      _iso(d.posted_at_utc),
+        "destination_label":  d.destination.label if d.destination is not None else None,
+        "channel_id":         d.channel_id or None,
+        "guild_id":           d.guild_id or None,
+        "merged_into_id":     d.merged_into_id,
+        "members": [
+            {
+                "id": m.id, "tenant_name": t.name, "status": m.status, "detail": m.detail,
+                "destination_label": m.destination.label if m.destination is not None else None,
+                "channel_id": m.channel_id or None,
+            }
+            for m, t in members
+        ],
     }
 
 
@@ -148,7 +172,11 @@ async def list_occurrences(
         )
         for occ_id, status, n in count_rows.all():
             counts.setdefault(occ_id, {})[status] = n
-    return [_occurrence_dict(o, e, counts.get(o.id)) for o, e in pairs]
+    overviews: dict[int, dict] = {}
+    for _, e in pairs:
+        if e.id not in overviews:
+            overviews[e.id] = await event_overview(db, await _load_event(db, e.id))
+    return [_occurrence_dict(o, e, counts.get(o.id), overviews[e.id]) for o, e in pairs]
 
 
 @router.patch("/occurrences/{occurrence_id}")
@@ -261,10 +289,11 @@ async def split_event(
     )
     new_event.reminders = [EventReminder(minutes_before=r.minutes_before) for r in event.reminders]
     new_event.alliances = [
-        EventAlliance(
-            tenant_id=a.tenant_id, message_override=a.message_override,
-            notification_channel_id=a.notification_channel_id, notification_role_id=a.notification_role_id,
-        ) for a in event.alliances
+        EventAlliance(tenant_id=a.tenant_id, message_override=a.message_override) for a in event.alliances
+    ]
+    new_event.group_links = [EventGroup(group_id=g.group_id) for g in event.group_links]
+    new_event.destination_links = [
+        EventDestination(destination_id=d.destination_id, included=d.included) for d in event.destination_links
     ]
     event.until_date = payload.from_date - timedelta(days=1)
     db.add(new_event)
@@ -318,14 +347,23 @@ async def list_deliveries(
     limit: int = Query(default=100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
-    """Newest first. `days` bounds by due time, looking back."""
+    """Newest first, one entry per send (spec §67.6): deliveries merged into
+    another appear under it as `members`. `days` bounds by due time."""
     now = datetime.now(timezone.utc)
+    tenant_ids = [t.id for t in tenants]
+    child = aliased(Delivery)
+    in_scope_via_member = select(child.merged_into_id).where(
+        child.merged_into_id.is_not(None), child.tenant_id.in_(tenant_ids))
     stmt = (
         select(Delivery, EventOccurrence, Event, Tenant)
         .join(EventOccurrence, EventOccurrence.id == Delivery.occurrence_id)
         .join(Event, Event.id == EventOccurrence.event_id)
         .join(Tenant, Tenant.id == Delivery.tenant_id)
-        .where(Delivery.tenant_id.in_([t.id for t in tenants]), Delivery.due_at_utc >= now - timedelta(days=days))
+        .where(
+            Delivery.merged_into_id.is_(None),
+            or_(Delivery.tenant_id.in_(tenant_ids), Delivery.id.in_(in_scope_via_member)),
+            Delivery.due_at_utc >= now - timedelta(days=days),
+        )
         .order_by(Delivery.due_at_utc.desc(), Delivery.id.desc())
         .limit(limit)
     )
@@ -336,7 +374,16 @@ async def list_deliveries(
     if kind:
         stmt = stmt.where(Delivery.kind == kind)
     rows = (await db.execute(stmt)).unique().all()
-    return [_delivery_dict(d, o, e, t) for d, o, e, t in rows]
+    members: dict[int, list[tuple[Delivery, Tenant]]] = {}
+    if rows:
+        found = await db.execute(
+            select(Delivery, Tenant).join(Tenant, Tenant.id == Delivery.tenant_id)
+            .where(Delivery.merged_into_id.in_([d.id for d, _, _, _ in rows]))
+            .order_by(Delivery.id)
+        )
+        for m, t in found.unique().all():
+            members.setdefault(m.merged_into_id, []).append((m, t))
+    return [_delivery_dict(d, o, e, t, members.get(d.id)) for d, o, e, t in rows]
 
 
 @router.post("/deliveries/{delivery_id}/retry")
@@ -380,7 +427,7 @@ async def delivery_health(
     minutes means the tick is not running."""
     now = datetime.now(timezone.utc)
     tenant_ids = [t.id for t in tenants]
-    scope = (Delivery.tenant_id.in_(tenant_ids), Delivery.due_at_utc <= now,
+    scope = (Delivery.tenant_id.in_(tenant_ids), Delivery.merged_into_id.is_(None), Delivery.due_at_utc <= now,
              Delivery.due_at_utc >= now - timedelta(days=7))
     rows = await db.execute(select(Delivery.status, func.count()).where(*scope).group_by(Delivery.status))
     counts = {status: n for status, n in rows.all()}

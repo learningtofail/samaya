@@ -9,20 +9,20 @@ tenant picker and a coordinator has no business seeing (or switching
 into) alliances they don't belong to.
 """
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from models import get_db
-from models.db import DiscordServer, EventType, Kingdom, Tenant, User, UserTenant
+from models.db import DiscordServer, EventType, Kingdom, Tenant, TenantSecondaryServer, User, UserTenant
 from services.audit import log_change
 from services.db_errors import raise_friendly_integrity_error
 from services.discord_api import verify_token
 
-from .deps import get_current_user, require_superadmin, require_tenant_owner
+from .deps import get_current_user, require_superadmin
 from .schemas import (
-    DiscordServerIn, DiscordServerPatch, KingdomIn, KingdomPatch, NotificationDestinationIn, TenantIn, TenantPatch,
+    DiscordServerIn, DiscordServerPatch, KingdomIn, KingdomPatch, TenantIn, TenantPatch,
 )
 
 router = APIRouter()
@@ -57,6 +57,7 @@ def _server_dict(s: DiscordServer, tenant_names: list[str] | None = None) -> dic
     note). list_discord_servers below eager-loads it and can omit this."""
     return {
         "id":                s.id,
+        "kingdom_id":        s.kingdom_id,
         "name":              s.name,
         "guild_id":          s.guild_id,
         "has_own_bot_token": bool(s.bot_token),
@@ -75,9 +76,37 @@ def _tenant_dict(t: Tenant) -> dict:
         "guild_id":    t.server.guild_id,
         "color":       t.color,
         "icon_image_data": t.icon_image_data or None,
-        "notification_channel_id": t.notification_channel_id or "",
-        "notification_role_id":    t.notification_role_id or "",
+        "secondary_servers": [
+            {"id": x.server_id, "name": x.server.name, "guild_id": x.server.guild_id}
+            for x in sorted(t.secondary_servers, key=lambda r: r.server.name)
+        ],
     }
+
+
+async def _check_servers(db: AsyncSession, kingdom_id: int, primary_id: int, secondary_ids: list[int]) -> list[int]:
+    """Spec §67.1: an alliance's primary and secondary servers must exist and
+    belong to its own Kingdom, and a secondary cannot repeat the primary.
+    Returns the secondary ids de-duplicated, in order."""
+    unique: list[int] = []
+    for sid in [primary_id, *secondary_ids]:
+        server = await db.get(DiscordServer, sid)
+        if not server:
+            raise HTTPException(status_code=404, detail="Discord server not found")
+        if server.kingdom_id != kingdom_id:
+            raise HTTPException(status_code=422, detail=f'Server "{server.name}" belongs to a different Kingdom than this alliance')
+        if sid != primary_id and sid not in unique:
+            unique.append(sid)
+    if primary_id in secondary_ids:
+        raise HTTPException(status_code=422, detail="A secondary server cannot be the same as the primary server")
+    return unique
+
+
+async def _set_secondary_servers(db: AsyncSession, tenant: Tenant, server_ids: list[int]) -> None:
+    await db.execute(delete(TenantSecondaryServer).where(TenantSecondaryServer.tenant_id == tenant.id))
+    for sid in server_ids:
+        db.add(TenantSecondaryServer(tenant_id=tenant.id, server_id=sid))
+    await db.flush()
+    await db.refresh(tenant, attribute_names=["secondary_servers"])
 
 
 @router.get("/api/kingdoms")
@@ -152,9 +181,7 @@ async def list_tenants(user: User = Depends(get_current_user), db: AsyncSession 
 async def create_tenant(
     payload: TenantIn, user: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)
 ):
-    server = await db.get(DiscordServer, payload.server_id)
-    if not server:
-        raise HTTPException(status_code=404, detail="Discord server not found")
+    secondary_ids = await _check_servers(db, payload.kingdom_id, payload.server_id, payload.secondary_server_ids)
 
     tenant = Tenant(
         kingdom_id = payload.kingdom_id,
@@ -170,6 +197,7 @@ async def create_tenant(
     except IntegrityError as e:
         await db.rollback()
         raise_friendly_integrity_error(e, _TENANT_SLUG_TAKEN, fallback="Could not create tenant")
+    await _set_secondary_servers(db, tenant, secondary_ids)
 
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id,
@@ -184,28 +212,6 @@ async def create_tenant(
     return _tenant_dict(tenant)
 
 
-@router.put("/api/notification-destination")
-async def set_notification_destination(
-    payload: NotificationDestinationIn,
-    tenant: Tenant = Depends(require_tenant_owner), user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """The selected alliance's Notifications destination (spec §66.1). An
-    alliance owner can set their own; it is not superadmin-only. Only fields
-    present are applied."""
-    before = {"channel": tenant.notification_channel_id, "role": tenant.notification_role_id}
-    if payload.notification_channel_id is not None:
-        tenant.notification_channel_id = payload.notification_channel_id
-    if payload.notification_role_id is not None:
-        tenant.notification_role_id = payload.notification_role_id
-    await log_change(
-        db, user_id=user.id, tenant_id=tenant.id, table_name="tenants", row_id=tenant.id, action="update",
-        before=before, after={"channel": tenant.notification_channel_id, "role": tenant.notification_role_id},
-    )
-    await db.commit()
-    return _tenant_dict(tenant)
-
-
 @router.patch("/api/tenants/{tenant_id}")
 async def update_tenant(
     tenant_id: int, payload: TenantPatch,
@@ -216,10 +222,13 @@ async def update_tenant(
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
-    if payload.server_id is not None:
-        server = await db.get(DiscordServer, payload.server_id)
-        if not server:
-            raise HTTPException(status_code=404, detail="Discord server not found")
+    new_primary = payload.server_id if payload.server_id is not None else tenant.server_id
+    current_secondary = [r.server_id for r in tenant.secondary_servers]
+    new_secondary = payload.secondary_server_ids if payload.secondary_server_ids is not None else current_secondary
+    if payload.server_id is not None or payload.secondary_server_ids is not None:
+        new_secondary = await _check_servers(db, tenant.kingdom_id, new_primary, new_secondary)
+        if payload.secondary_server_ids is not None:
+            await _set_secondary_servers(db, tenant, new_secondary)
 
     if payload.name is not None:      tenant.name      = payload.name
     if payload.slug is not None:      tenant.slug      = payload.slug
@@ -231,7 +240,8 @@ async def update_tenant(
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id,
         table_name="tenants", row_id=tenant.id, action="update",
-        after={"name": tenant.name, "slug": tenant.slug, "server_id": tenant.server_id},
+        after={"name": tenant.name, "slug": tenant.slug, "server_id": tenant.server_id,
+               "secondary_server_ids": [r.server_id for r in tenant.secondary_servers]},
     )
     try:
         await db.commit()
@@ -273,7 +283,11 @@ async def create_discord_server(
         if not ok:
             raise HTTPException(status_code=400, detail=f"Bot token verification failed: {result}")
 
+    if not await db.get(Kingdom, payload.kingdom_id):
+        raise HTTPException(status_code=404, detail="Kingdom not found")
+
     server = DiscordServer(
+        kingdom_id = payload.kingdom_id,
         name       = payload.name,
         guild_id   = payload.guild_id,
         bot_token  = payload.bot_token,
@@ -291,7 +305,7 @@ async def create_discord_server(
     await log_change(
         db, user_id=user.id, tenant_id=None,
         table_name="discord_servers", row_id=server.id, action="create",
-        after={"name": server.name, "guild_id": server.guild_id},
+        after={"name": server.name, "guild_id": server.guild_id, "kingdom_id": server.kingdom_id},
     )
     await db.commit()
     await db.refresh(server)
@@ -312,6 +326,14 @@ async def update_discord_server(
         if not ok:
             raise HTTPException(status_code=400, detail=f"Bot token verification failed: {verify_result}")
 
+    if payload.kingdom_id is not None and payload.kingdom_id != server.kingdom_id:
+        if not await db.get(Kingdom, payload.kingdom_id):
+            raise HTTPException(status_code=404, detail="Kingdom not found")
+        in_use = await db.execute(select(Tenant.name).where(Tenant.server_id == server.id, Tenant.kingdom_id != payload.kingdom_id))
+        names = list(in_use.scalars().all())
+        if names:
+            raise HTTPException(status_code=422, detail=f"Alliances in another Kingdom use this server: {', '.join(names)}")
+        server.kingdom_id = payload.kingdom_id
     if payload.name is not None:       server.name       = payload.name
     if payload.guild_id is not None:   server.guild_id   = payload.guild_id
     if payload.bot_token is not None:  server.bot_token  = payload.bot_token or None

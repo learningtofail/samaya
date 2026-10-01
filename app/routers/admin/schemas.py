@@ -13,6 +13,7 @@ class TenantIn(BaseModel):
     name:       str
     slug:       str
     server_id:  int
+    secondary_server_ids: list[int] = []
     color:      str = "#475569"
     icon_image_data: Optional[str] = None
 
@@ -23,6 +24,7 @@ class TenantPatch(BaseModel):
     name:       Optional[str] = None
     slug:       Optional[str] = None
     server_id:  Optional[int] = None
+    secondary_server_ids: Optional[list[int]] = None
     color:      Optional[str] = None
     icon_image_data: Optional[str] = None
 
@@ -37,6 +39,7 @@ class DiscordServerIn(BaseModel):
     one alliance. bot_token/public_key are optional: left unset, the
     server (and every Tenant referencing it) falls back to the
     platform-wide bot."""
+    kingdom_id: int
     name:       str
     guild_id:   str
     bot_token:  Optional[str] = None
@@ -44,6 +47,7 @@ class DiscordServerIn(BaseModel):
 
 
 class DiscordServerPatch(BaseModel):
+    kingdom_id: Optional[int] = None
     name:       Optional[str] = None
     guild_id:   Optional[str] = None
     bot_token:  Optional[str] = None
@@ -106,21 +110,6 @@ class UserPatch(BaseModel):
 class DisplayNameIn(BaseModel):
     """The caller's own display name. Blank clears it."""
     display_name: str = Field(max_length=60)
-
-
-class NotificationDestinationIn(BaseModel):
-    """An alliance's Notifications destination (spec §66.1): where reminders
-    go unless an event overrides it. An empty string clears a value."""
-    notification_channel_id: Optional[str] = Field(default=None, max_length=32)
-    notification_role_id:    Optional[str] = Field(default=None, max_length=32)
-
-    @field_validator("notification_channel_id", "notification_role_id")
-    @classmethod
-    def _numeric_id(cls, v):
-        v = (v or "").strip() if v is not None else v
-        if v and not v.isdigit():
-            raise ValueError("A Discord ID is digits only")
-        return v
 
 
 class KingdomInviteIn(BaseModel):
