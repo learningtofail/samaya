@@ -79,7 +79,7 @@
     <div class="table-wrap">
       <table class="pf-v6-c-table pf-m-grid-md responsive-table">
         <caption class="sr-only">Events and messages</caption>
-        <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Event</th><th class="pf-v6-c-table__th" scope="col">Schedule</th><th class="pf-v6-c-table__th" scope="col">Audience</th><th class="pf-v6-c-table__th" scope="col">Reminders</th><th class="pf-v6-c-table__th" scope="col">Status</th><th class="pf-v6-c-table__th" scope="col">Actions</th></tr></thead>
+        <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Event</th><th class="pf-v6-c-table__th" scope="col">Schedule</th><th class="pf-v6-c-table__th" scope="col">Alliances</th><th class="pf-v6-c-table__th" scope="col">Reminders</th><th class="pf-v6-c-table__th" scope="col">Status</th><th class="pf-v6-c-table__th" scope="col">Actions</th></tr></thead>
         <tbody id="eventsBody"></tbody>
       </table>
     </div>
@@ -89,7 +89,7 @@
       <p>An event is anything the bot posts on a schedule. Give it a duration and it also becomes a Discord Scheduled Event and shows on the public calendar. Leave the duration off and it is a message only.</p>
       <ul>
         <li><strong>Repeating events</strong> ask what you are editing: just one date, this date and every later one, or all of them.</li>
-        <li><strong>Reminders</strong> post to each audience alliance's default destinations. Untick one on the event to skip it, or add another. Alliances that share a channel get one combined message.</li>
+        <li><strong>Reminders</strong> post to the audiences each alliance uses by default. Untick an audience on the event to skip it, or tick another to add it. Alliances and audiences that share a channel get one combined message.</li>
         <li><strong>Leadership only</strong> events never create a Discord Scheduled Event and never appear on public pages.</li>
         <li><strong>Deleting</strong> an event also removes its Discord events. Deactivating stops all posting but keeps the event.</li>
       </ul>
@@ -256,22 +256,22 @@
     </div>
   </section>
 
-  <section class="panel" aria-labelledby="h-setup-alliances">
-    <h3 class="panel__title" id="h-setup-alliances">Alliances and destinations</h3>
-    <p class="samaya-muted">A destination is a Discord channel, and optionally a role, that an alliance's reminders and messages go to. An owner of the alliance or a superadmin manages them. Notifications can go to this alliance's primary or secondary servers. Ask a superadmin to add a server.</p>
-    <div id="setupAlliances"></div>
-  </section>
-
-  <section class="panel hidden" id="setupGroupsPanel" aria-labelledby="h-setup-groups">
-    <div class="view__head"><h3 class="panel__title" id="h-setup-groups">Audience groups</h3><button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnCreateGroup">New group</button></div>
-    <p class="samaya-muted">A group is a named set of destinations across the Kingdom, for example "All leadership channels". Pick a group on an event to post to everything in it. Kingdom coordinators and superadmins manage groups.</p>
+  <section class="panel" aria-labelledby="h-setup-audiences">
+    <div class="view__head"><h3 class="panel__title" id="h-setup-audiences">Audiences</h3><button type="button" class="pf-v6-c-button pf-m-primary pf-m-small hidden" id="btnCreateAudience">New audience</button></div>
+    <p class="samaya-muted">An audience is a named list of Discord destinations, each a server and channel with an optional role to mention. Create it once for the Kingdom, then let any alliance use it. Pick one or more audiences on an event. Kingdom coordinators and superadmins manage audiences.</p>
     <div class="table-wrap">
       <table class="pf-v6-c-table pf-m-grid-md responsive-table">
-        <caption class="sr-only">Audience groups</caption>
-        <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Group</th><th class="pf-v6-c-table__th" scope="col">Destinations</th><th class="pf-v6-c-table__th" scope="col">Actions</th></tr></thead>
-        <tbody id="groupsBody"></tbody>
+        <caption class="sr-only">Kingdom audiences</caption>
+        <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Audience</th><th class="pf-v6-c-table__th" scope="col">Destinations</th><th class="pf-v6-c-table__th" scope="col">Used by</th><th class="pf-v6-c-table__th" scope="col">Actions</th></tr></thead>
+        <tbody id="audiencesBody"></tbody>
       </table>
     </div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-setup-alliances">
+    <h3 class="panel__title" id="h-setup-alliances">Alliances and audiences</h3>
+    <p class="samaya-muted">Choose which audiences each alliance may post to. "Post by default" means the alliance's events post there unless an event opts out. An owner of the alliance, a Kingdom coordinator or a superadmin changes these.</p>
+    <div id="setupAlliances"></div>
   </section>
 
   <div class="hidden" id="setupSuperadmin">
@@ -359,9 +359,9 @@
     <div class="about-page__body">
       <p>Your own settings come first. Superadmins also see access, kingdoms, Discord servers, alliances and users below them.</p>
       <ul>
-        <li>An alliance with no default destination cannot receive reminders, so add one before creating events.</li>
-        <li>When two alliances post to the same channel at the same offset, the engine sends one message that mentions both roles.</li>
-        <li>Discord Scheduled Events are created only on an alliance's primary server. Secondary servers only receive messages.</li>
+        <li>An alliance that uses no audience by default cannot receive reminders, so choose one before creating events.</li>
+        <li>When two alliances, or two audiences, post to the same channel at the same offset, the engine sends one message that mentions each role once.</li>
+        <li>Discord Scheduled Events are created only on an alliance's primary server. An audience can post messages to any server of the Kingdom.</li>
         <li>If Discord cannot be reached, the pickers turn into plain boxes where you can type the numeric ID.</li>
         <li>A role or channel ID is the long number Discord shows when developer mode is on.</li>
       </ul>
@@ -510,14 +510,9 @@
               <p class="form-errors hidden" id="evAudienceNote"></p>
             </fieldset>
             <fieldset class="form-grid__full audience">
-              <legend class="audience__legend">Destinations</legend>
-              <p class="pf-v6-c-form__helper-text">Reminders post to each selected alliance's default destinations. Untick one to skip it for this event, or tick another to add it.</p>
-              <div id="evDestPanel"></div>
-              <div id="evDestExtra"></div>
-              <fieldset class="fieldset">
-                <legend class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Audience groups</span></legend>
-                <div class="dest-picker" id="evGroupList"></div>
-              </fieldset>
+              <legend class="audience__legend">Audiences</legend>
+              <p class="pf-v6-c-form__helper-text">Reminders post to every destination of each ticked audience. Untick an audience to skip it for this event, or tick another to add it.</p>
+              <div id="evAudiencePanel"></div>
               <p class="dest-summary" id="evDestSummary" role="status"></p>
               <div class="hidden" id="evDestProblems"></div>
             </fieldset>
@@ -536,7 +531,7 @@
                 <input type="checkbox" id="evLeadershipOnly">
                 <label for="evLeadershipOnly">Leadership only</label>
               </div>
-              <p class="pf-v6-c-form__helper-text" id="evLeadershipNote">Never creates a Discord Scheduled Event and is hidden from the public pages. Reminders post only to leadership-only destinations, and those destinations receive only leadership events.</p>
+              <p class="pf-v6-c-form__helper-text" id="evLeadershipNote">Never creates a Discord Scheduled Event and is hidden from the public pages. Reminders post only to leadership-only audiences, and those audiences receive only leadership events.</p>
             </div>
             <div class="pf-v6-c-form__group form-grid__full">
               <label class="pf-v6-c-form__label" for="evCoverFile"><span class="pf-v6-c-form__label-text">Cover image (optional)</span></label>
@@ -696,76 +691,44 @@
   </div>
 </div>
 
-<div class="pf-v6-c-backdrop" id="destinationModal" data-close-fn="closeDestinationModal">
+<div class="pf-v6-c-backdrop" id="audienceModal" data-close-fn="closeAudienceModal">
   <div class="pf-v6-l-bullseye">
-    <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="destinationModalTitle">
+    <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="audienceModalTitle">
       <header class="pf-v6-c-modal-box__header">
-        <h2 class="pf-v6-c-modal-box__title" id="destinationModalTitle"><span id="destinationModalTitleText">New destination</span></h2>
+        <h2 class="pf-v6-c-modal-box__title" id="audienceModalTitle"><span id="audienceModalTitleText">New audience</span></h2>
         <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
-        <input type="hidden" id="dstId">
-        <input type="hidden" id="dstTenantId">
+        <input type="hidden" id="audId">
         <form class="pf-v6-c-form" novalidate>
-          <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="dstLabel"><span class="pf-v6-c-form__label-text">Label</span></label>
-            <input class="pf-v6-c-form-control" type="text" id="dstLabel" maxlength="60">
-            <p class="pf-v6-c-form__helper-text">Shown on events and in the delivery log, for example "Leadership chat".</p>
+          <div class="pf-v6-c-form__group hidden" id="audKingdomGroup">
+            <label class="pf-v6-c-form__label" for="audKingdom"><span class="pf-v6-c-form__label-text">Kingdom</span></label>
+            <select class="pf-v6-c-form-control" id="audKingdom"></select>
           </div>
           <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="dstServer"><span class="pf-v6-c-form__label-text">Discord server</span></label>
-            <select class="pf-v6-c-form-control" id="dstServer"></select>
-          </div>
-          <div class="pf-v6-c-form__group" id="dstChannelHost"></div>
-          <div class="pf-v6-c-form__group" id="dstRoleHost"></div>
-          <div class="pf-v6-c-form__group">
-            <label class="check"><input type="checkbox" id="dstDefault"> Post by default</label>
-            <p class="pf-v6-c-form__helper-text">Events for this alliance post here unless the event opts out.</p>
-          </div>
-          <div class="pf-v6-c-form__group">
-            <label class="check"><input type="checkbox" id="dstLeadership"> Leadership only</label>
-            <p class="pf-v6-c-form__helper-text">Only leadership events post here, and leadership events post nowhere else.</p>
-          </div>
-        </form>
-      </div>
-      <footer class="pf-v6-c-modal-box__footer">
-        <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSaveDestinationModal">Save</button>
-        <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
-      </footer>
-    </div>
-  </div>
-</div>
-
-<div class="pf-v6-c-backdrop" id="groupModal" data-close-fn="closeGroupModal">
-  <div class="pf-v6-l-bullseye">
-    <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="groupModalTitle">
-      <header class="pf-v6-c-modal-box__header">
-        <h2 class="pf-v6-c-modal-box__title" id="groupModalTitle"><span id="groupModalTitleText">New audience group</span></h2>
-        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
-      </header>
-      <div class="pf-v6-c-modal-box__body">
-        <input type="hidden" id="grpId">
-        <form class="pf-v6-c-form" novalidate>
-          <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="grpName"><span class="pf-v6-c-form__label-text">Name</span></label>
-            <input class="pf-v6-c-form-control" type="text" id="grpName" maxlength="80">
-          </div>
-          <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="grpDescription"><span class="pf-v6-c-form__label-text">Description</span></label>
-            <input class="pf-v6-c-form-control" type="text" id="grpDescription" maxlength="300">
-          </div>
-          <div class="pf-v6-c-form__group hidden" id="grpKingdomGroup">
-            <label class="pf-v6-c-form__label" for="grpKingdom"><span class="pf-v6-c-form__label-text">Kingdom</span></label>
-            <select class="pf-v6-c-form-control" id="grpKingdom"></select>
+            <label class="pf-v6-c-form__label" for="audLabel"><span class="pf-v6-c-form__label-text">Label</span></label>
+            <input class="pf-v6-c-form-control" type="text" id="audLabel" maxlength="60">
+            <p class="pf-v6-c-form__helper-text">Shown on events and in the delivery log, for example "Leadership chats".</p>
           </div>
           <fieldset class="pf-v6-c-form__group fieldset">
             <legend class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Destinations</span></legend>
-            <div class="dest-picker" id="grpDestinations"></div>
+            <p class="pf-v6-c-form__helper-text">Each destination is a channel on one of the Kingdom's Discord servers. Add as many as the audience needs.</p>
+            <ul class="aud-dests" id="audDestinations"></ul>
+            <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnAddAudienceDestination">Add a destination</button>
+          </fieldset>
+          <div class="pf-v6-c-form__group">
+            <label class="check"><input type="checkbox" id="audLeadership"> Leadership only</label>
+            <p class="pf-v6-c-form__helper-text">Only leadership events post here, and leadership events post nowhere else.</p>
+          </div>
+          <fieldset class="pf-v6-c-form__group fieldset">
+            <legend class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Alliances that use this audience</span></legend>
+            <p class="pf-v6-c-form__helper-text">"Post by default" makes an alliance's events post here without being asked.</p>
+            <ul class="aud-links" id="audLinks"></ul>
           </fieldset>
         </form>
       </div>
       <footer class="pf-v6-c-modal-box__footer">
-        <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSaveGroupModal">Save</button>
+        <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSaveAudienceModal">Save</button>
         <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
       </footer>
     </div>

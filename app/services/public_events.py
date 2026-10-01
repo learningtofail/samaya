@@ -11,7 +11,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from models.db import Delivery, Destination, Event, EventAlliance, EventOccurrence, Tenant
+from models.db import AllianceAudience, Audience, AudienceDestination, Delivery, Event, EventAlliance, EventOccurrence, Tenant
 from services.event_engine import effective_end, effective_start  # noqa: F401  (re-exported for callers)
 from services.recurrence import occurs_on
 
@@ -24,7 +24,7 @@ class PublicRow:
     override: EventAlliance | None  # that tenant's per-alliance overrides, if any
     with_tenant_fields: bool        # combined view only
     posted: bool                    # any delivery for this occurrence has gone out
-    destination: Destination | None = None  # the alliance's first default, non-leadership destination (spec §67.6)
+    destination: AudienceDestination | None = None  # first destination of the alliance's first default, non-leadership Audience (spec §68)
 
     @property
     def has_calendar_entry(self) -> bool:
@@ -103,12 +103,15 @@ async def public_rows(
             Delivery.occurrence_id.in_({o.id for o, _, _ in pairs}), Delivery.status == "posted")
     )).scalars().all())
 
-    defaults: dict[int, Destination] = {}
-    for dest in (await db.execute(
-        select(Destination).where(Destination.post_by_default.is_(True), Destination.leadership_only.is_(False))
-        .order_by(Destination.id)
-    )).scalars().unique():
-        defaults.setdefault(dest.tenant_id, dest)
+    defaults: dict[int, AudienceDestination] = {}
+    for link, dest in (await db.execute(
+        select(AllianceAudience, AudienceDestination)
+        .join(Audience, Audience.id == AllianceAudience.audience_id)
+        .join(AudienceDestination, AudienceDestination.audience_id == Audience.id)
+        .where(AllianceAudience.post_by_default.is_(True), Audience.leadership_only.is_(False))
+        .order_by(Audience.id, AudienceDestination.id)
+    )).unique().all():
+        defaults.setdefault(link.tenant_id, dest)
 
     rows: list[PublicRow] = []
     for occ, event, owner_tenant in pairs:

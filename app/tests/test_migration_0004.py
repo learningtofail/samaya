@@ -72,7 +72,7 @@ INSERT INTO deliveries (id,occurrence_id,tenant_id,kind,reminder_minutes,due_at_
 
 def test_seeds_destinations_and_converts_overrides(old_db):
     asyncio.run(_db(old_db, SEED))
-    done = _alembic(old_db, "upgrade", "head")
+    done = _alembic(old_db, "upgrade", "a1f0c0de0004")
     assert done.returncode == 0, done.stderr
 
     dests = asyncio.run(_db(old_db, query=(
@@ -100,7 +100,7 @@ def test_check_is_clean_and_downgrade_round_trips(old_db):
     assert _alembic(old_db, "upgrade", "head").returncode == 0
     check = _alembic(old_db, "check")
     assert check.returncode == 0, check.stdout + check.stderr
-    assert _alembic(old_db, "downgrade", "-1").returncode == 0
+    assert _alembic(old_db, "downgrade", "a1f0c0de0003").returncode == 0
     assert _alembic(old_db, "upgrade", "head").returncode == 0
 
 
@@ -108,5 +108,5 @@ def test_a_server_with_no_decidable_kingdom_stops_the_migration(old_db):
     asyncio.run(_db(old_db, (
         "INSERT INTO kingdoms (id,name,slug) VALUES (1,'A','a'),(2,'B','b');"
         "INSERT INTO discord_servers (id,name,guild_id) VALUES (1,'Orphan','g-orphan');")))
-    done = _alembic(old_db, "upgrade", "head")
+    done = _alembic(old_db, "upgrade", "a1f0c0de0004")
     assert done.returncode != 0 and "Orphan" in done.stderr

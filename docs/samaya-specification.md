@@ -8,7 +8,7 @@
 
 This part describes Samaya as it exists now. It is rewritten when the system changes, so it is the place to start. The numbered sections in Part II explain why each piece was built and are not edited to track later changes, except for short corrections.
 
-**Destinations (§67).** Where an event posts is no longer a per-alliance Notifications channel with per-event overrides. An alliance owns destinations (server, channel, optional role), Kingdom coordinators define audience groups, reminders to the same guild, channel and offset merge into one message, and a server belongs to one Kingdom. Wherever Part I or Part II mention `notification_channel_id`, per-event channel overrides or `PUT /api/notification-destination`, §67 wins; the old columns stay until revision `a1f0c0de0005`.
+**Destinations and Audiences (§67, §68).** Where an event posts is no longer a per-alliance Notifications channel with per-event overrides. The Kingdom owns Audiences, each a named list of destinations (server, channel, optional role); alliances use Audiences through links; events select several; audience groups are folded into Audiences. Where §67 below says destination or group, §68 wins. Also: reminders to the same guild, channel and offset merge into one message, and a server belongs to one Kingdom. Wherever Part I or Part II mention `notification_channel_id`, per-event channel overrides or `PUT /api/notification-destination`, §67 wins; the old columns stay until revision `a1f0c0de0006`.
 
 ## CS.1 What the system is
 
@@ -1674,7 +1674,7 @@ Everything in §66.9, plus any change to authentication, Kingdoms, alliances or 
 
 ## 67. Destinations, Audience Groups and Deduplication
 
-**Status:** Planned, designed 2026-10-01 and awaiting approval. Nothing here is built. It extends §66 on purpose: §66 listed "Discord server setup" as out of scope and gave each alliance exactly one Notifications destination.
+**Status:** Built and deployed 2026-10-01 (revision `a1f0c0de0004`). Destination ownership is changed by §68: where this section says a destination belongs to an alliance, §68 wins. It extends §66 on purpose: §66 listed "Discord server setup" as out of scope and gave each alliance exactly one Notifications destination.
 
 **Problem.** An alliance has one Discord server and one notification channel and role. Two alliances that share a channel (production: MOD and NSR on one channel) each get their own reminder, so the channel sees two messages for one event. There is no way to post to a second server or channel, to build a leadership-only audience, or to point one event at a one-off channel without a per-event override.
 
@@ -1783,9 +1783,9 @@ The cutover script showed that Discord returns 429 under bursts, and that one de
   - for every `event_alliances` row with a channel or role override: a destination for the override (label "Event channel", `post_by_default` false, `leadership_only` true when the event is leadership-only, reused when the same alliance, server, channel and role exist), an `event_destinations` row that adds it, and one that opts out of the alliance default. A role-only override becomes a destination on the default channel with the other role; because both destinations then share a channel, they merge and the mention is the union of both roles, which differs from the old "override replaces" rule. This is rare and is flagged here for review;
   - existing `deliveries` get `guild_id` and `channel_id` backfilled from the alliance's destination and keep their status.
   - Leadership events that relied on the alliance default channel now resolve to no leadership-only destination (§67.2) and show a clear error until the owner flags a destination. This is deliberate: it closes the path where a leadership reminder could reach a public channel.
-- **Revision `a1f0c0de0005` (destructive, a later release):** drops the tenant and `event_alliances` notification columns after the new engine has run cleanly on production. Taking the `ops/backup.sh` dump first is the rollback.
+- **Revision `a1f0c0de0006` (destructive, a later release):** drops the tenant and `event_alliances` notification columns after the new engine has run cleanly on production. Taking the `ops/backup.sh` dump first is the rollback.
 - **Deploy:** a branch, a PR the owner merges, then on `lxc-taraka`: back up, `git pull`, `docker compose build app`, `alembic upgrade head`, `docker compose up -d app`, then check Setup shows the seeded destinations. Code-only rollback is safe for `0004` because the old columns remain.
-- Production entry of events can continue while this is built: the seed converts what exists, and nothing is dropped until `0005`.
+- Production entry of events can continue while this is built: the seed converts what exists, and nothing is dropped until `0006`.
 
 ### 67.9 Tests
 
@@ -1809,6 +1809,64 @@ On completion: Part I and `CLAUDE.md` describe destinations, groups and merging;
 
 Per-destination message wording, a creation-notice destination (§66.9), per-coordinator alliance limits (§66.9),and Scheduled Events on any server other than an alliance's primary.
 
+
+## 68. Audiences (Kingdom-Level, Multi-Channel)
+
+**Status:** Designed 2026-10-01 after §67 shipped, revised the same day after owner feedback. It supersedes §67.1, §67.2 and §67.5 wherever they say a destination belongs to one alliance or holds one channel, and it replaces audience groups. Merging, conflicts, leadership and rate limits (§67) stand.
+
+**Problem.** §67 made every destination one channel owned by one alliance. Two alliances posting to the same channel (production: MOD and NSR "Leadership") each needed a copy, and one announcement that must reach several servers needed a group on top.
+
+**Vocabulary.** "Destination" now has its ordinary meaning: **a server, a channel and an optional role to mention.** What §67 called a destination is an **Audience**: a named, reusable list of destinations.
+
+**Decisions (2026-10-01, with the owner).**
+- An **Audience belongs to the Kingdom**: label, `leadership_only`, and one or more destinations on any server of that Kingdom. A Kingdom coordinator (or superadmin) creates, edits and deletes it once.
+- An **alliance uses an Audience through a link** (`alliance_audiences`: alliance, audience, `post_by_default`). The link means "this alliance may post to this Audience"; the flag means "its events post there without being asked". One Audience links to many alliances. An alliance owner (or a coordinator or superadmin) manages that alliance's links.
+- **Events select multiple Audiences.** The Events form lists the Audiences linked to the audience alliances, defaults pre-ticked, and each can be switched on or off per event (`event_audiences`, as §67's per-event change).
+- **Audience groups are folded into Audiences.** A multi-destination Audience does what a group did. Migration converts each group into an Audience holding the channels of its members.
+- Servers need only share the Audience's Kingdom. **Secondary servers become informational**; Scheduled Events still go only to the alliance's primary server.
+- **Resolution (§67.2):** step 1 takes the Audiences linked to each audience alliance with `post_by_default`. Step 3 accepts an explicit add only when an audience alliance is linked to that Audience (default or not). An Audience linked to none of them is unavailable to the event. Sharing is declared, never inferred.
+- The result is a list of **targets**: an (alliance, destination) pair per destination of each selected Audience. An Audience reached by an explicit add that no audience alliance is linked to is attributed to the event's owning alliance.
+- **Merging (§67.3) now spans Audiences and alliances.** Deliveries are one per (occurrence, destination, alliance, offset). Deliveries that share (guild, channel, offset) are one send, whichever Audiences or alliances produced them. `{alliance_name}` lists the alliances of the merged targets. A role shared by merged targets is mentioned once.
+- Leadership (option A) is unchanged: a leadership-only Audience takes only leadership events and a leadership event uses only those.
+
+### 68.1 Data model
+
+- `audiences` (was `destinations`): `kingdom_id`, `label`, `leadership_only`. Unique on `(kingdom_id, label)`. No server, channel or role.
+- `audience_destinations` (new): `audience_id`, `server_id`, `channel_id`, `role_id`. Unique on `(audience_id, server_id, channel_id, role_id)`. The server must share the Audience's Kingdom (422 otherwise). At least one per Audience.
+- `alliance_audiences`: `tenant_id`, `audience_id`, `post_by_default`; primary key on the pair; same Kingdom; cascade on alliance delete, restrict on Audience delete.
+- `event_audiences` (was `event_destinations`): `event_id`, `audience_id`, `included`.
+- `deliveries.destination_id` references `audience_destinations.id`. Reminder unique index: `(occurrence_id, destination_id, tenant_id, reminder_minutes)` where `kind = 'reminder'`.
+- Dropped: `audience_groups`, `audience_group_destinations`, `event_groups`.
+
+### 68.2 Permissions
+
+| Action | Who |
+|---|---|
+| Create, edit, delete an Audience and its destinations | Kingdom coordinator for that Kingdom, or superadmin |
+| Link or unlink an alliance, set its default flag | Owner of that alliance, a coordinator of its Kingdom, or superadmin |
+| Select Audiences on an event | Anyone who may create or edit that event |
+
+Deleting an Audience that is linked or used by an event returns 409 listing the alliances and events. Known trade-off: an alliance owner can link any Kingdom Audience, including another alliance's leadership one. The leadership rule still limits it to leadership events. Restricting links to coordinators is a one-line permission change.
+
+### 68.3 Routes and console
+
+- `GET/POST /api/audiences`, `PATCH/DELETE /api/audiences/{id}` act on the Kingdom of the selected alliance. Each Audience carries `destinations` (`server_id`, `channel_id`, `role_id`) and `links` (`tenant_id`, `post_by_default`). A PATCH that sends `destinations` replaces the list.
+- `PUT /api/alliance-audiences` sets the selected alliance's links: a list of `{audience_id, post_by_default}`.
+- `/api/destinations` and `/api/audience-groups` are removed. `POST /api/events/preview-destinations` keeps its name and now returns Audiences with their destinations.
+- Setup: a **Kingdom audiences** panel (coordinators and superadmins) where each Audience has a list of server and channel rows; each alliance shows a checklist of the Kingdom's Audiences with "Post by default". The Events form shows **Audiences** as multi-select chips.
+
+### 68.4 Migration
+
+Revision `a1f0c0de0005` converts what §67 created:
+- Each §67 destination becomes an Audience plus one `audience_destinations` row. `kingdom_id` comes from the owning alliance. Destinations with the same Kingdom, server, channel and role merge into the lowest id; a label that clashes in the Kingdom gets the alliance name appended. Each former owner becomes a link with its old `post_by_default`.
+- Each audience group becomes an Audience (label from the group, a clash gets " (group)") holding the distinct channels of its members. Alliances are not linked to it. `event_groups` become `event_audiences` with `included = true`.
+- `event_destinations` and `deliveries` are remapped to the surviving rows, dropping duplicates (an add and an opt-out for merged rows keeps the opt-out).
+- Downgrade splits shared Audiences into per-alliance single-channel destinations and re-creates groups from groups' Audiences. Groups created after upgrade are not reconstructed (stated in the rollback runbook).
+- The revision that drops the legacy `notification_*` columns becomes `a1f0c0de0006`.
+
+### 68.5 Tests
+
+One Audience with two channels on two servers: two sends. An Audience linked to MOD and NSR: one message, role once, `{alliance_name}` "MOD, NSR". Two Audiences sharing a channel: one message. Link default versus optional. Explicit add rejected when no audience alliance is linked. Coordinator versus owner permissions and 409 on delete. A migration test from a §67-shaped database with identical destinations and a group. Setup and Events form checked in a browser at desktop and 390px.
 
 # Archive
 

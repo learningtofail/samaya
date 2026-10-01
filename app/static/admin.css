@@ -288,7 +288,7 @@ summary:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--focus
 
 .hidden { display: none; }
 
-/* Destinations, servers and audience groups (spec §67) */
+/* Audiences, destinations and servers (spec §68) */
 .fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .server-badge { display: inline-flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); border-radius: var(--radius-pill); background: var(--surface-alt); color: var(--ink); font-size: var(--fs-sm); }
 .server-badge--secondary { background: transparent; border: 1px solid var(--muted); }
@@ -298,6 +298,13 @@ summary:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--focus
 .dest-group__title { margin: 0 0 var(--space-1); font-weight: 600; }
 .dest-list { margin: 0; padding: 0; list-style: none; }
 .dest-list__item { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.dest { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
+.dest-list__item--stack { flex-direction: column; align-items: flex-start; gap: var(--space-1); padding: var(--space-2) 0; border-bottom: 1px solid var(--line); }
+.dest-list__destinations { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.aud-dests, .aud-links { list-style: none; margin: 0 0 var(--space-3); padding: 0; display: grid; gap: var(--space-3); }
+.aud-dest { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-alt); }
+.aud-dest__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.aud-link { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .dest-note { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--fs-sm); }
 .dest-warning { margin: var(--space-2) 0 0; padding: var(--space-2); border-left: 4px solid var(--bad-ink); background: var(--surface-alt); }
 .dest-summary { margin: var(--space-2) 0; font-weight: 600; }

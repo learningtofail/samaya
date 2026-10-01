@@ -229,6 +229,6 @@ async def sf(db_engine):
 @pytest_asyncio.fixture
 async def configured(sf, tenant):
     """The default tenant with a default destination (channel and role)."""
-    from tests.unified_helpers import add_destination
-    await add_destination(sf, tenant, "chan-mod", "role-mod")
+    from tests.unified_helpers import add_audience
+    await add_audience(sf, tenant, "chan-mod", "role-mod", label="Notifications")
     return tenant

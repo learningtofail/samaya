@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from models.db import (
-    Delivery, Destination, Event, EventAlliance, EventDestination, EventOccurrence, EventReminder, EventType, Tenant,
+    AllianceAudience, Audience, AudienceDestination, Delivery, Event, EventAlliance, EventAudience, EventOccurrence, EventReminder, EventType, Tenant,
 )
 from services.event_engine import sync_event_occurrences
 
@@ -109,22 +109,36 @@ async def deliveries(sf, event_id=None, **filters):
         return list((await s.execute(stmt.order_by(Delivery.due_at_utc, Delivery.id))).scalars().all())
 
 
-async def add_destination(sf, tenant, channel, role="", *, label="Notifications", default=True,
-                          leadership=False, server_id=None, tenant_id=None) -> int:
-    """A destination for `tenant` (a fixture dict), on the tenant's primary server unless told otherwise."""
+async def add_audience(sf, tenant, channel, role="", *, label=None, default=True,
+                       leadership=False, server_id=None, tenant_id=None, link=True, also=()) -> int:
+    """An Audience in `tenant`'s Kingdom (a fixture dict) posting to `channel` on the tenant's primary server
+    unless told otherwise, linked to the tenant (`tenant_id` overrides) with the given default.
+    `also` adds more destinations as (server_id, channel, role) tuples. Returns the Audience id."""
+    from models.db import Tenant
     async with sf() as s:
-        dest = Destination(
-            tenant_id=tenant_id or tenant["id"], server_id=server_id or tenant["server_id"], channel_id=channel,
-            role_id=role, label=label, post_by_default=default, leadership_only=leadership,
-        )
-        s.add(dest)
+        owner = await s.get(Tenant, tenant_id or tenant["id"])
+        audience = Audience(kingdom_id=owner.kingdom_id, label=label or f"Audience {channel} {owner.id}", leadership_only=leadership)
+        audience.destinations = [
+            AudienceDestination(server_id=server_id or tenant["server_id"], channel_id=channel, role_id=role),
+            *[AudienceDestination(server_id=sid, channel_id=ch, role_id=rl) for sid, ch, rl in also],
+        ]
+        s.add(audience)
+        await s.flush()
+        if link:
+            s.add(AllianceAudience(tenant_id=owner.id, audience_id=audience.id, post_by_default=default))
         await s.commit()
-        return dest.id
+        return audience.id
 
 
-async def change_destination(sf, event_id, destination_id, included: bool) -> None:
+async def link_audience(sf, audience_id, tenant_id, default=True) -> None:
     async with sf() as s:
-        s.add(EventDestination(event_id=event_id, destination_id=destination_id, included=included))
+        s.add(AllianceAudience(tenant_id=tenant_id, audience_id=audience_id, post_by_default=default))
+        await s.commit()
+
+
+async def change_audience(sf, event_id, audience_id, included: bool) -> None:
+    async with sf() as s:
+        s.add(EventAudience(event_id=event_id, audience_id=audience_id, included=included))
         await s.commit()
 
 

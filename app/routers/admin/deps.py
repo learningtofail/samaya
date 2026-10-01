@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
-from models.db import Tenant, User, UserTenant
+from models.db import DiscordServer, Tenant, User, UserTenant
 from services.sessions import SESSION_COOKIE_NAME, read_session_token
 
 # Fallback bot token for a Discord server that has none of its own.
@@ -138,7 +138,10 @@ async def require_not_viewer(
     return tenant
 
 
-async def check_kingdom_coordinator(db: AsyncSession, user: User, kingdom_id: int):
+async def check_kingdom_coordinator(
+    db: AsyncSession, user: User, kingdom_id: int,
+    detail: str = "Creating or editing a kingdom-wide event requires kingdom coordinator access",
+):
     """Not a FastAPI dependency — only some events (scope='kingdom-wide')
     need this check, not every route that touches EventDefinition, so
     it's called conditionally from inside create_event/update_event
@@ -152,7 +155,7 @@ async def check_kingdom_coordinator(db: AsyncSession, user: User, kingdom_id: in
     if not result.scalar_one_or_none():
         raise HTTPException(
             status_code=403,
-            detail="Creating or editing a kingdom-wide event requires kingdom coordinator access",
+            detail=detail,
         )
 
 
@@ -165,15 +168,16 @@ class DiscordCreds:
 async def get_discord_config(
     server_id: int | None = Query(default=None),
     tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
 ) -> DiscordCreds:
-    """The alliance's primary server, or, with `server_id`, one of its
-    secondary servers (spec §67.5): a destination's channel and role pickers
+    """The alliance's primary server, or, with `server_id`, any server of its
+    Kingdom (spec §68): an Audience destination's channel and role pickers
     load from the server the destination uses."""
     server = tenant.server
     if server_id is not None and server_id != tenant.server_id:
-        server = next((r.server for r in tenant.secondary_servers if r.server_id == server_id), None)
-        if server is None:
-            raise HTTPException(status_code=422, detail="That server is not this alliance's primary or secondary server")
+        server = await db.get(DiscordServer, server_id)
+        if server is None or server.kingdom_id != tenant.kingdom_id:
+            raise HTTPException(status_code=422, detail="That server does not belong to this alliance's Kingdom")
     token = server.bot_token or PLATFORM_BOT_TOKEN
     if not token:
         raise HTTPException(

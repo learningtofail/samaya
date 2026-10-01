@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import select
 
 from models.db import Delivery, Event, EventAlliance, EventOccurrence
-from tests.unified_helpers import add_destination, make_event, sync
+from tests.unified_helpers import add_audience, make_event, sync
 
 UTC = timezone.utc
 TODAY = date.today()
@@ -217,8 +217,8 @@ class TestChannelNameResolution:
 
     async def test_a_leadership_only_destination_is_never_exposed(self, client, sf, tenant, monkeypatch):
         await self._fake_channels(monkeypatch, [{"id": "lead", "name": "leaders"}, {"id": "pub", "name": "general"}])
-        await add_destination(sf, tenant, "lead", label="Leaders", leadership=True)
-        await add_destination(sf, tenant, "pub", label="Public")
+        await add_audience(sf, tenant, "lead", label="Leaders", leadership=True)
+        await add_audience(sf, tenant, "pub", label="Public")
         await _published(sf, tenant)
         assert _row((await client.get("/t/mod/api/events")).json(), "Bear Hunt")["notification_channel_name"] == "general"
 

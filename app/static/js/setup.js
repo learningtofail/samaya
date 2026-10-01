@@ -1,295 +1,325 @@
-// Setup tab (#v-setup, spec §66.7 and §67): your public display name, each
-// alliance's destinations (the Discord channels and roles its reminders and
-// messages go to), Kingdom audience groups, and, for a superadmin, the
-// platform sections that access.js and platform.js render. Depends on
-// common.js and pickers.js.
+// Setup tab (#v-setup, spec §66.7 and §68): your public display name, the
+// Kingdom's Audiences (named lists of Discord server and channel destinations),
+// which Audiences each alliance uses, and, for a superadmin, the platform
+// sections that access.js and platform.js render. Depends on common.js and
+// pickers.js.
 
-let SETUP_DESTINATIONS = [];   // every destination of the alliances shown
-let SETUP_GROUPS = [];
-let SETUP_KINGDOM_DESTINATIONS = [];
-const DST_PICKERS = { channel: null, role: null };
+let SETUP_AUDIENCES = [];      // every Audience of the Kingdoms the user can see
+let KINGDOM_SERVERS = {};      // Kingdom id -> [{id, name}]
+let AUD_ROWS = new Map();      // row number -> { server, channel, role } of the open Audience form
+let AUD_ROW_SEQ = 0;
 
 function loadSetup() {
   const sa = isSuperadmin();
   byId('setupDisplayName').value = ME && ME.display_name ? ME.display_name : '';
   byId('setupSuperadmin').classList.toggle('hidden', !sa);
-  renderSetupAlliances();
-  loadSetupGroups();
+  loadSetupAudiences();
   if (sa) {
     loadAccess();
     loadPlatform();
   }
 }
 
-// ── Alliance destinations ────────────────────────────────────
-
-function serversLineHtml(t) {
-  const secondary = (t.secondary_servers || []).map((s) => escapeHtml(s.name));
-  return `<div><span class="samaya-muted">Primary:</span> ${escapeHtml(t.server_name)}</div>
-    ${secondary.length ? `<div><span class="samaya-muted">Secondary:</span> ${secondary.join(', ')}</div>` : ''}`;
-}
-
-function destinationFlagsHtml(d) {
-  const flags = [];
-  if (d.post_by_default) flags.push(pfLabel('Default', 'pf-m-green'));
-  if (d.leadership_only) flags.push(pfLabel('Leadership only', 'pf-m-orange'));
-  return flags.length ? `<div class="label-stack">${flags.join(' ')}</div>` : '<span class="samaya-muted">Opt in per event</span>';
-}
-
-function buildDestinationRow(d, t, can) {
-  const primary = d.server_id === t.server_id;
-  const actions = can
-    ? `<div class="row-actions">
-        <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="edit-destination" data-id="${d.id}">Edit</button>
-        <button type="button" class="pf-v6-c-button pf-m-danger pf-m-small" data-action="delete-destination" data-id="${d.id}">Delete</button>
-      </div>`
-    : '<span class="samaya-muted">Read only</span>';
-  return `<tr class="pf-v6-c-table__tr">
-    <td class="pf-v6-c-table__td" data-label="Label"><strong>${escapeHtml(d.label)}</strong></td>
-    <td class="pf-v6-c-table__td" data-label="Server">${serverBadgeHtml(d.server_name, primary)}</td>
-    <td class="pf-v6-c-table__td" data-label="Channel"><span class="dest-channel" data-server="${d.server_id}" data-slug="${escapeHtml(d.alliance_slug)}" data-channel="${escapeHtml(d.channel_id)}">${escapeHtml(d.channel_id)}</span></td>
-    <td class="pf-v6-c-table__td" data-label="Role">${d.role_id ? `<span class="dest-role" data-server="${d.server_id}" data-slug="${escapeHtml(d.alliance_slug)}" data-role="${escapeHtml(d.role_id)}">${escapeHtml(d.role_id)}</span>` : '<span class="samaya-muted">None</span>'}</td>
-    <td class="pf-v6-c-table__td" data-label="Posts">${destinationFlagsHtml(d)}</td>
-    <td class="pf-v6-c-table__td" data-label="Actions">${actions}</td>
-  </tr>`;
-}
-
-async function renderSetupAlliances() {
-  const host = byId('setupAlliances');
-  if (!TENANTS.length) { host.innerHTML = '<p class="samaya-empty">You have no alliances yet.</p>'; return; }
-  try {
-    SETUP_DESTINATIONS = await api('GET', '/api/destinations', null, false, '*');
-  } catch (e) {
-    toast(e.message, true);
-    SETUP_DESTINATIONS = [];
-  }
-  host.innerHTML = TENANTS.map((t) => {
-    const can = isOwnerOfTenant(t);
-    const rows = SETUP_DESTINATIONS.filter((d) => d.tenant_id === t.id);
-    return `<section class="alliance" aria-labelledby="alliance${t.id}Name">
-      <h4 class="alliance__name" id="alliance${t.id}Name">${escapeHtml(t.name)}</h4>
-      ${serversLineHtml(t)}
-      <div class="table-wrap">
-        <table class="pf-v6-c-table pf-m-grid-md responsive-table">
-          <caption class="sr-only">Destinations for ${escapeHtml(t.name)}</caption>
-          <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Label</th><th class="pf-v6-c-table__th" scope="col">Server</th><th class="pf-v6-c-table__th" scope="col">Channel</th><th class="pf-v6-c-table__th" scope="col">Role</th><th class="pf-v6-c-table__th" scope="col">Posts</th><th class="pf-v6-c-table__th" scope="col">Actions</th></tr></thead>
-          <tbody>${rows.length ? rows.map((d) => buildDestinationRow(d, t, can)).join('') : emptyRow(6, 'No destinations yet. This alliance cannot receive reminders.')}</tbody>
-        </table>
-      </div>
-      ${can
-    ? `<button type="button" class="pf-v6-c-button pf-m-primary pf-m-small" data-action="add-destination" data-id="${t.id}">Add a destination for ${escapeHtml(t.name)}</button>`
-    : `<p class="samaya-muted">Only an owner of ${escapeHtml(t.name)} or a superadmin can change these.</p>`}
-    </section>`;
-  }).join('');
-  resolveDestinationNames(host);
-}
-
-// Channel and role IDs are replaced by names once Discord answers. A failure
-// leaves the ID, which is still correct.
-function resolveDestinationNames(host) {
-  host.querySelectorAll('.dest-channel').forEach((el) => {
-    loadDiscordList('channel', el.dataset.slug, serverArg(el.dataset.slug, el.dataset.server)).then(({ items }) => {
-      const hit = items.find((c) => String(c.id) === el.dataset.channel);
-      if (hit) el.textContent = '#' + hit.name;
-    });
-  });
-  host.querySelectorAll('.dest-role').forEach((el) => {
-    loadDiscordList('role', el.dataset.slug, serverArg(el.dataset.slug, el.dataset.server)).then(({ items }) => {
-      const hit = items.find((r) => String(r.id) === el.dataset.role);
-      if (hit) el.textContent = '@' + hit.name;
-    });
-  });
-}
-
-// The primary server is the default, so only a secondary needs the parameter.
-function serverArg(slug, serverId) {
-  const t = tenantBySlug(slug);
-  return t && String(t.server_id) === String(serverId) ? undefined : serverId;
-}
-
-function mountDestinationPickers(t, serverId, channel, role) {
-  const arg = serverArg(t.slug, serverId);
-  DST_PICKERS.channel = mountDiscordPicker(byId('dstChannelHost'), {
-    kind: 'channel', slug: t.slug, serverId: arg, id: 'dstChannel', label: 'Channel', value: channel, emptyLabel: 'Choose a channel',
-  });
-  DST_PICKERS.role = mountDiscordPicker(byId('dstRoleHost'), {
-    kind: 'role', slug: t.slug, serverId: arg, id: 'dstRole', label: 'Role (optional)', value: role, emptyLabel: 'No role',
-    helper: 'Mentioned on events that have "mention the role" turned on.',
-  });
-}
-
-function openDestinationForm(t, d) {
-  byId('destinationModalTitleText').textContent = d ? 'Edit destination' : 'New destination';
-  byId('dstId').value = d ? d.id : '';
-  byId('dstTenantId').value = t.id;
-  byId('dstLabel').value = d ? d.label : '';
-  const servers = allowedServers(t);
-  const serverId = d ? d.server_id : t.server_id;
-  byId('dstServer').innerHTML = optionsHtml(
-    servers.map((s) => ({ value: s.id, label: `${s.name} (${s.primary ? 'primary' : 'secondary'})` })), serverId);
-  byId('dstDefault').checked = d ? d.post_by_default : true;
-  byId('dstLeadership').checked = d ? d.leadership_only : false;
-  mountDestinationPickers(t, serverId, d ? d.channel_id : '', d ? d.role_id : '');
-  openModalById('destinationModal');
-}
-
-function closeDestinationModal() {
-  closeModalById('destinationModal');
-}
-
-byId('dstServer').addEventListener('change', () => {
-  const t = tenantById(parseInt(byId('dstTenantId').value, 10));
-  if (t) mountDestinationPickers(t, byId('dstServer').value, '', '');
-});
-
-async function saveDestinationModal() {
-  const t = tenantById(parseInt(byId('dstTenantId').value, 10));
-  if (!t) return;
-  const id = byId('dstId').value;
-  const channel = DST_PICKERS.channel.value();
-  const role = DST_PICKERS.role.value();
-  const label = byId('dstLabel').value.trim();
-  if (!label) { toast('Give the destination a label', true); return; }
-  if (!channel) { toast('Choose a channel', true); return; }
-  if (!/^\d+$/.test(channel) || (role && !/^\d+$/.test(role))) { toast('Channel and role IDs are digits only.', true); return; }
-  const payload = {
-    label, server_id: parseInt(byId('dstServer').value, 10), channel_id: channel, role_id: role,
-    post_by_default: byId('dstDefault').checked, leadership_only: byId('dstLeadership').checked,
-  };
-  const btn = byId('btnSaveDestinationModal');
-  btn.disabled = true;
-  try {
-    if (id) await api('PATCH', `/api/destinations/${id}`, payload, false, t.slug);
-    else await api('POST', '/api/destinations', payload, false, t.slug);
-    toast(`Destination saved for ${t.name}.`);
-    closeDestinationModal();
-    renderSetupAlliances();
-    loadSetupGroups();
-  } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
-}
-byId('btnSaveDestinationModal').addEventListener('click', saveDestinationModal);
-
-bindActions(byId('setupAlliances'), {
-  'add-destination'(btn) {
-    const t = tenantById(parseInt(btn.dataset.id, 10));
-    if (t) openDestinationForm(t, null);
-  },
-  'edit-destination'(btn) {
-    const d = SETUP_DESTINATIONS.find((x) => x.id === parseInt(btn.dataset.id, 10));
-    const t = d && tenantById(d.tenant_id);
-    if (t) openDestinationForm(t, d);
-  },
-  async 'delete-destination'(btn) {
-    const d = SETUP_DESTINATIONS.find((x) => x.id === parseInt(btn.dataset.id, 10));
-    const t = d && tenantById(d.tenant_id);
-    if (!t || !confirm(`Delete the destination "${d.label}"? Pending reminders to it are cancelled.`)) return;
-    try {
-      await api('DELETE', `/api/destinations/${d.id}`, null, false, t.slug);
-      toast('Destination deleted.');
-      renderSetupAlliances();
-      loadSetupGroups();
-    } catch (e) { toast(e.message, true); }
-  },
-});
-
-// ── Audience groups ──────────────────────────────────────────
-
-// The group endpoints act on the Kingdom of the selected alliance.
+// The Audience endpoints act on the Kingdom of the selected alliance, so a
+// Kingdom is reached through any alliance of it the user can see.
 function slugForKingdom(kingdomId) {
   const t = TENANTS.find((x) => x.kingdom_id === kingdomId);
   return t ? t.slug : undefined;
 }
 
-function groupKingdomIds() {
+function manageableKingdomIds() {
   return Array.from(new Set(TENANTS.map((t) => t.kingdom_id))).filter(isKingdomCoordinator);
 }
 
-async function loadSetupGroups() {
-  const panel = byId('setupGroupsPanel');
-  const kingdoms = groupKingdomIds();
-  panel.classList.toggle('hidden', !kingdoms.length);
-  if (!kingdoms.length) return;
+function canEditLinks(t) {
+  return isOwnerOfTenant(t) || isKingdomCoordinator(t.kingdom_id);
+}
+
+async function loadSetupAudiences() {
+  if (!TENANTS.length) {
+    byId('setupAlliances').innerHTML = '<p class="samaya-empty">You have no alliances yet.</p>';
+    byId('audiencesBody').innerHTML = emptyRow(4, 'No audiences yet.');
+    return;
+  }
   try {
-    const [perKingdom, destinations] = await Promise.all([
-      Promise.all(kingdoms.map((k) => api('GET', '/api/audience-groups', null, false, slugForKingdom(k)))),
-      api('GET', '/api/destinations?kingdom=true', null, false, '*'),
-    ]);
-    SETUP_GROUPS = perKingdom.flat();
-    SETUP_KINGDOM_DESTINATIONS = destinations.filter((d) => kingdoms.includes((tenantById(d.tenant_id) || {}).kingdom_id));
-  } catch (e) { toast(e.message, true); return; }
-  byId('groupsBody').innerHTML = SETUP_GROUPS.length
-    ? SETUP_GROUPS.map((g) => `<tr class="pf-v6-c-table__tr">
-        <td class="pf-v6-c-table__td" data-label="Group"><strong>${escapeHtml(g.name)}</strong>${g.description ? `<div class="samaya-muted">${escapeHtml(g.description)}</div>` : ''}</td>
-        <td class="pf-v6-c-table__td" data-label="Destinations">${g.destinations.length
-    ? g.destinations.map((d) => `<div>${escapeHtml(d.alliance)}: ${escapeHtml(d.label)}${d.leadership_only ? ' (leadership only)' : ''}</div>`).join('')
-    : '<span class="samaya-muted">Empty</span>'}</td>
-        <td class="pf-v6-c-table__td" data-label="Actions"><div class="row-actions">
-          <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="edit" data-id="${g.id}">Edit</button>
-          <button type="button" class="pf-v6-c-button pf-m-danger pf-m-small" data-action="delete" data-id="${g.id}">Delete</button>
-        </div></td>
-      </tr>`).join('')
-    : emptyRow(3, 'No audience groups yet.');
+    SETUP_AUDIENCES = await api('GET', '/api/audiences', null, false, '*');
+  } catch (e) {
+    toast(e.message, true);
+    SETUP_AUDIENCES = [];
+  }
+  renderAudiencesPanel();
+  renderSetupAlliances();
 }
 
-function fillGroupDestinations(scope, chosen) {
-  const choices = SETUP_KINGDOM_DESTINATIONS.filter((d) => (tenantById(d.tenant_id) || {}).kingdom_id === scope);
-  byId('grpDestinations').innerHTML = choices.length
-    ? choices.map((d) => `<label class="check"><input type="checkbox" value="${d.id}"${chosen.has(d.id) ? ' checked' : ''}> ${escapeHtml(d.alliance)}: ${escapeHtml(d.label)}${d.leadership_only ? ' (leadership only)' : ''}</label>`).join('')
-    : '<p class="samaya-muted">No destinations exist yet. Alliance owners add them above.</p>';
+// ── Kingdom audiences ────────────────────────────────────────
+
+function audienceFlagsHtml(a) {
+  return a.leadership_only ? pfLabel('Leadership only', 'pf-m-orange') : '';
 }
 
-byId('grpKingdom').addEventListener('change', () => fillGroupDestinations(parseInt(byId('grpKingdom').value, 10), new Set()));
+function audienceAlliancesHtml(a) {
+  if (!a.links.length) return '<span class="samaya-muted">No alliance uses it</span>';
+  return a.links.map((l) => `<div>${escapeHtml(l.alliance)} ${l.post_by_default ? pfLabel('Default', 'pf-m-green') : '<span class="samaya-muted">optional</span>'}</div>`).join('');
+}
 
-function openGroupForm(g) {
-  byId('groupModalTitleText').textContent = g ? 'Edit audience group' : 'New audience group';
-  byId('grpId').value = g ? g.id : '';
-  byId('grpName').value = g ? g.name : '';
-  byId('grpDescription').value = g ? g.description : '';
-  const chosen = new Set(g ? g.destination_ids : []);
-  const kingdoms = groupKingdomIds();
-  byId('grpKingdomGroup').classList.toggle('hidden', !!g || kingdoms.length < 2);
+function renderAudiencesPanel() {
+  const kingdoms = manageableKingdomIds();
+  byId('btnCreateAudience').classList.toggle('hidden', !kingdoms.length);
+  byId('audiencesBody').innerHTML = SETUP_AUDIENCES.length
+    ? SETUP_AUDIENCES.map((a) => {
+      const slug = slugForKingdom(a.kingdom_id);
+      const actions = isKingdomCoordinator(a.kingdom_id)
+        ? `<div class="row-actions">
+            <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="edit" data-id="${a.id}">Edit</button>
+            <button type="button" class="pf-v6-c-button pf-m-danger pf-m-small" data-action="delete" data-id="${a.id}">Delete</button>
+          </div>`
+        : '<span class="samaya-muted">Read only</span>';
+      return `<tr class="pf-v6-c-table__tr">
+        <td class="pf-v6-c-table__td" data-label="Audience"><strong>${escapeHtml(a.label)}</strong><div class="label-stack">${audienceFlagsHtml(a)}</div></td>
+        <td class="pf-v6-c-table__td" data-label="Destinations">${a.destinations.map((d) => `<div>${destinationHtml(d, slug)}</div>`).join('')}</td>
+        <td class="pf-v6-c-table__td" data-label="Used by">${audienceAlliancesHtml(a)}</td>
+        <td class="pf-v6-c-table__td" data-label="Actions">${actions}</td>
+      </tr>`;
+    }).join('')
+    : emptyRow(4, 'No audiences yet. A Kingdom coordinator or superadmin creates them.');
+  resolveDestinationNames(byId('audiencesBody'));
+}
+
+async function kingdomServers(kingdomId) {
+  if (!KINGDOM_SERVERS[kingdomId]) {
+    KINGDOM_SERVERS[kingdomId] = await api('GET', '/api/kingdom-servers', null, false, slugForKingdom(kingdomId));
+  }
+  return KINGDOM_SERVERS[kingdomId];
+}
+
+function audienceFormKingdom() {
+  const existing = SETUP_AUDIENCES.find((x) => String(x.id) === byId('audId').value);
+  return existing ? existing.kingdom_id : parseInt(byId('audKingdom').value, 10);
+}
+
+function addAudienceDestinationRow(servers, kingdomId, d) {
+  const n = ++AUD_ROW_SEQ;
+  const slug = slugForKingdom(kingdomId);
+  const serverId = d ? d.server_id : servers[0].id;
+  const li = document.createElement('li');
+  li.className = 'aud-dest';
+  li.dataset.row = String(n);
+  li.innerHTML = `
+    <div class="aud-dest__head">
+      <label class="pf-v6-c-form__label" for="audDst${n}Server"><span class="pf-v6-c-form__label-text">Discord server</span></label>
+      <button type="button" class="pf-v6-c-button pf-m-link pf-m-danger pf-m-small" data-action="remove-destination" data-row="${n}">Remove</button>
+    </div>
+    <select class="pf-v6-c-form-control" id="audDst${n}Server">${optionsHtml(servers.map((s) => ({ value: s.id, label: s.name })), serverId)}</select>
+    <div id="audDst${n}Channel"></div>
+    <div id="audDst${n}Role"></div>`;
+  byId('audDestinations').appendChild(li);
+  const row = { server: li.querySelector('select'), channel: null, role: null };
+  const mount = (channel, role) => {
+    const sid = row.server.value;
+    row.channel = mountDiscordPicker(byId(`audDst${n}Channel`), {
+      kind: 'channel', slug, serverId: sid, id: `audDst${n}ChannelSel`, label: 'Channel', value: channel, emptyLabel: 'Choose a channel',
+    });
+    row.role = mountDiscordPicker(byId(`audDst${n}Role`), {
+      kind: 'role', slug, serverId: sid, id: `audDst${n}RoleSel`, label: 'Role (optional)', value: role, emptyLabel: 'No role',
+      helper: 'Mentioned on events that have "mention the role" turned on.',
+    });
+  };
+  mount(d ? d.channel_id : '', d ? d.role_id : '');
+  row.server.addEventListener('change', () => mount('', ''));
+  AUD_ROWS.set(n, row);
+}
+
+function renderAudienceLinks(kingdomId, links) {
+  const alliances = TENANTS.filter((t) => t.kingdom_id === kingdomId);
+  const byTenant = new Map((links || []).map((l) => [l.tenant_id, l]));
+  byId('audLinks').innerHTML = alliances.length
+    ? alliances.map((t) => {
+      const link = byTenant.get(t.id);
+      return `<li class="aud-link">
+        <label class="check"><input type="checkbox" data-link="${t.id}"${link ? ' checked' : ''}> ${escapeHtml(t.name)}</label>
+        <label class="check"><input type="checkbox" data-default="${t.id}"${link && link.post_by_default ? ' checked' : ''}${link ? '' : ' disabled'}> Post by default</label>
+      </li>`;
+    }).join('')
+    : '<li class="samaya-muted">No alliances in this Kingdom.</li>';
+}
+
+byId('audLinks').addEventListener('change', (e) => {
+  const box = e.target.closest('input[data-link]');
+  if (!box) return;
+  const def = byId('audLinks').querySelector(`input[data-default="${box.dataset.link}"]`);
+  def.disabled = !box.checked;
+  if (box.checked) def.checked = true; else def.checked = false;
+});
+
+async function openAudienceForm(a) {
+  const kingdoms = manageableKingdomIds();
+  if (!a && !kingdoms.length) return;
+  const kingdomId = a ? a.kingdom_id : kingdoms[0];
+  byId('audienceModalTitleText').textContent = a ? 'Edit audience' : 'New audience';
+  byId('audId').value = a ? a.id : '';
+  byId('audLabel').value = a ? a.label : '';
+  byId('audLeadership').checked = a ? a.leadership_only : false;
+  byId('audKingdomGroup').classList.toggle('hidden', !!a || kingdoms.length < 2);
   KINGDOM_NAMES_CACHE = KINGDOM_NAMES_CACHE || {};
-  byId('grpKingdom').innerHTML = optionsHtml(kingdoms.map((k) => ({ value: k, label: KINGDOM_NAMES_CACHE[k] || `Kingdom ${k}` })), kingdoms[0]);
-  fillGroupDestinations(g ? g.kingdom_id : kingdoms[0], chosen);
-  openModalById('groupModal');
+  byId('audKingdom').innerHTML = optionsHtml(kingdoms.map((k) => ({ value: k, label: KINGDOM_NAMES_CACHE[k] || `Kingdom ${k}` })), kingdomId);
+  byId('audDestinations').innerHTML = '';
+  AUD_ROWS = new Map();
+  let servers;
+  try { servers = await kingdomServers(kingdomId); } catch (e) { toast(e.message, true); return; }
+  if (!servers.length) { toast('This Kingdom has no Discord servers yet. Ask a superadmin to add one.', true); return; }
+  (a && a.destinations.length ? a.destinations : [null]).forEach((d) => addAudienceDestinationRow(servers, kingdomId, d));
+  renderAudienceLinks(kingdomId, a ? a.links : []);
+  openModalById('audienceModal');
 }
 
-function closeGroupModal() {
-  closeModalById('groupModal');
+function closeAudienceModal() {
+  closeModalById('audienceModal');
 }
 
-async function saveGroupModal() {
-  const id = byId('grpId').value;
-  const group = SETUP_GROUPS.find((x) => String(x.id) === id);
-  const kingdomId = group ? group.kingdom_id : parseInt(byId('grpKingdom').value, 10);
-  const name = byId('grpName').value.trim();
-  if (!name) { toast('Give the group a name', true); return; }
-  const ids = Array.from(byId('grpDestinations').querySelectorAll('input:checked')).map((i) => parseInt(i.value, 10));
-  const payload = { name, description: byId('grpDescription').value.trim(), destination_ids: ids };
+byId('audKingdom').addEventListener('change', async () => {
+  const kingdomId = parseInt(byId('audKingdom').value, 10);
+  byId('audDestinations').innerHTML = '';
+  AUD_ROWS = new Map();
   try {
-    if (id) await api('PATCH', `/api/audience-groups/${id}`, payload, false, slugForKingdom(group.kingdom_id));
-    else await api('POST', '/api/audience-groups', payload, false, slugForKingdom(kingdomId));
-    toast('Audience group saved.');
-    closeGroupModal();
-    loadSetupGroups();
+    const servers = await kingdomServers(kingdomId);
+    if (servers.length) addAudienceDestinationRow(servers, kingdomId, null);
   } catch (e) { toast(e.message, true); }
+  renderAudienceLinks(kingdomId, []);
+});
+
+byId('btnAddAudienceDestination').addEventListener('click', async () => {
+  const kingdomId = audienceFormKingdom();
+  try { addAudienceDestinationRow(await kingdomServers(kingdomId), kingdomId, null); } catch (e) { toast(e.message, true); }
+});
+
+byId('audDestinations').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-action="remove-destination"]');
+  if (!btn) return;
+  if (AUD_ROWS.size < 2) { toast('An audience needs at least one destination.', true); return; }
+  AUD_ROWS.delete(parseInt(btn.dataset.row, 10));
+  btn.closest('li').remove();
+});
+
+function collectAudienceDestinations() {
+  const out = [];
+  for (const row of AUD_ROWS.values()) {
+    const channel = row.channel.value();
+    const role = row.role.value();
+    if (!channel) { toast('Choose a channel for every destination.', true); return null; }
+    if (!/^\d+$/.test(channel) || (role && !/^\d+$/.test(role))) { toast('Channel and role IDs are digits only.', true); return null; }
+    out.push({ server_id: parseInt(row.server.value, 10), channel_id: channel, role_id: role });
+  }
+  return out;
 }
 
-byId('btnCreateGroup').addEventListener('click', () => openGroupForm(null));
-byId('btnSaveGroupModal').addEventListener('click', saveGroupModal);
-bindActions(byId('groupsBody'), {
+async function saveAudienceModal() {
+  const id = byId('audId').value;
+  const kingdomId = audienceFormKingdom();
+  const label = byId('audLabel').value.trim();
+  if (!label) { toast('Give the audience a label', true); return; }
+  const destinations = collectAudienceDestinations();
+  if (!destinations) return;
+  const links = Array.from(byId('audLinks').querySelectorAll('input[data-link]:checked')).map((box) => ({
+    tenant_id: parseInt(box.dataset.link, 10),
+    post_by_default: byId('audLinks').querySelector(`input[data-default="${box.dataset.link}"]`).checked,
+  }));
+  const payload = { label, leadership_only: byId('audLeadership').checked, destinations, links };
+  const btn = byId('btnSaveAudienceModal');
+  btn.disabled = true;
+  try {
+    if (id) await api('PATCH', `/api/audiences/${id}`, payload, false, slugForKingdom(kingdomId));
+    else await api('POST', '/api/audiences', payload, false, slugForKingdom(kingdomId));
+    toast('Audience saved.');
+    closeAudienceModal();
+    loadSetupAudiences();
+  } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+}
+
+byId('btnCreateAudience').addEventListener('click', () => openAudienceForm(null));
+byId('btnSaveAudienceModal').addEventListener('click', saveAudienceModal);
+bindActions(byId('audiencesBody'), {
   edit(btn) {
-    const g = SETUP_GROUPS.find((x) => x.id === parseInt(btn.dataset.id, 10));
-    if (g) openGroupForm(g);
+    const a = SETUP_AUDIENCES.find((x) => x.id === parseInt(btn.dataset.id, 10));
+    if (a) openAudienceForm(a);
   },
   async delete(btn) {
-    const g = SETUP_GROUPS.find((x) => x.id === parseInt(btn.dataset.id, 10));
-    if (!g || !confirm(`Delete the group "${g.name}"?`)) return;
+    const a = SETUP_AUDIENCES.find((x) => x.id === parseInt(btn.dataset.id, 10));
+    if (!a || !confirm(`Delete the audience "${a.label}"? Pending reminders to it are cancelled.`)) return;
     try {
-      await api('DELETE', `/api/audience-groups/${g.id}`, null, false, slugForKingdom(g.kingdom_id));
-      toast('Audience group deleted.');
-      loadSetupGroups();
+      await api('DELETE', `/api/audiences/${a.id}`, null, false, slugForKingdom(a.kingdom_id));
+      toast('Audience deleted.');
+      loadSetupAudiences();
     } catch (e) { toast(e.message, true); }
+  },
+});
+
+// ── Alliances: which audiences each one uses ─────────────────
+
+function serversLineHtml(t) {
+  const secondary = (t.secondary_servers || []).map((s) => escapeHtml(s.name));
+  return `<div><span class="samaya-muted">Primary server:</span> ${escapeHtml(t.server_name)}</div>
+    ${secondary.length ? `<div><span class="samaya-muted">Also present on:</span> ${secondary.join(', ')}</div>` : ''}`;
+}
+
+function allianceAudienceRow(a, t, can) {
+  const link = a.links.find((l) => l.tenant_id === t.id);
+  const slug = t.slug;
+  return `<tr class="pf-v6-c-table__tr">
+    <td class="pf-v6-c-table__td" data-label="Audience"><strong>${escapeHtml(a.label)}</strong> ${audienceFlagsHtml(a)}
+      <div class="samaya-muted">${a.destinations.map((d) => destinationHtml(d, slug)).join(' ')}</div></td>
+    <td class="pf-v6-c-table__td" data-label="Uses">
+      <label class="check"><input type="checkbox" data-use="${a.id}" aria-label="${escapeHtml(t.name)} uses ${escapeHtml(a.label)}"${link ? ' checked' : ''}${can ? '' : ' disabled'}> Uses</label></td>
+    <td class="pf-v6-c-table__td" data-label="Post by default">
+      <label class="check"><input type="checkbox" data-default="${a.id}" aria-label="${escapeHtml(t.name)} posts to ${escapeHtml(a.label)} by default"${link && link.post_by_default ? ' checked' : ''}${can && link ? '' : ' disabled'}> Default</label></td>
+  </tr>`;
+}
+
+function renderSetupAlliances() {
+  const host = byId('setupAlliances');
+  host.innerHTML = TENANTS.map((t) => {
+    const can = canEditLinks(t);
+    const rows = SETUP_AUDIENCES.filter((a) => a.kingdom_id === t.kingdom_id);
+    return `<section class="alliance" aria-labelledby="alliance${t.id}Name" data-tenant="${t.id}">
+      <h4 class="alliance__name" id="alliance${t.id}Name">${escapeHtml(t.name)}</h4>
+      ${serversLineHtml(t)}
+      <div class="table-wrap">
+        <table class="pf-v6-c-table pf-m-grid-md responsive-table">
+          <caption class="sr-only">Audiences for ${escapeHtml(t.name)}</caption>
+          <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Audience</th><th class="pf-v6-c-table__th" scope="col">Uses</th><th class="pf-v6-c-table__th" scope="col">Post by default</th></tr></thead>
+          <tbody>${rows.length ? rows.map((a) => allianceAudienceRow(a, t, can)).join('') : emptyRow(3, 'No audiences in this Kingdom yet.')}</tbody>
+        </table>
+      </div>
+      ${can
+    ? `<button type="button" class="pf-v6-c-button pf-m-primary pf-m-small" data-action="save-links" data-id="${t.id}">Save audiences for ${escapeHtml(t.name)}</button>`
+    : `<p class="samaya-muted">Only an owner of ${escapeHtml(t.name)}, a Kingdom coordinator or a superadmin can change these.</p>`}
+    </section>`;
+  }).join('');
+  resolveDestinationNames(host);
+}
+
+byId('setupAlliances').addEventListener('change', (e) => {
+  const box = e.target.closest('input[data-use]');
+  if (!box) return;
+  const def = box.closest('tr').querySelector('input[data-default]');
+  def.disabled = !box.checked;
+  def.checked = box.checked;
+});
+
+bindActions(byId('setupAlliances'), {
+  async 'save-links'(btn) {
+    const t = tenantById(parseInt(btn.dataset.id, 10));
+    if (!t) return;
+    const section = btn.closest('section');
+    const links = Array.from(section.querySelectorAll('input[data-use]:checked')).map((box) => ({
+      audience_id: parseInt(box.dataset.use, 10),
+      post_by_default: section.querySelector(`input[data-default="${box.dataset.use}"]`).checked,
+    }));
+    btn.disabled = true;
+    try {
+      await api('PUT', '/api/alliance-audiences', { links }, false, t.slug);
+      toast(`Audiences saved for ${t.name}.`);
+      loadSetupAudiences();
+    } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
   },
 });
 
