@@ -62,12 +62,18 @@ class EventTypePatch(BaseModel):
 
 
 class EventAllianceIn(BaseModel):
-    """One audience row. The optional fields are overrides: left out or
-    null means "use the event's message / the alliance's own destination"."""
+    """One audience row. The optional override is the alliance's own wording:
+    left out or null means "use the event's message" (spec §67.4). Where the
+    message goes is chosen with destinations, not here."""
     tenant_slug:             str
     message_override:        Optional[str] = Field(default=None, max_length=MAX_MESSAGE_CHARS)
-    notification_channel_id: Optional[str] = None
-    notification_role_id:    Optional[str] = None
+
+
+class DestinationChangeIn(BaseModel):
+    """Spec §67.2: included=true adds a destination that is not on by default,
+    included=false opts out of one that is."""
+    destination_id: int
+    included:       bool
 
 
 class EventIn(BaseModel):
@@ -80,6 +86,8 @@ class EventIn(BaseModel):
     location:         str = Field(default="", max_length=200)
     cover_image_data: Optional[str] = None
     alliances:        list[EventAllianceIn] = []
+    group_ids:        list[int] = []
+    destination_changes: list[DestinationChangeIn] = []
     # The next five fall back to the event type's defaults when omitted.
     # An explicit null for duration_hours or interval_days is meaningful
     # (a plain message with no calendar entry; a one-off event).
@@ -134,6 +142,8 @@ class EventPatch(BaseModel):
     mention_role:     Optional[bool] = None
     reminder_minutes: Optional[list[int]] = None
     alliances:        Optional[list[EventAllianceIn]] = None
+    group_ids:        Optional[list[int]] = None
+    destination_changes: Optional[list[DestinationChangeIn]] = None
 
     _validate_scope = field_validator("scope", mode="before")(
         lambda cls, v: parse_scope(v, allow_none=True))
@@ -151,3 +161,15 @@ class EventPatch(BaseModel):
         lambda cls, v: parse_anchor_date(v, allow_none=True))
     _validate_reminders = field_validator("reminder_minutes", mode="before")(
         lambda cls, v: parse_reminder_minutes(v, allow_none=True))
+
+
+class EventPreviewIn(BaseModel):
+    """What the Events form sends to see where an event would post (spec §67.6)."""
+    scope:            str = "alliance"
+    leadership_only:  bool = False
+    message:          str = Field(default="", max_length=MAX_MESSAGE_CHARS)
+    alliances:        list[EventAllianceIn] = []
+    group_ids:        list[int] = []
+    destination_changes: list[DestinationChangeIn] = []
+
+    _validate_scope = field_validator("scope", mode="before")(parse_scope)

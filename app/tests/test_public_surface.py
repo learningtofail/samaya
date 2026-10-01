@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import select
 
 from models.db import Delivery, Event, EventAlliance, EventOccurrence
-from tests.unified_helpers import make_event, sync
+from tests.unified_helpers import add_destination, make_event, sync
 
 UTC = timezone.utc
 TODAY = date.today()
@@ -215,14 +215,12 @@ class TestChannelNameResolution:
         await _published(sf, configured)
         assert _row((await client.get("/t/mod/api/events")).json(), "Bear Hunt")["notification_channel_name"] == "announcements"
 
-    async def test_event_override_beats_the_alliance_destination(self, client, sf, configured, monkeypatch):
-        await self._fake_channels(monkeypatch, [{"id": "chan-mod", "name": "announcements"}, {"id": "x", "name": "leaders"}])
-        event_id = await _published(sf, configured)
-        async with sf() as s:
-            row = (await s.execute(select(EventAlliance).where(EventAlliance.event_id == event_id))).scalar_one()
-            row.notification_channel_id = "x"
-            await s.commit()
-        assert _row((await client.get("/t/mod/api/events")).json(), "Bear Hunt")["notification_channel_name"] == "leaders"
+    async def test_a_leadership_only_destination_is_never_exposed(self, client, sf, tenant, monkeypatch):
+        await self._fake_channels(monkeypatch, [{"id": "lead", "name": "leaders"}, {"id": "pub", "name": "general"}])
+        await add_destination(sf, tenant, "lead", label="Leaders", leadership=True)
+        await add_destination(sf, tenant, "pub", label="Public")
+        await _published(sf, tenant)
+        assert _row((await client.get("/t/mod/api/events")).json(), "Bear Hunt")["notification_channel_name"] == "general"
 
     async def test_no_destination_is_null(self, client, sf, tenant):
         await _published(sf, tenant)

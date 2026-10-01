@@ -76,7 +76,7 @@ async def tenant(db_engine):
         session.add(kingdom)
         await session.commit()
         server = DiscordServer(
-            name="MOD's server", guild_id="test-guild-mod", bot_token="test-bot-token-mod", public_key="test-pubkey-mod",
+            kingdom_id=kingdom.id, name="MOD's server", guild_id="test-guild-mod", bot_token="test-bot-token-mod", public_key="test-pubkey-mod",
         )
         session.add(server)
         await session.commit()
@@ -95,7 +95,7 @@ async def second_tenant(db_engine, tenant):
     TestSessionLocal = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
     async with TestSessionLocal() as session:
         server = DiscordServer(
-            name="NSR's server", guild_id="test-guild-nsr", bot_token="test-bot-token-nsr", public_key="test-pubkey-nsr",
+            kingdom_id=tenant["kingdom_id"], name="NSR's server", guild_id="test-guild-nsr", bot_token="test-bot-token-nsr", public_key="test-pubkey-nsr",
         )
         session.add(server)
         await session.commit()
@@ -228,10 +228,7 @@ async def sf(db_engine):
 
 @pytest_asyncio.fixture
 async def configured(sf, tenant):
-    """The default tenant with a notification channel and role."""
-    from models.db import Tenant
-    async with sf() as s:
-        t = await s.get(Tenant, tenant["id"])
-        t.notification_channel_id, t.notification_role_id = "chan-mod", "role-mod"
-        await s.commit()
+    """The default tenant with a default destination (channel and role)."""
+    from tests.unified_helpers import add_destination
+    await add_destination(sf, tenant, "chan-mod", "role-mod")
     return tenant

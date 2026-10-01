@@ -27,7 +27,10 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.db import (
-    Delivery, DiscordServer, Event, EventAlliance, EventOccurrence, Tenant,
+    Delivery, Destination, DiscordServer, Event, EventAlliance, EventOccurrence, Tenant,
+)
+from services.destinations import (
+    MERGED_PREFIX, alliance_overrides, find_conflicts, group_sends, merge_key, plan_destinations, resolve_for_event,
 )
 from services.recurrence import build_start_datetime, event_dates_in_window
 from services.templates import render_placeholders
@@ -96,15 +99,72 @@ async def audience_tenants(session: AsyncSession, event: Event) -> list[Tenant]:
     return list(result.scalars().all())
 
 
-def _wanted_deliveries(event: Event, occ: EventOccurrence, tenants: list[Tenant], reminder_minutes: list[int]):
-    """The (tenant_id, kind, minutes) -> due_at map this occurrence needs."""
+@dataclass
+class Wanted:
+    """One delivery an occurrence needs (spec §67.2)."""
+    kind: str
+    minutes: int
+    due: datetime
+    tenant_id: int
+    destination: Destination | None = None
+
+
+def _row_key(kind: str, destination_id: int | None, tenant_id: int, minutes: int) -> tuple:
+    """Identity of a delivery within an occurrence. A reminder is per
+    destination; a Discord event, or a reminder with no destination at all,
+    is per alliance."""
+    return (kind, destination_id, tenant_id if destination_id is None else 0, minutes)
+
+
+async def event_overview(session: AsyncSession, event: Event) -> dict:
+    """Spec §67.6: how many destinations and channels an event posts to, plus
+    warnings (a message conflict, or nowhere to post). Computed live from the
+    same functions the engine uses."""
+    tenants = await audience_tenants(session, event)
+    group_ids = [g.group_id for g in event.group_links]
+    changes = {d.destination_id: d.included for d in event.destination_links}
+    plan = await plan_destinations(
+        session, tenants=tenants, group_ids=group_ids, changes=changes, leadership_only=event.leadership_only,
+        base_message=event.message or "", overrides=alliance_overrides(event.alliances),
+    )
+    warnings = [c.message() for c in plan.conflicts]
+    if event.active and event.reminders and not plan.resolution.destinations:
+        warnings.append(
+            "No leadership-only destination is set up for this event." if event.leadership_only
+            else "This event has no destination, so no reminders will be sent."
+        )
+    return {
+        "audience_tenant_ids": [t.id for t in tenants],
+        "destination_count": len(plan.resolution.destinations),
+        "channel_count": len(plan.sends),
+        "warnings": warnings,
+    }
+
+
+def _wanted_deliveries(
+    event: Event, occ: EventOccurrence, tenants: list[Tenant], destinations: list[Destination],
+    reminder_minutes: list[int],
+) -> dict[tuple, Wanted]:
+    """Every delivery this occurrence needs, keyed by _row_key. Scheduled
+    Events are per audience alliance (on its primary server); reminders are
+    per resolved destination, or one placeholder per alliance when the event
+    resolves to no destination so the log shows why nothing was sent."""
     start = effective_start(occ)
-    wanted: dict[tuple[int, str, int], datetime] = {}
-    for tenant in tenants:
-        if event.duration_hours is not None and not event.leadership_only:
-            wanted[(tenant.id, KIND_DISCORD_EVENT, DISCORD_EVENT_MINUTES)] = start - DISCORD_EVENT_LEAD
-        for minutes in reminder_minutes:
-            wanted[(tenant.id, KIND_REMINDER, minutes)] = start - timedelta(minutes=minutes)
+    wanted: dict[tuple, Wanted] = {}
+    if event.duration_hours is not None and not event.leadership_only:
+        for tenant in tenants:
+            wanted[_row_key(KIND_DISCORD_EVENT, None, tenant.id, DISCORD_EVENT_MINUTES)] = Wanted(
+                KIND_DISCORD_EVENT, DISCORD_EVENT_MINUTES, start - DISCORD_EVENT_LEAD, tenant.id)
+    for minutes in reminder_minutes:
+        due = start - timedelta(minutes=minutes)
+        if destinations:
+            for dest in destinations:
+                wanted[_row_key(KIND_REMINDER, dest.id, dest.tenant_id, minutes)] = Wanted(
+                    KIND_REMINDER, minutes, due, dest.tenant_id, dest)
+        else:
+            for tenant in tenants:
+                wanted[_row_key(KIND_REMINDER, None, tenant.id, minutes)] = Wanted(
+                    KIND_REMINDER, minutes, due, tenant.id)
     return wanted
 
 
@@ -138,6 +198,7 @@ async def sync_event_occurrences(
         event.recurrence_kind, event.anchor_date, event.interval_days, event.until_date, today, window_days,
     )) if event.active else set()
     tenants = await audience_tenants(session, event) if event.active else []
+    destinations = (await resolve_for_event(session, event, tenants)).destinations if event.active else []
     duration = timedelta(hours=float(event.duration_hours)) if event.duration_hours is not None else None
 
     for day in sorted(dates):
@@ -161,7 +222,7 @@ async def sync_event_occurrences(
                 occ.start_datetime_utc = start
                 occ.end_datetime_utc = end
                 result.updated += 1
-        await _sync_occurrence_deliveries(session, event, occ, tenants, reminder_minutes, now, result)
+        await _sync_occurrence_deliveries(session, event, occ, tenants, destinations, reminder_minutes, now, result)
 
     # Occurrences the definition no longer produces (event deactivated, moved,
     # shortened by until_date, recurrence changed).
@@ -177,35 +238,78 @@ async def sync_event_occurrences(
 
 async def _sync_occurrence_deliveries(
     session: AsyncSession, event: Event, occ: EventOccurrence, tenants: list[Tenant],
-    reminder_minutes: list[int], now: datetime, result: SyncResult,
+    destinations: list[Destination], reminder_minutes: list[int], now: datetime, result: SyncResult,
 ) -> None:
-    wanted = _wanted_deliveries(event, occ, tenants, reminder_minutes)
+    wanted = _wanted_deliveries(event, occ, tenants, destinations, reminder_minutes)
     rows = await session.execute(
         select(Delivery).where(Delivery.occurrence_id == occ.id).execution_options(populate_existing=True)
     )
-    current = {(d.tenant_id, d.kind, d.reminder_minutes): d for d in rows.scalars().all()}
+    current = {
+        _row_key(d.kind, d.destination_id, d.tenant_id, d.reminder_minutes): d for d in rows.scalars().all()
+    }
     start = effective_start(occ)
 
-    for key, due in wanted.items():
+    for key, want in wanted.items():
         delivery = current.get(key)
+        guild_id = want.destination.server.guild_id if want.destination else ""
+        channel_id = want.destination.channel_id if want.destination else ""
         if delivery is None:
-            status, detail = _new_delivery_state(key[1], due, start, now)
-            session.add(Delivery(
-                occurrence_id=occ.id, tenant_id=key[0], kind=key[1], reminder_minutes=key[2],
-                due_at_utc=due, status=status, detail=detail,
-            ))
+            status, detail = _new_delivery_state(want.kind, want.due, start, now)
+            delivery = Delivery(
+                occurrence_id=occ.id, tenant_id=want.tenant_id, kind=want.kind, reminder_minutes=want.minutes,
+                destination_id=want.destination.id if want.destination else None,
+                guild_id=guild_id, channel_id=channel_id, due_at_utc=want.due, status=status, detail=detail,
+            )
+            session.add(delivery)
+            current[key] = delivery
         elif delivery.status in ("pending", "cancelled"):
-            delivery.due_at_utc = due
-            status, detail = _new_delivery_state(key[1], due, start, now)
+            delivery.due_at_utc = want.due
+            delivery.guild_id, delivery.channel_id = guild_id, channel_id
+            status, detail = _new_delivery_state(want.kind, want.due, start, now)
             delivery.status, delivery.detail = status, detail
+            delivery.merged_into_id = None
+    await session.flush()
 
     for key, delivery in current.items():
         if key in wanted:
             continue
         if delivery.status == "pending":
             delivery.status, delivery.detail = "cancelled", "No longer part of the event"
+            delivery.merged_into_id = None
         elif delivery.status == "posted" and delivery.kind == KIND_DISCORD_EVENT:
             result.orphaned.append(delivery)
+
+    _apply_merges(wanted, current, start, now)
+    await session.flush()
+
+
+def _apply_merges(wanted: dict[tuple, Wanted], current: dict[tuple, Delivery], start: datetime, now: datetime) -> None:
+    """Spec §67.3. Reminders to destinations that share (guild, channel) and an
+    offset are one send: one delivery keeps the send and the rest are marked
+    `cancelled`, linked through merged_into_id. Rows that already attempted a
+    send are never rewritten."""
+    groups: dict[tuple, list[tuple]] = {}
+    for key, want in wanted.items():
+        if want.kind != KIND_REMINDER or want.destination is None:
+            continue
+        groups.setdefault((want.minutes, *merge_key(want.destination)), []).append(key)
+
+    for keys in groups.values():
+        keys.sort(key=lambda k: (wanted[k].tenant_id, wanted[k].destination.id))
+        rows = [current[k] for k in keys]
+        attempted = [d for d in rows if d.status in ("sending", "posted", "error")]
+        pending = [d for d in rows if d.status == "pending"]
+        rep = (attempted or pending or rows)[0]
+        if rep.status == "cancelled" and (rep.detail or "").startswith(MERGED_PREFIX):
+            rep.status, rep.detail = _new_delivery_state(KIND_REMINDER, ensure_utc(rep.due_at_utc), start, now)
+        rep.merged_into_id = None
+        for d in rows:
+            if d is rep:
+                continue
+            if d.status == "pending" or (d.status == "cancelled" and (d.detail or "").startswith(MERGED_PREFIX)):
+                note = " (already sent)" if rep.status == "posted" else ""
+                d.status, d.detail = "cancelled", f"{MERGED_PREFIX}{rep.id}{note}"
+                d.merged_into_id = rep.id
 
 
 async def _retire_occurrence(session: AsyncSession, occ: EventOccurrence, result: SyncResult) -> None:
@@ -243,11 +347,21 @@ def _guild_and_token(tenant: Tenant) -> tuple[str, str]:
     return server.guild_id, (server.bot_token or platform_bot_token())
 
 
-async def _render(event: Event, occ: EventOccurrence, tenant: Tenant, text: str, now: datetime) -> str:
+async def _render(event: Event, occ: EventOccurrence, tenant: Tenant, text: str, now: datetime,
+                  alliance_names: list[str] | None = None) -> str:
+    """`alliance_names` replaces {alliance_name} when several alliances share
+    one message (spec §67.3); it renders as a comma-separated list."""
     return render_placeholders(
-        text, tenant_name=tenant.name, kingdom_name=tenant.kingdom.name, scheduled_for=now,
+        text, tenant_name=", ".join(alliance_names) if alliance_names else tenant.name,
+        kingdom_name=tenant.kingdom.name, scheduled_for=now,
         event_offset_minutes=round((effective_start(occ) - now).total_seconds() / 60),
     )
+
+
+async def _guild_alliance_names(session: AsyncSession, event: Event, guild_id: str) -> list[str]:
+    """Names of the audience alliances whose primary server is this guild."""
+    tenants = await audience_tenants(session, event)
+    return sorted({t.name for t in tenants if t.server.guild_id == guild_id}, key=str.lower)
 
 
 async def _effective_message(session: AsyncSession, event: Event, occ: EventOccurrence, tenant_id: int) -> str:
@@ -272,19 +386,21 @@ async def _known_discord_ids(session: AsyncSession, guild_id: str) -> set[str]:
     return {r[0] for r in rows.all()}
 
 
-async def _shared_guild_event_id(session: AsyncSession, occ: EventOccurrence, guild_id: str) -> str | None:
-    """Spec §52: alliances sharing a guild share one Discord event."""
+async def _shared_guild_event(session: AsyncSession, occ: EventOccurrence, guild_id: str) -> tuple[str, int] | None:
+    """Spec §52: alliances sharing a guild share one Discord event. Returns
+    (discord event id, the delivery that created it)."""
     row = await session.execute(
-        select(Delivery.discord_event_id)
+        select(Delivery.discord_event_id, Delivery.id)
         .join(Tenant, Tenant.id == Delivery.tenant_id)
         .join(DiscordServer, DiscordServer.id == Tenant.server_id)
         .where(
             Delivery.occurrence_id == occ.id, Delivery.kind == KIND_DISCORD_EVENT,
             Delivery.status == "posted", Delivery.discord_event_id.is_not(None),
             DiscordServer.guild_id == guild_id,
-        ).limit(1)
+        ).order_by(Delivery.id).limit(1)
     )
-    return row.scalar_one_or_none()
+    found = row.first()
+    return (found[0], found[1]) if found else None
 
 
 def _parse_discord_time(value: str | None) -> datetime | None:
@@ -305,9 +421,9 @@ async def _send_discord_event(
     if not token:
         return "error", "No Discord bot token configured for this alliance"
 
-    shared = await _shared_guild_event_id(session, occ, guild_id)
+    shared = await _shared_guild_event(session, occ, guild_id)
     if shared:
-        delivery.discord_event_id = shared
+        delivery.discord_event_id, delivery.merged_into_id = shared
         return "posted", "Shared with another alliance in the same Discord server"
 
     start, end = effective_start(occ), effective_end(occ)
@@ -329,7 +445,9 @@ async def _send_discord_event(
     message = await _effective_message(session, event, occ, tenant.id)
     discord_id, error = await discord.create_discord_event(
         token=token, guild_id=guild_id, name=event.name, start=start, end=end,
-        description=await _render(event, occ, tenant, message, now) if message else "",
+        description=await _render(
+            event, occ, tenant, message, now, await _guild_alliance_names(session, event, guild_id),
+        ) if message else "",
         location=event.location, image=event.cover_image_data or None,
     )
     if error:
@@ -338,29 +456,57 @@ async def _send_discord_event(
     return "posted", None
 
 
+async def _merged_destinations(session: AsyncSession, delivery: Delivery) -> list[Destination]:
+    """The destinations of one send: this delivery's own plus every delivery
+    that was merged into it."""
+    rows = await session.execute(select(Delivery).where(Delivery.merged_into_id == delivery.id))
+    members = [delivery, *rows.scalars().all()]
+    return [m.destination for m in members if m.destination is not None]
+
+
 async def _send_reminder(
     session: AsyncSession, discord, delivery: Delivery, event: Event, occ: EventOccurrence,
     tenant: Tenant, now: datetime,
 ) -> tuple[str, str | None]:
-    _, token = _guild_and_token(tenant)
+    """One real message per (guild, channel): the representative delivery sends
+    for every destination merged into it (spec §67.3, §67.4)."""
+    dest = delivery.destination
+    if dest is None:
+        if event.leadership_only:
+            return "error", "No leadership-only destination configured"
+        return "error", "No destination configured for this alliance"
+    if dest.leadership_only != event.leadership_only:
+        return "cancelled", "This destination does not take this kind of event"
+    server = dest.server
+    token = server.bot_token or platform_bot_token()
     if not token:
-        return "error", "No Discord bot token configured for this alliance"
-    override = (await session.execute(
-        select(EventAlliance).where(EventAlliance.event_id == event.id, EventAlliance.tenant_id == tenant.id)
-    )).scalar_one_or_none()
-    channel = (override.notification_channel_id if override and override.notification_channel_id
-               else tenant.notification_channel_id)
-    role = (override.notification_role_id if override and override.notification_role_id
-            else tenant.notification_role_id)
-    if not channel:
-        return "error", "No notification channel configured for this alliance"
+        return "error", "No Discord bot token configured for this server"
 
-    message = await _effective_message(session, event, occ, tenant.id) or f"{event.name} starts {{event_time_relative}}"
-    content = await _render(event, occ, tenant, message, now)
-    if event.mention_role and role:
-        content = f"<@&{role}> {content}"
-    ok, error = await discord.send_channel_message(token, channel, content[:MAX_CONTENT_CHARS])
-    return ("posted", None) if ok else ("error", error)
+    members = await _merged_destinations(session, delivery)
+    sends = group_sends(members)
+    send = sends[0]
+    note: str | None = None
+    if occ.message_override:
+        message = occ.message_override
+    else:
+        overrides = alliance_overrides((await session.execute(
+            select(EventAlliance).where(EventAlliance.event_id == event.id))).scalars().all())
+        base = event.message or ""
+        if find_conflicts(sends, base, overrides):
+            message = base
+            names = sorted({m.tenant.name for m in members if m.tenant_id in overrides})
+            note = (f"Conflicting alliance messages on a shared channel; base message sent. "
+                    f"Overrides for {', '.join(names)} were not used")
+        else:
+            message = overrides.get(dest.tenant_id, base)
+    message = message or f"{event.name} starts {{event_time_relative}}"
+    content = await _render(event, occ, dest.tenant, message, now, send.alliance_names)
+    if event.mention_role and send.role_ids:
+        content = " ".join(f"<@&{r}>" for r in send.role_ids) + f" {content}"
+    ok, error = await discord.send_channel_message(token, dest.channel_id, content[:MAX_CONTENT_CHARS])
+    if not ok:
+        return "error", error
+    return "posted", note
 
 
 # ------------------------------------------------------------------- tick
@@ -376,9 +522,11 @@ async def _claim(session: AsyncSession, delivery_id: int, now: datetime) -> bool
 
 
 async def _finish(session_factory, delivery_id: int, status: str, detail: str | None,
-                  discord_event_id: str | None, now: datetime) -> None:
+                  discord_event_id: str | None, now: datetime, merged_into_id: int | None = None) -> None:
     async with session_factory() as session:
         values = {"status": status, "detail": detail}
+        if merged_into_id is not None:
+            values["merged_into_id"] = merged_into_id
         if status == "posted":
             values["posted_at_utc"] = now
         if discord_event_id:
@@ -394,7 +542,7 @@ async def process_delivery(session_factory, discord, delivery_id: int, now: date
         if not await _claim(session, delivery_id, now):
             return None
 
-    status, detail, discord_event_id = "error", "Unexpected failure before sending", None
+    status, detail, discord_event_id, merged_into_id = "error", "Unexpected failure before sending", None, None
     try:
         async with session_factory() as session:
             delivery = await session.get(Delivery, delivery_id)
@@ -411,13 +559,13 @@ async def process_delivery(session_factory, discord, delivery_id: int, now: date
                 status, detail = "cancelled", "Starts within 15 minutes; no Discord event created"
             elif delivery.kind == KIND_DISCORD_EVENT:
                 status, detail = await _send_discord_event(session, discord, delivery, event, occ, tenant, now)
-                discord_event_id = delivery.discord_event_id
+                discord_event_id, merged_into_id = delivery.discord_event_id, delivery.merged_into_id
             else:
                 status, detail = await _send_reminder(session, discord, delivery, event, occ, tenant, now)
     except Exception as exc:  # one delivery's failure must not stop the tick
         logger.exception("delivery %s failed", delivery_id)
         status, detail = "error", f"{type(exc).__name__}: {exc}"
-    await _finish(session_factory, delivery_id, status, detail, discord_event_id, now)
+    await _finish(session_factory, delivery_id, status, detail, discord_event_id, now, merged_into_id)
     return status
 
 
@@ -451,6 +599,23 @@ async def run_delivery_tick(session_factory, discord, now: datetime | None = Non
         if status:
             counts[status] = counts.get(status, 0) + 1
     return counts
+
+
+async def resync_kingdom_events(session: AsyncSession, kingdom_id: int, now: datetime | None = None) -> int:
+    """Regenerates the deliveries of every active event in a Kingdom. Called
+    after a destination or an audience group changes (spec §67.3), so pending
+    deliveries follow the new setup. Flushes; the caller commits."""
+    now = now or datetime.now(timezone.utc)
+    rows = await session.execute(
+        select(Event).join(Tenant, Tenant.id == Event.owning_tenant_id)
+        .where(Tenant.kingdom_id == kingdom_id, Event.active.is_(True))
+        .execution_options(populate_existing=True)
+    )
+    events = list(rows.scalars().unique().all())
+    for event in events:
+        await session.refresh(event, ["reminders", "alliances", "group_links", "destination_links"])
+        await sync_event_occurrences(session, event, now)
+    return len(events)
 
 
 async def run_generation(session_factory, now: datetime | None = None) -> int:
@@ -535,7 +700,9 @@ async def refresh_posted_discord_events(
             message = await _effective_message(session, event, occ, tenant.id)
             ok, error = await discord.update_discord_event(
                 token, guild_id, discord_id, name=event.name,
-                description=await _render(event, occ, tenant, message, now) if message else "",
+                description=await _render(
+                    event, occ, tenant, message, now, await _guild_alliance_names(session, event, guild_id),
+                ) if message else "",
                 location=event.location, image=event.cover_image_data or None,
                 start=effective_start(occ), end=effective_end(occ),
             )

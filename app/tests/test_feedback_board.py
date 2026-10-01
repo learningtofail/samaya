@@ -300,26 +300,3 @@ class TestDisplayNames:
     async def test_superadmin_cannot_demote_self_via_display_name_edit(self, client, test_user):
         assert (await client.patch(f"{ADMIN}/users/{test_user['id']}", json={"is_superadmin": False})).status_code == 400
         assert (await client.patch(f"{ADMIN}/users/{test_user['id']}", json={"display_name": "Me"})).status_code == 200
-
-
-class TestNotificationDestination:
-    async def test_owner_sets_and_clears(self, client, tenant):
-        r = await client.put(f"{ADMIN}/notification-destination", json={
-            "notification_channel_id": "123456", "notification_role_id": "789"})
-        assert r.status_code == 200
-        assert (r.json()["notification_channel_id"], r.json()["notification_role_id"]) == ("123456", "789")
-        r = await client.put(f"{ADMIN}/notification-destination", json={"notification_role_id": ""})
-        assert (r.json()["notification_channel_id"], r.json()["notification_role_id"]) == ("123456", "")
-
-    async def test_ids_must_be_digits(self, client):
-        assert (await client.put(f"{ADMIN}/notification-destination", json={"notification_channel_id": "#general"})).status_code == 422
-
-    async def test_coordinator_cannot_change_it(self, tenant, make_user_and_client):
-        c, _ = await make_user_and_client(tenant_grants=[(tenant["id"], "coordinator")])
-        c.headers["X-Tenant-Slug"] = tenant["slug"]
-        assert (await c.put(f"{ADMIN}/notification-destination", json={"notification_channel_id": "1"})).status_code == 403
-
-    async def test_tenant_list_shows_the_destination(self, client, tenant):
-        await client.put(f"{ADMIN}/notification-destination", json={"notification_channel_id": "42"})
-        listing = (await client.get(f"{ADMIN}/tenants")).json()
-        assert next(t for t in listing if t["slug"] == "mod")["notification_channel_id"] == "42"

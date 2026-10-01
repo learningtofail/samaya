@@ -28,19 +28,20 @@ _channel_name_cache: dict[int, tuple[dict[str, str], float]] = {}
 _CHANNEL_CACHE_TTL_SECONDS = 300
 
 
-async def _resolve_channel_name(tenant: Tenant, channel_id: str) -> str | None:
+async def _resolve_channel_name(server, channel_id: str) -> str | None:
+    """`server` is the DiscordServer the destination lives on (spec §67)."""
     if not channel_id:
         return None
-    token = tenant.server.bot_token or platform_bot_token()
+    token = server.bot_token or platform_bot_token()
     if not token:
         return None
 
     now = time.monotonic()
-    cached = _channel_name_cache.get(tenant.server_id)
+    cached = _channel_name_cache.get(server.id)
     if cached is not None and now - cached[1] <= _CHANNEL_CACHE_TTL_SECONDS:
         return cached[0].get(channel_id)
 
-    channels, error = await get_guild_channels(token, tenant.server.guild_id)
+    channels, error = await get_guild_channels(token, server.guild_id)
     if error:
         # Serve a stale cache entry on a transient Discord/network failure
         # rather than silently blanking out a channel name that was
@@ -48,7 +49,7 @@ async def _resolve_channel_name(tenant: Tenant, channel_id: str) -> str | None:
         return cached[0].get(channel_id) if cached else None
 
     channel_map = {c["id"]: c["name"] for c in channels}
-    _channel_name_cache[tenant.server_id] = (channel_map, now)
+    _channel_name_cache[server.id] = (channel_map, now)
     return channel_map.get(channel_id)
 
 _DEFAULT_PUBLIC_SITE_TITLE = "Kingshot Event Schedule"
@@ -102,7 +103,9 @@ async def _rows_to_json(rows: list[PublicRow]) -> list[dict]:
     out = []
     for row in rows:
         data = _row_dict(row)
-        data["notification_channel_name"] = await _resolve_channel_name(row.tenant, row.channel_id)
+        data["notification_channel_name"] = (
+            await _resolve_channel_name(row.destination.server, row.channel_id) if row.destination else None
+        )
         out.append(data)
     return out
 

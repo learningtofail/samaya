@@ -140,3 +140,8 @@ jobs:
       - run: pip install --no-cache-dir -r requirements.txt
       - run: alembic upgrade head
       - run: alembic check   # fails if models/db.py drifted from the migrations
+      # Revision a1f0c0de0004 seeds data; this runs it against old-shaped rows (spec §67.8).
+      - run: pip install --no-cache-dir -r requirements-dev.txt
+      - run: pytest tests/test_migration_0004.py -q
+        env:
+          SAMAYA_MIGRATION_TEST_PG: postgresql://taraka:ci_only_password@localhost:5432

@@ -8,6 +8,9 @@ built:
   EventType, Event, EventAlliance,
   EventReminder, EventOccurrence,
   Delivery                               — events and Discord delivery (spec §66)
+  Destination, AudienceGroup,
+  AudienceGroupDestination, EventDestination,
+  EventGroup, TenantSecondaryServer      — where messages go (spec §67)
 
 Every table has its own docstring explaining what it's for and why it's
 shaped the way it is — this header is just the map."""
@@ -16,7 +19,7 @@ import uuid
 from sqlalchemy import (
     JSON, Boolean, CheckConstraint, Column, Date, DateTime,
     ForeignKey, Index, Integer, Numeric, Text, Time,
-    UniqueConstraint, func
+    UniqueConstraint, func, text
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -51,9 +54,13 @@ class DiscordServer(Base):
     """A Discord guild this app posts to — infrastructure, not an alliance.
     Introduced in spec §25 to make explicit what Tenant.guild_id already
     allowed implicitly: multiple alliances (Tenants) can share one Discord
-    server. Not scoped to a Kingdom — a server (e.g. HTD, a de facto
-    Kingshot-wide hub per spec §19) can host alliances spanning Kingdoms,
-    or none at all beyond the ones actually created there.
+    server.
+
+    Spec §67: a server belongs to one Kingdom (kingdom_id). That replaces
+    the earlier "not scoped to a Kingdom" rule: an alliance's primary and
+    secondary servers, and every destination's server, must be in the
+    alliance's own Kingdom, so one Kingdom can never reach another's
+    servers.
 
     bot_token/public_key are nullable = falls back to the platform-wide
     bot (see routers.admin.deps.PLATFORM_BOT_TOKEN and
@@ -64,6 +71,7 @@ class DiscordServer(Base):
     __tablename__ = "discord_servers"
 
     id         = Column(Integer, primary_key=True)
+    kingdom_id = Column(Integer, ForeignKey("kingdoms.id"), nullable=False)
     name       = Column(Text, nullable=False)
     guild_id   = Column(Text, nullable=False, unique=True)
     bot_token  = Column(Text, nullable=True)
@@ -86,6 +94,8 @@ class Tenant(Base):
 
     id         = Column(Integer, primary_key=True)
     kingdom_id = Column(Integer, ForeignKey("kingdoms.id"), nullable=False)
+    # The PRIMARY server (spec §67): where this alliance's Discord Scheduled
+    # Events are created. Secondary servers live in TenantSecondaryServer.
     server_id  = Column(Integer, ForeignKey("discord_servers.id"), nullable=False)
     name       = Column(Text, nullable=False)
     slug       = Column(Text, nullable=False, unique=True)
@@ -122,6 +132,7 @@ class Tenant(Base):
     # of bug a missed spot would cause (see spec §25.2).
     kingdom    = relationship("Kingdom", back_populates="tenants", lazy="joined")
     server     = relationship("DiscordServer", back_populates="tenants", lazy="joined")
+    secondary_servers = relationship("TenantSecondaryServer", lazy="selectin")
 
 
 class User(Base):
@@ -413,6 +424,9 @@ class Event(Base):
     alliances  = relationship("EventAlliance", back_populates="event", cascade="all, delete-orphan")
     reminders  = relationship("EventReminder", back_populates="event", cascade="all, delete-orphan")
     occurrences = relationship("EventOccurrence", back_populates="event", cascade="all, delete-orphan")
+    # Spec §67.2: the audience groups chosen for the event and its per-destination changes.
+    group_links       = relationship("EventGroup", cascade="all, delete-orphan")
+    destination_links = relationship("EventDestination", cascade="all, delete-orphan")
 
     __table_args__ = (
         CheckConstraint("scope IN ('alliance', 'kingdom-wide')", name="ck_event_scope_valid"),
@@ -439,6 +453,8 @@ class EventAlliance(Base):
     event_id                = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     tenant_id               = Column(Integer, ForeignKey("tenants.id"), nullable=False)
     message_override        = Column(Text, nullable=True)
+    # Legacy (spec §67.8): replaced by destinations. No longer read or
+    # written; the closing revision drops both columns.
     notification_channel_id = Column(Text, nullable=True)
     notification_role_id    = Column(Text, nullable=True)
 
@@ -516,11 +532,19 @@ class Delivery(Base):
     discord_message_id = Column(Text, nullable=True)
     detail             = Column(Text, nullable=True)
     posted_at_utc      = Column(DateTime(timezone=True), nullable=True)
+    # Spec §67.1. destination_id is null for discord_event rows. guild_id and
+    # channel_id snapshot where a reminder went, so history survives edits to
+    # (or deletion of) the destination. merged_into_id points at the delivery
+    # that carried the real send when several destinations share one channel.
+    destination_id     = Column(Integer, ForeignKey("destinations.id", ondelete="SET NULL"), nullable=True)
+    guild_id           = Column(Text, nullable=False, default="", server_default="")
+    channel_id         = Column(Text, nullable=False, default="", server_default="")
+    merged_into_id     = Column(Integer, ForeignKey("deliveries.id", ondelete="SET NULL"), nullable=True)
 
     occurrence = relationship("EventOccurrence", back_populates="deliveries")
+    destination = relationship("Destination", lazy="joined")
 
     __table_args__ = (
-        UniqueConstraint("occurrence_id", "tenant_id", "kind", "reminder_minutes", name="uq_delivery"),
         CheckConstraint("kind IN ('discord_event', 'reminder')", name="ck_delivery_kind"),
         CheckConstraint(
             "status IN ('pending', 'sending', 'posted', 'error', 'cancelled')",
@@ -531,4 +555,97 @@ class Delivery(Base):
             name="ck_delivery_reminder_minutes",
         ),
         Index("ix_deliveries_status_due", "status", "due_at_utc"),
+        # Spec §67.1: a reminder is unique per destination, a Discord event per alliance.
+        Index("uq_delivery_reminder", "occurrence_id", "destination_id", "reminder_minutes", unique=True,
+              postgresql_where=text("kind = 'reminder'"), sqlite_where=text("kind = 'reminder'")),
+        Index("uq_delivery_event", "occurrence_id", "tenant_id", unique=True,
+              postgresql_where=text("kind = 'discord_event'"), sqlite_where=text("kind = 'discord_event'")),
     )
+
+
+class TenantSecondaryServer(Base):
+    """Spec §67: a server an alliance may post notifications to besides its
+    primary one (Tenant.server_id). Informational plus the allowed list for
+    that alliance's destinations; it never creates a Scheduled Event.
+    Sharing is declared per alliance and never inferred."""
+    __tablename__ = "tenant_secondary_servers"
+
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True)
+    server_id = Column(Integer, ForeignKey("discord_servers.id"), primary_key=True)
+
+    server = relationship("DiscordServer", lazy="joined")
+
+
+class Destination(Base):
+    """Spec §67.1: one place an alliance's messages can go — a server, a
+    channel and an optional role, with a label. post_by_default decides
+    whether events use it without being asked; leadership_only reserves it
+    for leadership events (and leadership events use nothing else)."""
+    __tablename__ = "destinations"
+
+    id              = Column(Integer, primary_key=True)
+    tenant_id       = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    server_id       = Column(Integer, ForeignKey("discord_servers.id"), nullable=False)
+    channel_id      = Column(Text, nullable=False)
+    role_id         = Column(Text, nullable=False, default="", server_default="")
+    label           = Column(Text, nullable=False)
+    post_by_default = Column(Boolean, nullable=False, default=True)
+    leadership_only = Column(Boolean, nullable=False, default=False)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+
+    tenant = relationship("Tenant", lazy="joined")
+    server = relationship("DiscordServer", lazy="joined")
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "server_id", "channel_id", "role_id", name="uq_destination_target"),
+        UniqueConstraint("tenant_id", "label", name="uq_destination_label"),
+        CheckConstraint("channel_id <> ''", name="ck_destination_channel_set"),
+    )
+
+
+class AudienceGroup(Base):
+    """Spec §67.1: a named, reusable set of destinations at Kingdom level,
+    managed by kingdom coordinators. Expanded into deliveries whenever
+    occurrences are generated."""
+    __tablename__ = "audience_groups"
+
+    id          = Column(Integer, primary_key=True)
+    kingdom_id  = Column(Integer, ForeignKey("kingdoms.id"), nullable=False)
+    name        = Column(Text, nullable=False)
+    description = Column(Text, nullable=False, default="", server_default="")
+    created_at  = Column(DateTime(timezone=True), server_default=func.now())
+
+    destinations = relationship(
+        "Destination", secondary="audience_group_destinations", lazy="selectin", order_by="Destination.id",
+        viewonly=True,  # membership rows are written through AudienceGroupDestination
+    )
+
+    __table_args__ = (
+        UniqueConstraint("kingdom_id", "name", name="uq_audience_group_name"),
+    )
+
+
+class AudienceGroupDestination(Base):
+    __tablename__ = "audience_group_destinations"
+
+    group_id       = Column(Integer, ForeignKey("audience_groups.id", ondelete="CASCADE"), primary_key=True)
+    destination_id = Column(Integer, ForeignKey("destinations.id", ondelete="RESTRICT"), primary_key=True)
+
+
+class EventDestination(Base):
+    """Spec §67.2: a per-event change to one destination's default.
+    included=True adds a destination that is not on by default;
+    included=False opts out of one that is."""
+    __tablename__ = "event_destinations"
+
+    event_id       = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
+    destination_id = Column(Integer, ForeignKey("destinations.id", ondelete="RESTRICT"), primary_key=True)
+    included       = Column(Boolean, nullable=False)
+
+
+class EventGroup(Base):
+    __tablename__ = "event_groups"
+
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
+    group_id = Column(Integer, ForeignKey("audience_groups.id", ondelete="RESTRICT"), primary_key=True)
+

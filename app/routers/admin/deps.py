@@ -11,7 +11,7 @@ key implicitly trusted every holder with every tenant.
 import os
 from dataclasses import dataclass
 
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Depends, Header, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -162,14 +162,25 @@ class DiscordCreds:
     guild_id: str
 
 
-async def get_discord_config(tenant: Tenant = Depends(get_current_tenant)) -> DiscordCreds:
-    token = tenant.server.bot_token or PLATFORM_BOT_TOKEN
+async def get_discord_config(
+    server_id: int | None = Query(default=None),
+    tenant: Tenant = Depends(get_current_tenant),
+) -> DiscordCreds:
+    """The alliance's primary server, or, with `server_id`, one of its
+    secondary servers (spec §67.5): a destination's channel and role pickers
+    load from the server the destination uses."""
+    server = tenant.server
+    if server_id is not None and server_id != tenant.server_id:
+        server = next((r.server for r in tenant.secondary_servers if r.server_id == server_id), None)
+        if server is None:
+            raise HTTPException(status_code=422, detail="That server is not this alliance's primary or secondary server")
+    token = server.bot_token or PLATFORM_BOT_TOKEN
     if not token:
         raise HTTPException(
             status_code=400,
             detail="No Discord bot token set for this tenant's server, and no platform fallback configured",
         )
-    return DiscordCreds(bot_token=token, guild_id=tenant.server.guild_id)
+    return DiscordCreds(bot_token=token, guild_id=server.guild_id)
 
 
 async def check_target_access(db: AsyncSession, user: User, tenant_ids: list[int]):

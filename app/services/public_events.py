@@ -11,7 +11,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from models.db import Delivery, Event, EventAlliance, EventOccurrence, Tenant
+from models.db import Delivery, Destination, Event, EventAlliance, EventOccurrence, Tenant
 from services.event_engine import effective_end, effective_start  # noqa: F401  (re-exported for callers)
 from services.recurrence import occurs_on
 
@@ -24,6 +24,7 @@ class PublicRow:
     override: EventAlliance | None  # that tenant's per-alliance overrides, if any
     with_tenant_fields: bool        # combined view only
     posted: bool                    # any delivery for this occurrence has gone out
+    destination: Destination | None = None  # the alliance's first default, non-leadership destination (spec §67.6)
 
     @property
     def has_calendar_entry(self) -> bool:
@@ -40,9 +41,7 @@ class PublicRow:
 
     @property
     def channel_id(self) -> str:
-        if self.override is not None and self.override.notification_channel_id:
-            return self.override.notification_channel_id
-        return self.tenant.notification_channel_id or ""
+        return self.destination.channel_id if self.destination is not None else ""
 
     @property
     def status(self) -> str:
@@ -104,16 +103,24 @@ async def public_rows(
             Delivery.occurrence_id.in_({o.id for o, _, _ in pairs}), Delivery.status == "posted")
     )).scalars().all())
 
+    defaults: dict[int, Destination] = {}
+    for dest in (await db.execute(
+        select(Destination).where(Destination.post_by_default.is_(True), Destination.leadership_only.is_(False))
+        .order_by(Destination.id)
+    )).scalars().unique():
+        defaults.setdefault(dest.tenant_id, dest)
+
     rows: list[PublicRow] = []
     for occ, event, owner_tenant in pairs:
         by_tenant = alliance_rows.get(event.id, {})
         posted = occ.id in posted_ids
         if tenant is not None:
-            rows.append(PublicRow(occ, event, tenant, by_tenant.get(tenant.id), False, posted))
+            rows.append(PublicRow(occ, event, tenant, by_tenant.get(tenant.id), False, posted, defaults.get(tenant.id)))
         elif event.scope == "kingdom-wide":
-            rows.append(PublicRow(occ, event, owner_tenant, by_tenant.get(owner_tenant.id), True, posted))
+            rows.append(PublicRow(occ, event, owner_tenant, by_tenant.get(owner_tenant.id), True, posted,
+                                  defaults.get(owner_tenant.id)))
         else:
             audience = [tenants[tid] for tid in sorted(by_tenant) if tid in tenants] or [owner_tenant]
             for member in audience:
-                rows.append(PublicRow(occ, event, member, by_tenant.get(member.id), True, posted))
+                rows.append(PublicRow(occ, event, member, by_tenant.get(member.id), True, posted, defaults.get(member.id)))
     return rows
