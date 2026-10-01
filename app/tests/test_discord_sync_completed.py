@@ -111,26 +111,3 @@ class TestNaturallyCompletedClassification:
     ):
         r = await client.post("/admin/api/sync/mark-completed/999999", headers={"X-Tenant-Slug": tenant["slug"]})
         assert r.status_code == 404
-
-
-class TestLastActivityIncludesCompleted:
-
-    async def test_completed_postlog_row_still_counts_as_last_activity(
-        self, client: AsyncClient, db_session: AsyncSession, tenant: dict
-    ):
-        now = datetime.now(timezone.utc)
-        log = PostLog(
-            tenant_id=tenant["id"], event_name="Bear Hunt @ Trap 1",
-            occurrence_date=now.date(), discord_event_id="discord-evt-2",
-            discord_guild_id="test-guild-mod", posted_at_utc=now,
-            posted_by="system", status="completed",
-        )
-        db_session.add(log)
-        await db_session.commit()
-
-        r = await client.get(f"/t/{tenant['slug']}/api/last-activity")
-        assert r.status_code == 200
-        body = r.json()
-        assert body is not None
-        assert body["name"] == "Bear Hunt @ Trap 1"
-        assert body["kind"] == "event"

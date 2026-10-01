@@ -6,140 +6,22 @@ clock. Route tests build dates relative to the real today and pass matching
 `now` values to the tick.
 """
 import asyncio
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from sqlalchemy.orm import selectinload
 
 from models.db import (
-    Delivery, DiscordServer, Event, EventAlliance, EventOccurrence, EventReminder, EventType, Tenant,
+    Delivery, DiscordServer, Event, EventAlliance, EventOccurrence, Tenant,
 )
 from services.discord_client import get_discord
 from services.event_engine import (
-    STALE_CLAIM_AFTER, process_delivery, run_delivery_tick, run_generation, sync_event_occurrences,
+    STALE_CLAIM_AFTER, process_delivery, run_delivery_tick, run_generation,
 )
 
+from tests.unified_helpers import NOW, UTC, deliveries, make_event, sync
+
 BASE = "/admin/api/v2"
-UTC = timezone.utc
-NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
-
-
-class FakeDiscord:
-    """Records every call and keeps a tiny in-memory guild calendar."""
-
-    def __init__(self):
-        self.calls: list[tuple] = []
-        self.guild_events: dict[str, list[dict]] = {}
-        self.create_error = ""
-        self.send_error = ""
-        self.cancel_error = ""
-        self.raise_on_send_to: set[str] = set()
-        self._next = 0
-
-    def count(self, name: str) -> int:
-        return sum(1 for c in self.calls if c[0] == name)
-
-    async def create_discord_event(self, token, guild_id, name, start, end, description, location, image=None):
-        self.calls.append(("create", guild_id, name, start, end, description))
-        if self.create_error:
-            return "", self.create_error
-        self._next += 1
-        discord_id = f"de{self._next}"
-        self.guild_events.setdefault(guild_id, []).append(
-            {"id": discord_id, "name": name, "scheduled_start_time": start.isoformat()})
-        return discord_id, ""
-
-    async def update_discord_event(self, token, guild_id, discord_event_id, name, description, location,
-                                   image=None, start=None, end=None):
-        self.calls.append(("update", guild_id, discord_event_id, name, description, start, end))
-        return True, ""
-
-    async def cancel_discord_event(self, token, guild_id, discord_event_id):
-        self.calls.append(("cancel", guild_id, discord_event_id))
-        if self.cancel_error:
-            return False, self.cancel_error
-        self.guild_events[guild_id] = [e for e in self.guild_events.get(guild_id, []) if e["id"] != discord_event_id]
-        return True, ""
-
-    async def get_guild_events(self, token, guild_id):
-        return list(self.guild_events.get(guild_id, []))
-
-    async def send_channel_message(self, token, channel_id, content):
-        self.calls.append(("send", channel_id, content))
-        if channel_id in self.raise_on_send_to:
-            raise RuntimeError("boom")
-        return (False, self.send_error) if self.send_error else (True, "")
-
-
-@pytest.fixture
-def fake():
-    return FakeDiscord()
-
-
-@pytest.fixture
-def sf(db_engine):
-    return async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest_asyncio.fixture
-async def configured(sf, tenant):
-    """The default tenant with a notification channel and role."""
-    async with sf() as s:
-        t = await s.get(Tenant, tenant["id"])
-        t.notification_channel_id, t.notification_role_id = "chan-mod", "role-mod"
-        await s.commit()
-    return tenant
-
-
-async def _type_id(s, kingdom_id: int) -> int:
-    row = (await s.execute(select(EventType).where(EventType.kingdom_id == kingdom_id))).scalars().first()
-    if row is None:
-        row = EventType(kingdom_id=kingdom_id, name="General")
-        s.add(row)
-        await s.flush()
-    return row.id
-
-
-async def make_event(sf, tenant, *, name="Bear Hunt", anchor=date(2026, 10, 2), start="19:00", duration=2.0,
-                     interval=7, reminders=(60,), scope="alliance", leadership_only=False, message="",
-                     mention_role=False, audience=None, active=True) -> int:
-    async with sf() as s:
-        hour, minute = map(int, start.split(":"))
-        event = Event(
-            owning_tenant_id=tenant["id"], type_id=await _type_id(s, tenant["kingdom_id"]), name=name,
-            scope=scope, leadership_only=leadership_only, message=message, start_time_utc=time(hour, minute),
-            duration_hours=duration, recurrence_kind="interval_days" if interval else "none",
-            interval_days=interval, anchor_date=anchor, mention_role=mention_role, active=active,
-        )
-        event.reminders = [EventReminder(minutes_before=m) for m in reminders]
-        event.alliances = [EventAlliance(tenant_id=t) for t in (audience or [tenant["id"]])]
-        s.add(event)
-        await s.commit()
-        return event.id
-
-
-async def sync(sf, event_id, now=NOW):
-    async with sf() as s:
-        event = (await s.execute(
-            select(Event).options(selectinload(Event.reminders), selectinload(Event.alliances))
-            .where(Event.id == event_id).execution_options(populate_existing=True)
-        )).scalar_one()
-        result = await sync_event_occurrences(s, event, now)
-        await s.commit()
-        return result
-
-
-async def deliveries(sf, event_id=None, **filters):
-    async with sf() as s:
-        stmt = select(Delivery).join(EventOccurrence, EventOccurrence.id == Delivery.occurrence_id)
-        if event_id is not None:
-            stmt = stmt.where(EventOccurrence.event_id == event_id)
-        for key, value in filters.items():
-            stmt = stmt.where(getattr(Delivery, key) == value)
-        return list((await s.execute(stmt.order_by(Delivery.due_at_utc, Delivery.id))).scalars().all())
 
 
 # ----------------------------------------------------------------- generation

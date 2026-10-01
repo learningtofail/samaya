@@ -216,3 +216,25 @@ async def make_user_and_client(db_engine):
 
     yield _make
     app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def fake():
+    from tests.unified_helpers import FakeDiscord
+    return FakeDiscord()
+
+
+@pytest_asyncio.fixture
+async def sf(db_engine):
+    return async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture
+async def configured(sf, tenant):
+    """The default tenant with a notification channel and role."""
+    from models.db import Tenant
+    async with sf() as s:
+        t = await s.get(Tenant, tenant["id"])
+        t.notification_channel_id, t.notification_role_id = "chan-mod", "role-mod"
+        await s.commit()
+    return tenant

@@ -102,7 +102,7 @@ const STATUS = {
 };
 const KINDS = [
   { text: 'Event', color: 'oklch(0.5 0.12 75)', desc: 'A scheduled game event with a start time and duration.' },
-  { text: 'Announcement', color: 'oklch(0.5 0.14 300)', desc: 'A one-off Discord message with no duration. Not in the calendar feed.' },
+  { text: 'Message', color: 'oklch(0.5 0.14 300)', desc: 'A Discord message with no duration. Not in the calendar feed.' },
   { text: 'Kingdom-wide', color: 'oklch(0.5 0.12 75)', desc: 'Every alliance in the Kingdom takes part together.' },
 ];
 function displayStatus(ev, now) {
@@ -363,9 +363,9 @@ function rowHtml(ev, cont, last, now, tz) {
     : `<b>${hm(ev._start, tz)}</b>${tz === 'UTC' ? '' : `<small>${hm(ev._start, 'UTC')} UTC</small>`}`;
   const dur = isAnn ? '' : (multi ? `${formatDuration(ev.duration_hours)} · ends ${escapeHtml(endDay)} ${hm(ev._end, tz)}` : formatDuration(ev.duration_hours));
   const relText = cont ? 'continues' : (key === 'live' ? `ends ${rel(ev._end - now)}` : (ev._start > now ? `${isAnn ? 'sends' : 'starts'} ${rel(ev._start - now)}` : ''));
-  const kind = (isAnn ? 'Announcement' : 'Event') + (ev.scope === 'kingdom-wide' ? ' · Kingdom-wide' : '');
+  const kind = (ev.type && ev.type.name ? ev.type.name : (isAnn ? 'Message' : 'Event')) + (ev.scope === 'kingdom-wide' ? ' · Kingdom-wide' : '');
   const id = `d-${ev._k.replace(/\W/g, '_')}${cont ? '-c' : ''}`;
-  const color = safeColor(als[0].color, KINGDOM_COLOR);
+  const color = safeColor(ev.type && ev.type.color ? ev.type.color : als[0].color, KINGDOM_COLOR);
   return `<article class="row${key === 'live' ? ' is-live' : ''}${key === 'completed' || key === 'cancelled' ? ' is-done' : ''}" style="--c:${color}" data-key="${escapeHtml(ev._k)}">
     <button type="button" class="row-head" data-action="toggle" aria-expanded="${open}" aria-controls="${id}">
       <span class="row-time">${timeBlock}</span>
@@ -566,7 +566,7 @@ $('riSubmit').addEventListener('click', async () => {
     kind: 'error', error_type: $('riErrorType').value, title: `Issue: ${ev.event_name}`, description,
     tenant_slug: ev.tenant_slug || TENANT_SLUG || null, submitter_contact: $('riContact').value.trim() || null,
   };
-  if (ev.kind === 'announcement') payload.related_announcement_id = ev.id; else payload.related_occurrence_id = ev.id;
+  payload.related_occurrence_id = ev.id;
   $('riSubmit').disabled = true;
   try {
     const res = await fetch('/api/tickets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
