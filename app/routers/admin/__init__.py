@@ -1,32 +1,19 @@
-"""Admin router package — split by concern.
-
-Each submodule owns one slice of the admin surface; this file just wires
-them together under the same `router` name main.py already imports, so
-main.py needed no changes.
-"""
+"""Admin router package, split by concern. Each submodule owns one slice of
+the admin surface; this file wires them together under one `router`."""
 from fastapi import APIRouter
 
 from . import (
-    ui, status, events, occurrences, scheduler_control,
-    post_log, discord_config, discord_sync, tenants, invites, me,
-    announcements, announcement_templates, users, audit_log, tickets, unified_events, unified_engine,
+    ui, discord_config, tenants, invites, me, users, audit_log, tickets,
+    unified_events, unified_engine,
 )
 
 router = APIRouter()
 
 router.include_router(ui.router)
-router.include_router(status.router)
-router.include_router(events.router)
-router.include_router(occurrences.router)
-router.include_router(scheduler_control.router)
-router.include_router(post_log.router)
 router.include_router(discord_config.router)
-router.include_router(discord_sync.router)
 router.include_router(tenants.router)
 router.include_router(invites.router)
 router.include_router(me.router)
-router.include_router(announcements.router)
-router.include_router(announcement_templates.router)
 router.include_router(users.router)
 router.include_router(audit_log.router)
 router.include_router(tickets.router)

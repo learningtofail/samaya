@@ -28,9 +28,9 @@ async function loadDelivery() {
   params.set('days', byId('deliveryDays').value || '7');
   try {
     const [health, rows, events] = await Promise.all([
-      api('GET', '/api/v2/delivery-health', null, false, filter),
-      api('GET', '/api/v2/deliveries?' + params.toString(), null, false, filter),
-      api('GET', '/api/v2/events', null, false, filter),
+      api('GET', '/api/delivery-health', null, false, filter),
+      api('GET', '/api/deliveries?' + params.toString(), null, false, filter),
+      api('GET', '/api/events', null, false, filter),
     ]);
     renderDeliveryHealth(health);
     renderDeliveryEventFilter(events, eventId);
@@ -50,8 +50,6 @@ function renderDeliveryEventFilter(events, selected) {
 }
 
 function renderDeliveryHealth(h) {
-  const banner = byId('deliveryEngineOff');
-  banner.classList.toggle('hidden', h.engine_enabled !== false);
   const counts = h.counts || {};
   const order = [['posted', 'Posted', 'pf-m-green'], ['pending', 'Pending', 'pf-m-gray'], ['sending', 'Sending', 'pf-m-blue'],
     ['error', 'Errors', 'pf-m-red'], ['cancelled', 'Cancelled', 'pf-m-orange']];
@@ -99,7 +97,7 @@ bindActions(byId('deliveryBody'), {
   async retry(btn) {
     btn.disabled = true;
     try {
-      await api('POST', `/api/v2/deliveries/${btn.dataset.id}/retry`, null, false, btn.dataset.slug);
+      await api('POST', `/api/deliveries/${btn.dataset.id}/retry`, null, false, btn.dataset.slug);
       toast('Retry queued. The engine sends it on its next minute.');
       loadDelivery();
     } catch (e) {

@@ -2,7 +2,6 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -12,13 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from models import AsyncSessionLocal
-from scheduler.regeneration import regenerate_occurrences
-from scheduler.reminders import send_pre_event_reminders
-from scheduler.announcements import send_scheduled_announcements
-from scheduler.auto_post import auto_post_upcoming_occurrences
 from scheduler.unified_jobs import delivery_tick_job, generation_job
-from routers.admin.unified_engine import engine_enabled
 from routers import events, admin, webhooks, ics, auth as auth_router, auth_pages, tickets_public
 
 logging.basicConfig(level=logging.INFO)
@@ -62,95 +55,21 @@ async def lifespan(app: FastAPI):
     # against its own in-memory SQLite engine — that's independent of this
     # lifespan and unaffected by this change.
 
-    # SchedulerState rows are now per-tenant (tenant_id, job_name), created
-    # lazily by scheduler.jobs._update_state on each tenant's first run —
-    # there's no fixed set of rows to pre-seed the way there was with one
-    # global row per job, since tenants can be added at any time via the
-    # tenants admin API.
-
-    # Check if regeneration is overdue (>25h since last run) for any
-    # existing tenant, or missing entirely (a tenant with no state row
-    # yet). Runs for every tenant if so — cheap and idempotent, and
-    # simpler than tracking per-tenant overdue-ness separately at startup.
-    async with AsyncSessionLocal() as session:
-        from sqlalchemy import select
-        from models.db import SchedulerState, Tenant
-        from services.time_utils import ensure_utc
-        tenants_result = await session.execute(select(Tenant))
-        tenant_ids = [t.id for t in tenants_result.scalars().all()]
-
-        overdue = False
-        for tid in tenant_ids:
-            row = await session.execute(
-                select(SchedulerState).where(
-                    SchedulerState.tenant_id == tid,
-                    SchedulerState.job_name == "regenerate_occurrences",
-                )
-            )
-            state = row.scalar_one_or_none()
-            if state is None or state.last_run_utc is None or \
-               (datetime.now(timezone.utc) - ensure_utc(state.last_run_utc)).total_seconds() > 90000:
-                overdue = True
-                break
-
-        if overdue:
-            logger.info("Overdue regeneration detected on startup — running now for all tenants")
-            await regenerate_occurrences()
-
-    if engine_enabled():
-        # Spec §66.4: the unified engine replaces all four old jobs. They must
-        # not run alongside it, or every event would be posted twice.
-        scheduler.add_job(
-            generation_job, CronTrigger(hour=0, minute=0, timezone="UTC"),
-            id="unified_generation", replace_existing=True,
-        )
-        scheduler.add_job(
-            delivery_tick_job, IntervalTrigger(minutes=1),
-            id="unified_delivery_tick", replace_existing=True,
-        )
-        await generation_job()  # startup catch-up; idempotent
-        logger.info("Unified event engine enabled (SAMAYA_UNIFIED_ENGINE): legacy jobs not registered")
-    else:
-        # Daily regeneration at UTC 00:00
-        scheduler.add_job(
-            regenerate_occurrences,
-            CronTrigger(hour=0, minute=0, timezone="UTC"),
-            id="regenerate_occurrences",
-            replace_existing=True,
-        )
-
-        # Pre-event reminder — runs every minute
-        scheduler.add_job(
-            send_pre_event_reminders,
-            IntervalTrigger(minutes=1),
-            id="pre_event_notifier",
-            replace_existing=True,
-        )
-
-        # Scheduled announcement delivery — runs every minute
-        scheduler.add_job(
-            send_scheduled_announcements,
-            IntervalTrigger(minutes=1),
-            id="announcement_delivery",
-            replace_existing=True,
-        )
-
-        # Daily auto-post of upcoming occurrences (spec §51) — deliberately
-        # after regeneration's own UTC 00:00 slot (16:00 UTC), so a fresh
-        # day's regenerated occurrences are always in place before this job
-        # looks for anything to post.
-        scheduler.add_job(
-            auto_post_upcoming_occurrences,
-            CronTrigger(hour=16, minute=0, timezone="UTC"),
-            id="auto_post_upcoming_occurrences",
-            replace_existing=True,
-        )
+    # Spec §66.4: one daily generation pass (idempotent, so also run once at
+    # startup to cover a restart that skipped the 00:00 slot) and one
+    # per-minute delivery tick.
+    scheduler.add_job(
+        generation_job, CronTrigger(hour=0, minute=0, timezone="UTC"),
+        id="unified_generation", replace_existing=True,
+    )
+    scheduler.add_job(
+        delivery_tick_job, IntervalTrigger(minutes=1),
+        id="unified_delivery_tick", replace_existing=True,
+    )
+    await generation_job()
 
     scheduler.start()
-    logger.info(
-        "Samaya scheduler started — daily regen at UTC 00:00, daily auto-post at UTC 16:00, "
-        "reminders and announcements every minute"
-    )
+    logger.info("Samaya scheduler started: daily generation at UTC 00:00, delivery tick every minute")
 
     yield
 

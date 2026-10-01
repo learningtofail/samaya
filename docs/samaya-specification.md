@@ -1,8 +1,8 @@
 # Samaya — Technical Specification
 
 **Repository:** github.com/learningtofail/samaya
-**Version:** 1.34.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
-**Last reconciled with the code:** 2026-10-01, repository commit `4cb4d15`. Part I below is the authoritative current state. Part II keeps the original section-by-section record; where Part II and Part I differ, Part I wins.
+**Version:** 2.0.0 (unified event model) · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Last reconciled with the code:** 2026-10-01, branch `unified-event-model`, ready to merge. Production still runs the previous version until the cutover in `docs/cutover-runbook.md`. Part I below is the authoritative current state. Part II keeps the original section-by-section record; where Part II and Part I differ, Part I wins, and sections replaced by §66 carry a note saying so.
 
 # Part I: Current State
 
@@ -10,7 +10,7 @@ This part describes Samaya as it exists now. It is rewritten when the system cha
 
 ## CS.1 What the system is
 
-A self-hosted, multi-tenant event scheduler for the Kingshot community on Kingdom 138. Each alliance is a tenant. The system generates recurring event occurrences, posts them to Discord as Scheduled Events, sends pre-event reminders and scheduled announcements, publishes public pages and ICS calendar feeds, and runs a public feedback board.
+A self-hosted, multi-tenant event scheduler for the Kingshot community on Kingdom 138. Each alliance is a tenant. Coordinators define **events** (a calendar event with a duration, or a plain message with none), each with one **event type** that sets its label and color. The delivery engine generates occurrences, creates Discord Scheduled Events for events with a duration, and sends reminders and messages to each alliance's notification channel. Public pages and ICS feeds show what is public, and a public feedback board takes requests and error reports. §66 is the design record.
 
 ## CS.2 Stack and process model
 
@@ -18,71 +18,75 @@ A self-hosted, multi-tenant event scheduler for the Kingshot community on Kingdo
 |---|---|
 | API | FastAPI on Uvicorn, one worker only (APScheduler runs in the web process; a second worker duplicates every job) |
 | Data | SQLAlchemy 2.0 async, asyncpg, PostgreSQL 16 |
-| Schema changes | Alembic only (`app/alembic/`, baseline `6fc935931248`). Startup no longer creates tables. Production must adopt the baseline with `alembic stamp head` before any new revision (not yet confirmed as done); new revisions run with `alembic upgrade head` before the restart |
-| Scheduling | APScheduler, in process, UTC |
+| Schema changes | Alembic only (`app/alembic/`). Revisions: baseline `6fc935931248`, `a1f0c0de0001` (event model tables), `a1f0c0de0002` (feedback moderation), `a1f0c0de0003` (drops the replaced tables; destructive, no downgrade). Startup does not create tables; `alembic upgrade head` is a deploy step |
+| Scheduling | APScheduler, in process, UTC: a daily generation pass and a per-minute delivery tick |
 | Frontend | Static HTML, CSS and JS, no build step and no framework. Classic script tags, not ES modules |
 | Auth | Discord OAuth2 with signed session cookies; `SameSite=Strict` is the CSRF defense |
-| Tooling | Ruff (Python), ESLint (public page scripts only), pytest (SQLite), vitest (public page pure functions) |
+| Tooling | Ruff (Python), ESLint (public page scripts), pytest (SQLite), vitest (public page pure functions) |
 
 ## CS.3 Tenancy and data model
 
-- **Kingdom**: a Kingshot game server. Carries optional `public_site_title` and `admin_console_title` (§38.7).
-- **Tenant**: an alliance, with `color` and an optional `icon_image_data` (a data URI, §38.7). It points at a **DiscordServer**, which holds `guild_id`, `bot_token` and `public_key`. Several tenants may share one DiscordServer, and a shared guild gets exactly one Discord Scheduled Event per occurrence (§52).
-- **Event scope**: `alliance` or `kingdom-wide`. A kingdom-wide event has one `Occurrence` and one independent `PostLog` row per tenant. Alliance-scope events can also reach other tenants through explicit `EventTarget` rows (§20). Kingdom-wide visibility is independent of notification targets (§61).
-- **Tables**: `kingdoms`, `tenants`, `discord_servers`, `users`, `user_tenants`, `user_kingdoms`, `invites`, `audit_log`, `event_definitions` (with `cover_image_data`, §35), `event_tenant_notifications`, `event_targets`, `occurrences`, `post_log`, `announcements` (with `scope`, `recurring`, `interval_days`, `event_offset_minutes`), `announcement_targets`, `announcement_templates`, `tickets`, `ticket_votes`, `scheduler_state`.
+- **Kingdom**: a Kingshot game server, with optional `public_site_title` and `admin_console_title` (§38.7).
+- **Tenant**: an alliance, with `color`, an optional `icon_image_data`, and its notification destination (`notification_channel_id`, `notification_role_id`). It points at a **DiscordServer**, which holds `guild_id`, `bot_token` and `public_key`. Several tenants may share one DiscordServer, and a shared guild gets exactly one Discord Scheduled Event per occurrence (§52).
+- **Events** (§66.1): `event_types` (label, color, defaults per Kingdom), `events` (scope `alliance` or `kingdom-wide`, optional duration, recurrence `interval_days` or `none`, optional `until_date`, message, `leadership_only`, `cover_image_data`), `event_alliances` (the audience, with per-alliance message and destination overrides), `event_reminders` (minutes before start), `event_occurrences` (generated, with per-occurrence cancel, move and message override), `deliveries` (one row per Discord post: kind `discord_event` or `reminder`, status `pending`, `sending`, `posted`, `error`, `cancelled`).
+- **Other tables**: `kingdoms`, `tenants`, `discord_servers`, `users` (with `display_name`), `user_tenants`, `user_kingdoms`, `invites`, `audit_log`, `tickets`, `ticket_votes`, `ticket_responses`.
 - All timestamps are UTC. Use `services/time_utils.ensure_utc()` when reading them, because asyncpg and aiosqlite differ on `tzinfo`.
 
 ## CS.4 Roles and access
 
 - Access is by invite only. Discord OAuth is the only authentication and the only way a user is created. There is no self-service signup.
-- Backend roles: `owner`, `coordinator`, `viewer` per tenant (`user_tenants`), a separate kingdom-coordinator grant (`user_kingdoms`, superadmin-issued, not implied by owning an alliance), and the superadmin flag, bootstrapped only from `SUPERADMIN_DISCORD_IDS`.
+- Backend roles: `owner`, `coordinator`, `viewer` per tenant (`user_tenants`), a separate kingdom-coordinator grant (`user_kingdoms`, superadmin-issued, not implied by owning an alliance; required for event types and kingdom-wide events), and the superadmin flag, bootstrapped only from `SUPERADMIN_DISCORD_IDS`.
 - A `viewer` can read everything a coordinator can but every mutating call returns 403 (`require_not_viewer`).
-- The admin UI shows two tiers: superadmin, and everyone else. Access, Platform and Audit Log are superadmin-only in the UI. The backend role checks are unchanged underneath (§38.6).
+- The admin UI shows two tiers: superadmin, and everyone else. Setup's access, platform and user sections and the Audit log tab are superadmin-only in the UI (§38.6).
+- Coordinators can set their own `display_name`, which is how they appear on public feedback responses ("Team" when unset).
 
 ## CS.5 API surface
 
 Public, unauthenticated:
 - Pages: `/events`, `/t/{slug}/events`, `/feedback`.
-- Data: `/api/events`, `/t/{slug}/api/events`, `/api/alliances`, `/api/kingdom-branding`, `/api/last-activity`, `/t/{slug}/api/last-activity`, `GET/POST /api/tickets`, `POST /api/tickets/{id}/vote`.
+- Data: `/api/events`, `/t/{slug}/api/events`, `/api/alliances`, `/api/kingdom-branding`, `/api/last-activity`, `/t/{slug}/api/last-activity`, `GET/POST /api/tickets` (`GET` returns `{active, archived}`), `POST /api/tickets/{id}/vote`. All read through `services/public_events.public_rows`, the one place that excludes inactive and leadership-only events (§66.6).
 - Calendars: `/ics/events.ics` and `/t/{slug}/ics/events.ics`.
 - Other: `/health`, `POST /webhooks/discord` (signature verified).
 - The three ticket endpoints are rate limited per client IP (§65).
 
 Auth: `/auth/login`, `/auth/discord/callback`, `/invite/{token}`, `POST /auth/logout`, and two static failure pages.
 
-Admin (`/admin`, session required, tenant chosen by the `X-Tenant-Slug` header): events (CRUD, notification override, CSV import and export), occurrences (list, patch, post, remove from Discord), announcements (CRUD, cancel, retry failed targets), announcement templates, post log, Discord sync, Discord config, scheduler preview and regenerate, status and delivery health, audit log, invites and members, kingdoms, tenants, Discord servers, users, tickets triage, and `/api/me`. The authoritative route list is the router files listed in `CLAUDE.md`.
+Admin (`/admin`, session required, tenant chosen by the `X-Tenant-Slug` header, `*` for combined read-only lists):
+- Events: `event-types`, `events` (CRUD, `POST events/{id}/split`), `occurrences` (list, `PATCH`), `deliveries` (list, `POST .../retry`), `delivery-health`.
+- Feedback: `tickets` (list, `PATCH`, `DELETE`), `tickets/{id}/responses`.
+- Setup: kingdoms, tenants, Discord servers, `notification-destination`, invites, members, kingdom coordinators, users, `me`, `discord/channels` and `discord/roles`, `audit-log`.
+The authoritative route list is the router files listed in `CLAUDE.md`.
 
 ## CS.6 Background jobs
 
 | Job | Schedule | Purpose |
 |---|---|---|
-| `regenerate_occurrences` | Daily 00:00 UTC, and on demand per tenant | Rebuild occurrences from event definitions |
-| `send_pre_event_reminders` | Every minute | Pre-event Discord pings |
-| `send_scheduled_announcements` | Every minute | Deliver due announcements per target; a recurring one re-arms (§13.5) |
-| `auto_post_upcoming_occurrences` | Daily 16:00 UTC | Post occurrences starting within 7 days; flag conflicts, never overwrite (§51) |
+| `generation_job` | Daily 00:00 UTC, and once at startup | Idempotently create and update occurrences and their deliveries for every event, 28 days ahead; never touches cancelled or moved occurrences |
+| `delivery_tick_job` | Every minute | Claim each due delivery atomically, commit, then call Discord. At most once per delivery; one failure never blocks another; a `sending` row older than 10 minutes becomes an error and is never retried automatically |
 
-Every job function takes an injectable `session_factory`, because jobs run outside any request.
+A Discord Scheduled Event is due 7 days before start and is skipped for leadership events and events with no duration. Reminders are due `minutes_before` before start. Same-name, same-time events already in Discord are recorded without a second post; a same-name, different-time event is flagged, never overwritten (§51). All logic is in `services/event_engine.py`, tested with a fake Discord client.
 
 ## CS.7 Frontend
 
-- **Admin console** (`admin.html`, `admin.css`, `js/*.js`): PatternFly, one script per view, tab order Dashboard, Events, Announcements, Schedule (table or timeline), Post Log, Sync, Config, Tickets, Access and Platform, Audit Log (§38). Each view has its own alliance filter kept in `localStorage`. No inline styles or inline event handlers in the markup (§65). The `js/*.js` files are not covered by ESLint.
+- **Admin console** (`admin.html`, `admin.css`, `js/*.js`): PatternFly, one script per view. Tabs: Events, Schedule (table or timeline), Delivery log, Event types, Feedback, Setup, Audit log (§66.7). The message composer (toolbar, live preview, emoji picker) is `js/composer.js`. Each view has its own alliance filter kept in `localStorage`. No inline styles or inline event handlers in the markup (§65). The `js/*.js` files are not covered by ESLint.
 - **Public events page** (`events.html`, `events.css`, `events-public.js`): standalone light theme with a gold accent, no PatternFly. One IIFE with no globals. Alliance filter chips, a live-now hero with countdown, schedule grouped by day, list and calendar views, 24-hour time, and a time zone choice kept under `samaya_display_tz` (§62). Pure functions are unit tested through the `__SAMAYA_TEST__` hook.
-- **Feedback board** (`feedback.html`, `.css`, `.js`): separate files, same conventions as the events page (§40 to §43, §65).
+- **Feedback board** (`feedback.html`, `.css`, `.js`): active tickets, a collapsed Archived section, public team responses (§66.10).
 - Cloudflare caches `/static/*` by extension, so every static change bumps `STATIC_ASSET_VERSION` in `services/static_assets.py`.
 
 ## CS.8 Configuration, deployment and operations
 
-- Variables: `DB_PASSWORD`, `SECRET_KEY`, `DISCORD_OAUTH_CLIENT_ID`, `_SECRET`, `_REDIRECT_URI`, `SUPERADMIN_DISCORD_IDS`, `PLATFORM_BOT_TOKEN`, `PLATFORM_PUBLIC_KEY`, and the SMTP settings. The app refuses to boot without `SECRET_KEY` and the OAuth client ID and secret.
+- Variables: `DB_PASSWORD`, `SECRET_KEY`, `DISCORD_OAUTH_CLIENT_ID`, `_SECRET`, `_REDIRECT_URI`, `SUPERADMIN_DISCORD_IDS`, `PLATFORM_BOT_TOKEN`, `PLATFORM_PUBLIC_KEY`, and the SMTP settings. The app refuses to boot without `SECRET_KEY` and the OAuth client ID and secret. The earlier `SAMAYA_UNIFIED_ENGINE` flag no longer exists.
 - Docker Compose runs `app` (127.0.0.1:8000) and `db` (postgres:16-alpine). Caddy runs natively on `lxc-taraka`, outside the repository and outside Compose, in front of the app. Its config is `/etc/caddy/Caddyfile` with `admin off`, so a change needs `systemctl restart caddy`, and each new public route needs a matching `reverse_proxy` line there. Cloudflare Tunnel and Access sit in front of that, and Access gates `/admin`.
-- Deploy: apply the patch locally, commit, push, then on `lxc-taraka` pull, run `alembic upgrade head` if a migration is included, and restart.
+- Deploy: apply the patch locally, commit, push, then on `lxc-taraka` pull, run `alembic upgrade head` if a migration is included, and restart. The one-time move to the unified event model follows `docs/cutover-runbook.md`.
 - Backups: `ops/backup.sh` takes a nightly gzipped `pg_dump` with 14 day rotation (cron on the LXC host), and `restic` covers `/opt/taraka/postgres/`.
-- Recovery: `docs/rollback-runbook.md` covers code rollback, Alembic downgrade (and when it cannot be trusted), and restore from a dump.
+- Recovery: `docs/rollback-runbook.md` covers code rollback, Alembic downgrade (and when it cannot be trusted), restore from a dump, and the cutover rollback.
 
 ## CS.9 Testing and CI
 
 - pytest runs against in-memory SQLite and never touches production. The suite is organized by what is tested; see `CLAUDE.md` for the file list.
 - vitest covers the public events page's pure functions.
-- CI (`.github/workflows/ci.yml`, every push and pull request to `master`): pytest after `ruff check`, a frontend job (ESLint and vitest), a Docker build that boots the image against a real Postgres and checks `/api/kingdom-branding`, and an `alembic upgrade head` plus `alembic check` job that fails when a model change has no migration.
+- CI (`.github/workflows/ci.yml`, every push and pull request to `master` and to `unified-event-model`): pytest after `ruff check`, a frontend job (ESLint and vitest), a Docker build that boots the image against a real Postgres and checks `/api/kingdom-branding`, and an `alembic upgrade head` plus `alembic check` job that fails when a model change has no migration.
+- `ops/dev_smoke_engine.py` runs the delivery engine against a real Discord test server (dev bot and database only, never production credentials).
 
 ## CS.10 Conventions
 
@@ -93,21 +97,19 @@ Every job function takes an injectable `session_factory`, because jobs run outsi
 
 ## CS.11 Known issues and open work
 
-- **Recurring announcements do not re-post (reported, not diagnosed).** See §13.5. Not being fixed: the announcement code is replaced by §66.
-- **Delivery tick hazards (confirmed in code).** One failing announcement blocks later ones in the same tick, and a send followed by a rollback can duplicate a post. §66.4 designs both out.
-- **Planned, not built:** §66 unified event model, the current priority. §63 alliance branding and §64 scheduled theme resolution are deferred.
-- **Roadmap ideas** are collected in §44.
+- **Not built, by decision (§66.9):** monthly recurrence, leadership-only Discord channels, per-coordinator alliance limits, a creation-notice destination, downstream systems. §63 alliance branding and §64 scheduled theme resolution are deferred.
+- **Admin API gaps found while building the console (§66.7):** `/api/me` does not expose kingdom-coordinator grants, so the UI cannot hide event-type and kingdom-wide controls from users who lack them (the server returns 403); event list responses carry `cover_image_data` inline; the delivery list sorts by due time, so an old error row can fall behind the page limit (the UI asks for 200 and filters); a non-superadmin editing an event whose audience includes alliances they cannot see would drop those alliances.
 - **Known gaps:** no per-tenant custom Discord Interactions endpoint (§22); anonymous votes are per browser, not per person; the public page has no analytics; admin `js/*.js` has no lint coverage; Google Fonts load from an external host unless self-hosted.
+- **Roadmap ideas** are collected in §44 and §66.9.
 
 ## CS.12 Section map
 
 | Group | Sections |
 |---|---|
-| Original baseline, corrected where facts changed | 1 to 12 |
-| Current and still describing the system | 13, 15, 17 (tab list superseded, rationale kept), 19 (server name column, admin UI superseded by 38.5), 20 to 35, 37, 38, 40 to 46, 49 to 53, 55 to 57, 59 to 62 |
-| Planned | 66 (unified event model, replaces 13, 20, 27, 37, 49, 50 when built) |
+| Original baseline, corrected where facts changed | 1 to 12 (4, 5, 6 and 12 describe the previous system; see CS.3, CS.5, CS.6, CS.9) |
+| Current and still describing the system | 15, 17 (rationale only), 19 (rationale only), 21 to 26, 28, 29, 31 (audit log, viewer role), 33 to 35, 38, 40 to 46, 52, 53, 55 to 57, 59 to 62, 65, 66 |
+| Replaced by §66 (kept as design history) | 13, 20, 27, 30.1, 32, 37, 45, 49, 50, 51 (semantics kept) |
 | Deferred | 63, 64 |
-| Reconciliation and audit remediation | 65 |
 | Archived (fully superseded) | 14, 18, 36, 39, 47, 54, 58 |
 | Intentionally empty | 16, 48 |
 
@@ -157,6 +159,8 @@ Public routes scope by URL path segment (`/t/{tenant_slug}/...`) because calenda
 
 ## 4. Data Model
 
+**Superseded by the unified event model.** Replaced for events and announcements by §66.1; see CS.3 for the current tables.
+
 | Table | Purpose |
 |---|---|
 | `kingdoms` | Game server; `name`, unique `slug` |
@@ -181,6 +185,8 @@ Public routes scope by URL path segment (`/t/{tenant_slug}/...`) because calenda
 Every timestamp is UTC. `services/time_utils.ensure_utc()` normalizes `tzinfo` because asyncpg and aiosqlite round-trip `DateTime(timezone=True)` columns differently — a real cross-driver bug that surfaced independently in three files before being consolidated.
 
 ## 5. API Surface
+
+**Superseded by the unified event model.** Admin event, occurrence and announcement routes were replaced by §66; see CS.5.
 
 ### 5.1 Public (unauthenticated, path-scoped)
 
@@ -224,6 +230,8 @@ Every timestamp is UTC. `services/time_utils.ensure_utc()` normalizes `tzinfo` b
 Manually triggering a regeneration requires a logged-in session and an `X-Tenant-Slug` header — done from the admin UI's Schedule tab, not a bare `curl`. The endpoint is `POST /admin/api/scheduler/regenerate`.
 
 ## 6. Background Jobs (`app/scheduler/`)
+
+**Superseded by the unified event model.** Replaced by the delivery engine (§66.4); see CS.6. The four jobs described here no longer exist.
 
 Four independent jobs, each in its own file (split from an earlier monolithic `jobs.py`). Every public function accepts an optional `session_factory` (default `models.AsyncSessionLocal`) since jobs run outside any HTTP request and can't use FastAPI's `get_db` dependency — tests must inject a test session factory or the job will hit the real database.
 
@@ -288,6 +296,8 @@ Backup: `/opt/taraka/postgres/` is included in `restic` backups with a `pg_dump`
 
 ## 12. Testing (`app/tests/`)
 
+**Superseded by the unified event model.** Tests for the replaced code were removed in §66.8; see CS.9 and `CLAUDE.md`.
+
 In-memory SQLite via `aiosqlite`, orchestrated through `conftest.py` fixtures; never touches production Postgres.
 
 Key fixtures: `tenant`/`second_tenant` (two tenants in one Kingdom), `test_user` (a superadmin by design, so business-logic tests aren't implicitly testing the permission model too), `client` (authenticated as `test_user`), `make_user_and_client` (factory for a specific non-superadmin user with specific grants, for permission tests).
@@ -306,6 +316,8 @@ Key fixtures: `tenant`/`second_tenant` (two tenants in one Kingdom), `test_user`
 Run via: `pip install -r app/requirements-dev.txt && cd app && pytest`. `requirements.txt` is runtime-only (what ships in the Docker image); `requirements-dev.txt` layers pytest and the in-memory SQLite driver on top for local/CI use.
 
 ## 13. Admin UI — Announcements
+
+**Superseded by the unified event model.** Replaced by §66: an announcement is now an event with no duration. Kept as design history.
 
 **Replacement planned:** §66 (unified event model) merges announcements into events. Remains accurate for the running code until that ships.
 
@@ -445,6 +457,8 @@ Rationale for the original grouping still holds for the tabs it covers: Events a
 **Admin UI superseded by §38.5.** The single-tenant Channels table with a Server column (described above as originally built) was replaced by a Discord Config tab that groups by `DiscordServer` instead of by Tenant — a `<details>` accordion section per server, since more than one alliance can share one server and a flat per-tenant table would repeat that server's identical channel/role list under each alliance's name. `get_guild_info`/`GET /api/discord/guild` (above) is still the function that resolves a server's display name; it's now called from `GET /api/discord/config-overview` (§38.5) rather than rendered as a per-row table column.
 
 ## 20. Events — Multi-Server Notification Targets
+
+**Superseded by the unified event model.** Replaced by `event_alliances` (§66.1, §66.2).
 
 **Replacement planned:** §66 replaces event targets with `event_alliances`. Remains accurate for the running code until that ships.
 
@@ -620,6 +634,8 @@ The masthead's Log Out button uses PatternFly's `pf-m-secondary` button variant,
 
 ## 27. Announcement Templates
 
+**Superseded by the unified event model.** Replaced: event types (§66.1) carry the defaults; the placeholder substitution in `services/templates.py` is reused.
+
 **Replacement planned:** §66 replaces templates with event types. Remains accurate for the running code until that ships.
 
 **Status:** Implemented, pending deployment. §27.1's migration script must run against production before the new application code is deployed, same order as every other schema-changing migration in this repo.
@@ -764,6 +780,8 @@ The masthead's Log Out button uses PatternFly's `pf-m-secondary` button variant,
 
 ## 32. Bulk Event Import/Export, and Placeholder Support in the Pre-Event Ping
 
+**Superseded by the unified event model.** The CSV import and export was not carried over (§66.11). Placeholder support lives on in `services/templates.py`.
+
 **Status:** Implemented, pending deployment. No migration — both halves are additive endpoints/behavior on existing tables.
 
 **Problem.** Two small, unrelated roadmap items bundled into one patch since both are the last of this round's build list. First: setting up a season's worth of recurring events one at a time through the modal is repetitive busywork for anything beyond a handful of events, and there was no way to get an alliance's events *out* of the system either (to hand to another alliance standing up the same schedule, or just to back up outside the app). Second: §27 gave Announcements six `{placeholder}`s (alliance/kingdom name, send/event time and their relative forms) but scoped them to Announcement bodies only (§27.3) — an Event's own `description`, which reaches Discord in two places (the Scheduled Event's own description field, and now the pre-event ping), stayed literal text with no way to reference "when this actually starts" without hand-typing a UTC time that goes stale the moment the schedule changes.
@@ -863,6 +881,8 @@ The masthead's Log Out button uses PatternFly's `pf-m-secondary` button variant,
 - Bulk import/export (§32.1) carrying cover images — `_BULK_EVENT_COLUMNS` is unchanged; a multi-megabyte base64 blob per row would make the CSV format actively worse for its one real use case (skimming/editing event lineups in a spreadsheet), so an imported event always starts with no cover image, set afterward through the modal if wanted.
 
 ## 37. Public Events Page: Announcements and Notification Lead Time
+
+**Superseded by the unified event model.** Replaced by §66.6: messages are events with no duration and appear in the same list.
 
 **Replacement planned:** §66 lists duration-less events as messages instead of announcements. Remains accurate for the running code until that ships.
 
@@ -1090,6 +1110,8 @@ Small, well-scoped ideas that have come up but are deliberately not built yet �
 
 ## 45. Sync Tab False Positives: Naturally-Completed Events and a Striped-Row Rendering Bug
 
+**Superseded by the unified event model.** The Sync tab no longer exists (§66.7); the delivery log replaces it.
+
 **Status:** Implemented.
 
 **Problem 1 — every event that finishes normally was reported as a possible Discord deletion.** The Sync tab's "PostLog Only" bucket exists to catch a Discord Scheduled Event deleted directly in Discord rather than through Samaya, but it was firing for the overwhelming majority-case instead: an event that simply ran to completion. Two compounding causes, both in place since early in this app's life and only now surfacing as user-visible noise:
@@ -1145,6 +1167,8 @@ Every row-level click handler (`handleRowPreviewClick`, `common.js`) ignores cli
 
 ## 49. Combined Owning-Alliance/Scope Selector, Event/Announcement Reassignment, and In-Place Announcement Editing
 
+**Superseded by the unified event model.** Replaced by §66.4a edit scopes and `PATCH /api/events/{id}`.
+
 **Replacement planned:** §66 merges announcement editing into event editing. Remains accurate for the running code until that ships.
 
 **Status:** Implemented.
@@ -1180,6 +1204,8 @@ Out of scope: resolving channel/role names server-side into the API response its
 
 ## 50. Scheduled Announcements in the Admin Schedule View
 
+**Superseded by the unified event model.** Replaced by the Schedule tab (§66.7), which lists every event type together.
+
 **Replacement planned:** §66 merges announcements into the Schedule view of events. Remains accurate for the running code until that ships.
 
 **Status:** Implemented.
@@ -1200,6 +1226,8 @@ No backend changes — this is a display-only combination of two already-existin
 - Showing anything other than `status == 'scheduled'` announcements here — posted/failed/cancelled ones remain a concern for the Announcements tab, not a forward-looking 28-day schedule.
 
 ## 51. Daily Auto-Post Job
+
+**Superseded by the unified event model.** Replaced by the delivery engine (§66.4); the same-name and same-time rules are kept.
 
 **Status:** Implemented.
 
@@ -1581,7 +1609,7 @@ The open UI problems recorded on 2026-09-28 (broken "Add Target" and "New Announ
 
 ### 66.8 Migration and build plan
 
-- Two Alembic revisions, so CI stays green at every phase. **Phase 1 (`a1f0c0de0001`, additive, has a downgrade):** creates the new tables, the new `tenants` and `users` columns, the production-drift fixes and the "General" type per Kingdom. **Closure phase (destructive, no meaningful downgrade):** drops the replaced tables. The rollback for the closure revision is restoring the pre-change dump from `ops/backup.sh` (`docs/rollback-runbook.md`). Take that backup first. Setup data is kept (§66.1). Existing ticket rows are discarded unless exported first.
+- Additive revisions first, one destructive revision last, so CI stays green at every phase. **Phase 1 (`a1f0c0de0001`, additive, has a downgrade):** creates the new tables, the new `tenants` and `users` columns, the production-drift fixes and the "General" type per Kingdom. **Closure phase (destructive, no meaningful downgrade):** drops the replaced tables. The rollback for the closure revision is restoring the pre-change dump from `ops/backup.sh` (`docs/rollback-runbook.md`). Take that backup first. Setup data is kept (§66.1). Ticket rows are kept (`a1f0c0de0002` clears their references to old occurrences and announcements). Closure is `a1f0c0de0003`; the migration between them (`a1f0c0de0002`) is the feedback change of §66.10.
 - Production must have adopted the Alembic baseline (`alembic stamp head`) before this revision. That is not confirmed and is a blocking check.
 - **Production adopted the baseline (confirmed 2026-10-01):** `alembic_version` holds `6fc935931248`. `alembic check` on production still reports drift between the live schema and the models, because production was built by the old hand-written scripts: unique constraints on `user_tenants` and `user_kingdoms` carry Postgres default names (`user_tenants_user_id_tenant_id_key`, `user_kingdoms_user_id_kingdom_id_key`) where the models say `uq_user_tenant` and `uq_user_kingdom`, and `discord_servers.created_at` is nullable where the model says `NOT NULL`. The same check also lists `announcement_targets`, `event_tenant_notifications` and `announcement_templates`, which this revision drops. The Phase 1 revision (`a1f0c0de0001`) therefore renames those constraints (guarded, a no-op on a baseline-built database), and the models now say `NOT NULL` for `discord_servers.created_at` and `announcement_templates.created_at`, which matches production; the revision backfills any null and sets `NOT NULL` so a baseline-built database converges too. Correction recorded 2026-10-01: an earlier version of this note had the nullability direction reversed. `alembic check` passes on both a drifted and a fresh database.
 - **Cutover and Discord events (decided 2026-10-01).** The old system does not need to keep posting before the cutover. The cutover step deletes the Discord Scheduled Events the old system created, identified by the `discord_event_id` values in `post_log`, and never touches events created by hand. The new engine then creates fresh ones. There is no adoption of matching events at cutover. The §51 same-name, same-time check stays for events created by hand later.
@@ -1590,8 +1618,8 @@ The open UI problems recorded on 2026-09-28 (broken "Add Target" and "New Announ
   1. **Foundation (done 2026-10-01, branch `unified-event-model`):** models, the additive revision, recurrence `none` and `until_date`, event type and event APIs at `/admin/api/v2/event-types` and `/admin/api/v2/events`, validators, 83 new tests. The `/v2` prefix is temporary and is dropped in the closure phase, when the old routes go. Edits in Phase 1 apply to the whole event; the scope choice of §66.4a arrives with the delivery engine.
   2. **Delivery engine (done 2026-10-01, branch `unified-event-model`; verified against real Discord 2026-10-01 with `ops/dev_smoke_engine.py`: one Scheduled Event and one reminder posted and cleaned up on a test server):** occurrence and delivery generation, the single tick, shared-guild dedupe, reminders, per-occurrence edits, the split, manual retry, delivery log and health, all behind `SAMAYA_UNIFIED_ENGINE`; 58 tests against a fake Discord client including at-most-once and failure isolation. Not yet exercised against real Discord: that needs the dev bot and test server.
   3. **Public surface (done 2026-10-01):** public API, ICS, last-activity and the events page read the new tables through one query path, `services/public_events.public_rows`; `tests/test_public_surface.py` checks a leadership-only event against every public route (JSON, ICS, last-activity, per alliance and combined) and was mutation-checked by removing the filter.
-  4. **Admin console:** the tabs in §66.7.
-  5. **Closure:** feedback moderation, responses and archive (§66.10), audit integration, `CLAUDE.md` map, this spec's Part I rewritten, dead code and old tests removed, cutover with backup.
+  4. **Admin console (done 2026-10-01):** the tabs in §66.7, built only on the surviving endpoints, checked in a real browser (Playwright against a seeded local server, desktop and 390px wide). The composer moved to `js/composer.js`. Known API gaps are in CS.11.
+  5. **Closure (done 2026-10-01):** feedback moderation, responses and archive (§66.10); the old routers, scheduler jobs, models, schemas and tests deleted; the `/v2` prefix and the `SAMAYA_UNIFIED_ENGINE` flag removed (the engine is the only engine); revision `a1f0c0de0003` drops the replaced tables and refuses to run while any old Discord event ID remains in `post_log`; `app/cutover_delete_old_discord_events.py` deletes those events first (dry run by default, shared-guild events deleted once, safe to repeat); `docs/cutover-runbook.md` and the cutover section of `docs/rollback-runbook.md`; `CLAUDE.md` and Part I rewritten. Checked on a fresh Postgres 16 and on one seeded with old-model rows (guard refuses, then passes once IDs are cleared; `alembic check` clean). The cutover itself is run by the owner, not by a merge.
 
 ### 66.9 Roadmap, not built now
 

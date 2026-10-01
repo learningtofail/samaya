@@ -21,7 +21,7 @@ from services.event_engine import (
 
 from tests.unified_helpers import NOW, UTC, deliveries, make_event, sync
 
-BASE = "/admin/api/v2"
+BASE = "/admin/api"
 
 
 # ----------------------------------------------------------------- generation
@@ -576,7 +576,6 @@ class TestDeliveryLog:
         assert (await client.get(f"{BASE}/deliveries", params={"status": "posted", "days": 30})).json() == []
         health = (await client.get(f"{BASE}/delivery-health")).json()
         assert health["counts"].get("error") is None or isinstance(health["counts"], dict)
-        assert health["engine_enabled"] is False
 
     async def test_retry_only_applies_to_errors(self, client, fake_discord, sf):
         await _create_event(client)

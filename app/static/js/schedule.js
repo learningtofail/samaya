@@ -47,8 +47,8 @@ async function loadSchedule() {
   const filter = getTabFilter('schedule');
   try {
     const [occs, events] = await Promise.all([
-      api('GET', `/api/v2/occurrences?from=${SCHED_RANGE_FROM}&to=${to}`, null, false, filter),
-      api('GET', '/api/v2/events', null, false, filter),
+      api('GET', `/api/occurrences?from=${SCHED_RANGE_FROM}&to=${to}`, null, false, filter),
+      api('GET', '/api/events', null, false, filter),
     ]);
     SCHED_OCC = occs;
     SCHED_EVENTS = {};
@@ -183,7 +183,7 @@ function renderTimeline() {
 // ── Row actions ──────────────────────────────────────────────
 
 async function patchOccurrence(occ, payload, doneMessage) {
-  const res = await api('PATCH', `/api/v2/occurrences/${occ.id}`, payload, false, occWriteSlug(occ));
+  const res = await api('PATCH', `/api/occurrences/${occ.id}`, payload, false, occWriteSlug(occ));
   toastDiscordErrors(res.discord_errors, doneMessage);
   return res;
 }
@@ -281,7 +281,7 @@ async function openOccurrenceModal(opts) {
     eventDict = eventById(opts.eventId);
     const from = utcDateKey(new Date());
     try {
-      const all = await api('GET', `/api/v2/occurrences?from=${from}&to=${addDays(from, 56)}`, null, false, writeSlugForEvent(eventDict));
+      const all = await api('GET', `/api/occurrences?from=${from}&to=${addDays(from, 56)}`, null, false, writeSlugForEvent(eventDict));
       list = all.filter((o) => o.event_id === opts.eventId);
     } catch (e) { toast(e.message, true); return; }
     if (!list.length) {

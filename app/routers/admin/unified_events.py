@@ -1,12 +1,8 @@
 """Admin API for the unified event model (spec §66): event types and events.
 
-Mounted under /api/v2 while the older event_definitions/announcements
-routes still exist; the closure phase removes the prefix. Phase 1 covers
-definitions only (create, read, update, deactivate, delete). Occurrence and
-delivery generation, the per-occurrence overrides and the "this and
-following" split (§66.4a) arrive with the delivery engine in Phase 2, which
-is also where deleting or editing an event starts to cancel pending
-deliveries and remove Discord events.
+Event definitions: create, read, update, deactivate, delete. Occurrences,
+the per-occurrence overrides, the "this and following" split and deliveries
+are in unified_engine.py.
 """
 from datetime import date, datetime, time as dtime, timezone
 
@@ -30,7 +26,7 @@ from .deps import (
 )
 from .unified_schemas import EventAllianceIn, EventIn, EventPatch, EventTypeIn, EventTypePatch
 
-router = APIRouter(prefix="/api/v2")
+router = APIRouter(prefix="/api")
 
 _EVENT_TYPE_NAME_TAKEN = "An event type with that name already exists"
 _EVENT_TYPE_MESSAGES = {

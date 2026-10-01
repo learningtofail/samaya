@@ -33,7 +33,7 @@ async function loadTypes() {
   byId('btnNewType').classList.toggle('hidden', !canWriteAnywhere());
   byId('typesViewerNote').classList.toggle('hidden', canWriteAnywhere());
   try {
-    EVENT_TYPES = await api('GET', '/api/v2/event-types', null, false, typesSlug());
+    EVENT_TYPES = await api('GET', '/api/event-types', null, false, typesSlug());
     renderTypes();
   } catch (e) {
     toast(e.message, true);
@@ -133,8 +133,8 @@ async function saveType() {
   TYPEF.saving = true;
   byId('btnSaveType').disabled = true;
   try {
-    if (TYPEF.editing) await api('PATCH', `/api/v2/event-types/${TYPEF.editing.id}`, payload, false, typesSlug());
-    else await api('POST', '/api/v2/event-types', payload, false, typesSlug());
+    if (TYPEF.editing) await api('PATCH', `/api/event-types/${TYPEF.editing.id}`, payload, false, typesSlug());
+    else await api('POST', '/api/event-types', payload, false, typesSlug());
     invalidateEventTypes();
     closeTypeModal();
     toast(TYPEF.editing ? 'Event type saved.' : 'Event type created.');
@@ -156,7 +156,7 @@ bindActions(byId('typesBody'), {
     const t = EVENT_TYPES.find((x) => x.id === parseInt(btn.dataset.id, 10));
     if (!t || !confirm(`Delete the event type "${t.name}"? This only works when no event uses it.`)) return;
     try {
-      await api('DELETE', `/api/v2/event-types/${t.id}`, null, false, typesSlug());
+      await api('DELETE', `/api/event-types/${t.id}`, null, false, typesSlug());
       invalidateEventTypes();
       toast('Event type deleted.');
       loadTypes();

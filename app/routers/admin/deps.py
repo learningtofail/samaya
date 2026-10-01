@@ -8,6 +8,7 @@ again) but now also checks the logged-in user actually has UserTenant
 access to it — the bridge period never enforced that, since the shared
 key implicitly trusted every holder with every tenant.
 """
+import os
 from dataclasses import dataclass
 
 from fastapi import Depends, Header, HTTPException, Request
@@ -15,15 +16,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
-from models.db import EventDefinition, Occurrence, Tenant, User, UserTenant
-from services.discord_posting import PLATFORM_BOT_TOKEN
+from models.db import Tenant, User, UserTenant
 from services.sessions import SESSION_COOKIE_NAME, read_session_token
 
-# PLATFORM_BOT_TOKEN moved to services/discord_posting.py (audit
-# remediation, Phase 2) — re-imported here since get_discord_config below
-# still needs it and this module isn't a natural place to define it (it's
-# not a FastAPI dependency, just a config constant most of this module's
-# actual callers care about for Discord posting reasons).
+# Fallback bot token for a Discord server that has none of its own.
+PLATFORM_BOT_TOKEN = os.environ.get("PLATFORM_BOT_TOKEN", "")
 
 
 async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)) -> User:
@@ -175,28 +172,6 @@ async def get_discord_config(tenant: Tenant = Depends(get_current_tenant)) -> Di
     return DiscordCreds(bot_token=token, guild_id=tenant.server.guild_id)
 
 
-async def get_occurrence_with_event(
-    occ_id: int, tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)
-) -> tuple[Occurrence, EventDefinition]:
-    from sqlalchemy import or_
-    result = await db.execute(
-        select(Occurrence, EventDefinition)
-        .join(EventDefinition)
-        .join(Tenant, EventDefinition.owning_tenant_id == Tenant.id)
-        .where(
-            Occurrence.id == occ_id,
-            or_(
-                Occurrence.tenant_id == tenant.id,
-                (EventDefinition.scope == "kingdom-wide") & (Tenant.kingdom_id == tenant.kingdom_id),
-            ),
-        )
-    )
-    row = result.one_or_none()
-    if not row:
-        raise HTTPException(status_code=404, detail="Occurrence not found")
-    return row
-
-
 async def check_target_access(db: AsyncSession, user: User, tenant_ids: list[int]):
     """A coordinator can only select tenants they hold UserTenant access
     to — matching the invite system's own access list, not a separately
@@ -232,6 +207,3 @@ async def resolve_target_tenants(db: AsyncSession, user: User, target_slugs: lis
     await check_target_access(db, user, [t.id for t in tenants_by_slug.values()])
     return tenants_by_slug
 
-
-# find_post_log moved to services/discord_posting.py (audit remediation,
-# Phase 2) — see that module's docstring. Import it from there.

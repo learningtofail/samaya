@@ -3,9 +3,9 @@
 // and reminders.js; occurrence-level edits live in schedule.js.
 //
 // Editing a recurring event first asks for a scope (spec §66.4a):
-//   this occurrence only  -> PATCH /api/v2/occurrences/{id}   (schedule.js)
-//   this and following    -> POST  /api/v2/events/{id}/split
-//   all occurrences       -> PATCH /api/v2/events/{id}
+//   this occurrence only  -> PATCH /api/occurrences/{id}   (schedule.js)
+//   this and following    -> POST  /api/events/{id}/split
+//   all occurrences       -> PATCH /api/events/{id}
 
 // ── State ────────────────────────────────────────────────────
 let EVENTS = [];
@@ -17,7 +17,7 @@ async function loadEventTypesFor(slug) {
   const tenant = tenantBySlug(slug);
   const key = tenant ? tenant.kingdom_id : slug;
   if (EVENT_TYPES_BY_KINGDOM[key]) return EVENT_TYPES_BY_KINGDOM[key];
-  const types = await api('GET', '/api/v2/event-types', null, false, slug);
+  const types = await api('GET', '/api/event-types', null, false, slug);
   EVENT_TYPES_BY_KINGDOM[key] = types;
   return types;
 }
@@ -39,7 +39,7 @@ async function loadEvents() {
   document.getElementById('btnNewEvent').classList.toggle('hidden', !canWriteAnywhere());
   document.getElementById('eventsViewerNote').classList.toggle('hidden', canWriteAnywhere());
   try {
-    EVENTS = await api('GET', '/api/v2/events', null, false, getTabFilter('events'));
+    EVENTS = await api('GET', '/api/events', null, false, getTabFilter('events'));
     renderEventTypeFilter();
     renderEventsTable();
   } catch (e) {
@@ -148,7 +148,7 @@ async function toggleEventActive(ev) {
   const turningOff = ev.active;
   if (turningOff && !confirm(`Deactivate "${ev.name}"? Its pending reminders are cancelled and any Discord events it created are removed. You can activate it again later.`)) return;
   try {
-    const res = await api('PATCH', `/api/v2/events/${ev.id}`, { active: !ev.active }, false, writeSlugForEvent(ev));
+    const res = await api('PATCH', `/api/events/${ev.id}`, { active: !ev.active }, false, writeSlugForEvent(ev));
     toastDiscordErrors(res.discord_errors, turningOff ? 'Event deactivated.' : 'Event activated.');
     loadEvents();
   } catch (e) { toast(e.message, true); }
@@ -157,7 +157,7 @@ async function toggleEventActive(ev) {
 async function deleteEvent(ev) {
   if (!confirm(`Delete "${ev.name}" permanently? This also removes the Discord events it created, cancels its pending reminders and deletes its schedule. This cannot be undone.`)) return;
   try {
-    await api('DELETE', `/api/v2/events/${ev.id}`, null, false, writeSlugForEvent(ev));
+    await api('DELETE', `/api/events/${ev.id}`, null, false, writeSlugForEvent(ev));
     toast('Event deleted.');
     loadEvents();
   } catch (e) { toast(e.message, true); }
@@ -757,12 +757,12 @@ async function saveEventForm() {
         reminder_minutes: f.reminder_minutes, alliances: f.alliances,
       };
       if (EVF.cover.current) payload.cover_image_data = EVF.cover.current;
-      await api('POST', '/api/v2/events', payload, false, f.ownerSlug);
+      await api('POST', '/api/events', payload, false, f.ownerSlug);
       toast('Event created.');
     } else if (EVF.mode === 'edit') {
       const changes = buildEventChanges(EVF.event, f, false);
       if (!Object.keys(changes).length) { toast('Nothing was changed.'); closeEventModal(); return; }
-      const res = await api('PATCH', `/api/v2/events/${EVF.event.id}`, changes, false, writeSlugForEvent(EVF.event));
+      const res = await api('PATCH', `/api/events/${EVF.event.id}`, changes, false, writeSlugForEvent(EVF.event));
       toastDiscordErrors(res.discord_errors, 'Changes saved to every occurrence.');
     } else {
       const changes = buildEventChanges(EVF.event, f, true);
@@ -770,7 +770,7 @@ async function saveEventForm() {
         showFormErrors([{ msg: 'Change at least one field. Otherwise there is nothing to split.' }]);
         return;
       }
-      const res = await api('POST', `/api/v2/events/${EVF.event.id}/split`,
+      const res = await api('POST', `/api/events/${EVF.event.id}/split`,
         { from_date: EVF.splitFrom, changes }, false, writeSlugForEvent(EVF.event));
       toastDiscordErrors(res.discord_errors, `Series split. The new version starts on ${EVF.splitFrom}.`);
     }

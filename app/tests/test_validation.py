@@ -1,208 +1,62 @@
-"""
-Tests for EventIn Pydantic validation.
-All bad inputs should return 422 with a readable detail message.
-All good inputs should return 201.
-"""
+"""Field validation on event creation (POST /admin/api/events). Bad input
+must be a 422 whose message names the offending field, not merely any 422:
+a missing `type_id` alone would also give 422, so every rejection test
+sends an otherwise valid body and checks the field name in the detail."""
+import pytest
 from httpx import AsyncClient
 
-
-VALID_EVENT = {
-    "name":            "Test Event",
-    "interval_days":   7,
-    "start_time_utc":  "19:00",
-    "duration_hours":  2.0,
-    "discord_channel": "#test",
-    "description":     "A test event",
-    "anchor_date":     "2025-05-01",
-}
+BASE = "/admin/api"
 
 
-# ── interval_days ─────────────────────────────────────────────
-
-class TestIntervalDaysValidation:
-
-    async def test_interval_zero_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "interval_days": 0}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
-        assert "interval" in r.json()["detail"].lower()
-
-    async def test_interval_negative_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "interval_days": -1}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
-
-    async def test_interval_one_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "interval_days": 1}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
-
-    async def test_interval_28_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "interval_days": 28}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
-
-    async def test_interval_string_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "interval_days": "weekly"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
+@pytest.fixture
+async def valid_event(client: AsyncClient) -> dict:
+    resp = await client.post(f"{BASE}/event-types", json={"name": "Validation"})
+    assert resp.status_code == 201, resp.text
+    return {
+        "type_id": resp.json()["id"], "name": "Test Event", "interval_days": 7,
+        "start_time_utc": "19:00", "duration_hours": 2.0, "anchor_date": "2026-05-01",
+    }
 
 
-# ── duration_hours ────────────────────────────────────────────
-
-class TestDurationValidation:
-
-    async def test_duration_zero_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "duration_hours": 0}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
-        assert "duration" in r.json()["detail"].lower()
-
-    async def test_duration_negative_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "duration_hours": -1}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
-
-    async def test_duration_half_hour_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "duration_hours": 0.5}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
-
-    async def test_duration_24_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "duration_hours": 24}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
+async def _create(client: AsyncClient, body: dict):
+    return await client.post(f"{BASE}/events", json=body)
 
 
-# ── start_time_utc ────────────────────────────────────────────
-
-class TestStartTimeValidation:
-
-    async def test_invalid_hour_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "start_time_utc": "25:00"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
-        assert "hour" in r.json()["detail"].lower() or "time" in r.json()["detail"].lower()
-
-    async def test_invalid_minute_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "start_time_utc": "19:60"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
-
-    async def test_invalid_format_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "start_time_utc": "7pm"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
-
-    async def test_midnight_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "start_time_utc": "00:00"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
-
-    async def test_end_of_day_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "start_time_utc": "23:59"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
-
-    async def test_single_digit_hour_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "start_time_utc": "9:00"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
+@pytest.mark.parametrize("field,value", [
+    ("interval_days", 0), ("interval_days", -1), ("interval_days", "weekly"),
+    ("duration_hours", 0), ("duration_hours", -1),
+    ("start_time_utc", "25:00"), ("start_time_utc", "12:60"), ("start_time_utc", "noon"),
+    ("anchor_date", "2026-02-30"), ("anchor_date", "05/01/2026"),
+    ("scope", "everyone"), ("scope", "Alliance"),
+    ("reminder_minutes", [-5]),
+    ("recurrence_kind", "monthly"),
+])
+async def test_invalid_value_is_rejected_and_names_the_field(client, valid_event, field, value):
+    resp = await _create(client, {**valid_event, field: value})
+    assert resp.status_code == 422, resp.text
+    assert field in resp.json()["detail"], resp.json()["detail"]
 
 
-# ── anchor_date ───────────────────────────────────────────────
-
-class TestAnchorDateValidation:
-
-    async def test_invalid_date_string_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "anchor_date": "not-a-date"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
-        assert "anchor" in r.json()["detail"].lower() or "date" in r.json()["detail"].lower()
-
-    async def test_wrong_format_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "anchor_date": "01/05/2025"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
-
-    async def test_valid_date_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "anchor_date": "2025-05-01"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
+@pytest.mark.parametrize("overrides", [
+    {"interval_days": 1}, {"interval_days": 28},
+    {"duration_hours": 0.5}, {"duration_hours": 24},
+    {"start_time_utc": "00:00"}, {"start_time_utc": "23:59"}, {"start_time_utc": "9:05"},
+    {"scope": "alliance"}, {"scope": "kingdom-wide"},
+    {"reminder_minutes": []}, {"reminder_minutes": [0]}, {"reminder_minutes": [60, 10]},
+    {"duration_hours": None}, {"recurrence_kind": "none", "interval_days": None},
+])
+async def test_valid_value_is_accepted(client, valid_event, overrides):
+    resp = await _create(client, {**valid_event, **overrides})
+    assert resp.status_code == 201, resp.text
 
 
-# ── notify_minutes_before ─────────────────────────────────────
-
-class TestNotifyMinutesValidation:
-
-    async def test_zero_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "notify_minutes_before": 0}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
-
-    async def test_negative_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "notify_minutes_before": -5}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
-
-    async def test_null_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "notify_minutes_before": None}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
-
-    async def test_omitted_accepted(self, client: AsyncClient):
-        data = {k: v for k, v in VALID_EVENT.items()}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
-
-    async def test_positive_value_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "notify_minutes_before": 60}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
+async def test_scope_defaults_to_alliance(client, valid_event):
+    resp = await _create(client, valid_event)
+    assert resp.json()["scope"] == "alliance"
 
 
-# ── multiple errors returned together ────────────────────────
-
-class TestMultipleErrors:
-
-    async def test_multiple_invalid_fields_reported(self, client: AsyncClient):
-        data = {
-            **VALID_EVENT,
-            "interval_days":  0,
-            "duration_hours": -1,
-        }
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
-        # Both errors should appear in the detail string
-        detail = r.json()["detail"]
-        assert "interval" in detail.lower() or "duration" in detail.lower()
-
-
-# ── scope ─────────────────────────────────────────────────────
-
-class TestScopeValidation:
-
-    async def test_alliance_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "scope": "alliance"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
-
-    async def test_kingdom_wide_accepted(self, client: AsyncClient):
-        data = {**VALID_EVENT, "scope": "kingdom-wide"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 201
-
-    async def test_default_when_omitted(self, client: AsyncClient):
-        r = await client.post("/admin/api/events", json=VALID_EVENT)
-        assert r.json()["scope"] == "alliance"
-
-    async def test_unknown_scope_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "scope": "everyone"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
-        assert "scope" in r.json()["detail"].lower()
-
-    async def test_wrong_case_rejected(self, client: AsyncClient):
-        data = {**VALID_EVENT, "scope": "Alliance"}
-        r = await client.post("/admin/api/events", json=data)
-        assert r.status_code == 422
+async def test_multiple_invalid_fields_are_all_reported(client, valid_event):
+    resp = await _create(client, {**valid_event, "interval_days": 0, "start_time_utc": "99:99"})
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert "interval_days" in detail and "start_time_utc" in detail

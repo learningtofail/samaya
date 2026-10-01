@@ -1,9 +1,8 @@
 """Delivery-engine routes for the unified event model (spec §66.4, §66.4a):
 per-occurrence edits, the "this and following" split, and the delivery log.
 
-Mounted under the same temporary /api/v2 prefix as unified_events.py.
+Mounted under /api, next to unified_events.py.
 """
-import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
@@ -31,13 +30,9 @@ from .unified_events import (
 )
 from .unified_schemas import EventPatch
 
-router = APIRouter(prefix="/api/v2")
+router = APIRouter(prefix="/api")
 
 MAX_MESSAGE_CHARS = 2000
-
-
-def engine_enabled() -> bool:
-    return os.environ.get("SAMAYA_UNIFIED_ENGINE", "").lower() in ("1", "true", "yes", "on")
 
 
 # --------------------------------------------------------------------------
@@ -395,9 +390,8 @@ async def delivery_health(
     )).scalar_one()
     overdue = round((now - ensure_utc(oldest)).total_seconds() / 60) if oldest is not None else 0
     return {
-        "engine_enabled": engine_enabled(),
         "window_days": 7,
         "counts": counts,
         "oldest_pending_overdue_minutes": overdue,
-        "healthy": engine_enabled() and counts.get("error", 0) == 0 and overdue <= 5,
+        "healthy": counts.get("error", 0) == 0 and overdue <= 5,
     }

@@ -29,7 +29,7 @@ from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from models.db import Base
-from models import get_db, get_session_factory
+from models import get_db
 from services.sessions import SESSION_COOKIE_NAME, create_session_token
 
 # In-memory SQLite — fast, isolated, no cleanup needed
@@ -141,7 +141,6 @@ async def client(db_engine, tenant, test_user):
             yield session
 
     app.dependency_overrides[get_db] = override_get_db
-    app.dependency_overrides[get_session_factory] = lambda: TestSessionLocal
 
     session_token = create_session_token(test_user["id"])
     async with AsyncClient(
@@ -168,7 +167,6 @@ async def client_no_session(db_engine):
             yield session
 
     app.dependency_overrides[get_db] = override_get_db
-    app.dependency_overrides[get_session_factory] = lambda: TestSessionLocal
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
@@ -205,7 +203,6 @@ async def make_user_and_client(db_engine):
             async with TestSessionLocal() as session:
                 yield session
         app.dependency_overrides[get_db] = override_get_db
-        app.dependency_overrides[get_session_factory] = lambda: TestSessionLocal
 
         session_token = create_session_token(user_id)
         client = AsyncClient(

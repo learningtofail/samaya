@@ -1,5 +1,5 @@
 """Unified event model, Phase 1 (spec §66): event types and event
-definitions through the admin API at /api/v2.
+definitions through the admin API at /api.
 
 The default `client` is a superadmin on purpose (see conftest.py); the
 permission tests use make_user_and_client for a deliberately unprivileged
@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from models.db import AuditLog, Event, EventAlliance, EventReminder, EventType
 
-BASE = "/admin/api/v2"
+BASE = "/admin/api"
 
 
 async def _make_type(client, **overrides):

@@ -1,12 +1,9 @@
 """Tests for spec §38: cross-alliance admin views, Tenant icon images,
 Kingdom branding titles, and the public last-activity endpoints.
 """
-from datetime import datetime, timezone
 
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.db import PostLog
 
 TINY_PNG_DATA_URI = (
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQV"
@@ -88,46 +85,6 @@ class TestKingdomBranding:
         )
         assert r.status_code == 403
         await viewer_client.aclose()
-
-
-class TestCombinedDashboard:
-
-    async def test_status_combined_mode(self, client: AsyncClient, tenant: dict, second_tenant: dict):
-        r = await client.get("/admin/api/status", headers={"X-Tenant-Slug": "*"})
-        assert r.status_code == 200
-        slugs = {a["tenant_slug"] for a in r.json()["alliances"]}
-        assert {tenant["slug"], second_tenant["slug"]} <= slugs
-
-    async def test_delivery_health_combined_mode_per_alliance_rows(
-        self, client: AsyncClient, db_session: AsyncSession, tenant: dict, second_tenant: dict
-    ):
-        now = datetime.now(timezone.utc)
-        db_session.add(PostLog(
-            tenant_id=tenant["id"], event_name="Siege", occurrence_date=now.date(),
-            discord_guild_id="g", posted_at_utc=now, status="posted",
-        ))
-        await db_session.commit()
-
-        r = await client.get("/admin/api/delivery-health", headers={"X-Tenant-Slug": "*"})
-        rows = {a["tenant_slug"]: a for a in r.json()["alliances"]}
-        assert rows[tenant["slug"]]["event_posts"]["posted"] == 1
-        assert rows[second_tenant["slug"]]["event_posts"]["posted"] == 0
-
-
-class TestCombinedSync:
-
-    async def test_sync_combined_mode_returns_per_alliance_rows(
-        self, client: AsyncClient, tenant: dict, second_tenant: dict
-    ):
-        r = await client.get("/admin/api/sync/discord", headers={"X-Tenant-Slug": "*"})
-        assert r.status_code == 200
-        rows = r.json()["alliances"]
-        slugs = {a["tenant_slug"] for a in rows}
-        assert {tenant["slug"], second_tenant["slug"]} <= slugs
-        # Each row is self-contained (either a real "summary" or an
-        # "error", never a top-level exception) since one alliance's
-        # Discord/token trouble must not take down every other row.
-        assert all(("summary" in a) or ("error" in a) for a in rows)
 
 
 class TestDiscordConfigOverview:
