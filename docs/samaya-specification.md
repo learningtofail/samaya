@@ -2,6 +2,118 @@
 
 **Repository:** github.com/learningtofail/samaya
 **Version:** 1.34.0 · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
+**Last reconciled with the code:** 2026-10-01, repository commit `4cb4d15`. Part I below is the authoritative current state. Part II keeps the original section-by-section record; where Part II and Part I differ, Part I wins.
+
+# Part I: Current State
+
+This part describes Samaya as it exists now. It is rewritten when the system changes, so it is the place to start. The numbered sections in Part II explain why each piece was built and are not edited to track later changes, except for short corrections.
+
+## CS.1 What the system is
+
+A self-hosted, multi-tenant event scheduler for the Kingshot community on Kingdom 138. Each alliance is a tenant. The system generates recurring event occurrences, posts them to Discord as Scheduled Events, sends pre-event reminders and scheduled announcements, publishes public pages and ICS calendar feeds, and runs a public feedback board.
+
+## CS.2 Stack and process model
+
+| Layer | Current state |
+|---|---|
+| API | FastAPI on Uvicorn, one worker only (APScheduler runs in the web process; a second worker duplicates every job) |
+| Data | SQLAlchemy 2.0 async, asyncpg, PostgreSQL 16 |
+| Schema changes | Alembic only (`app/alembic/`, baseline `6fc935931248`). Startup no longer creates tables. Production must adopt the baseline with `alembic stamp head` before any new revision (not yet confirmed as done); new revisions run with `alembic upgrade head` before the restart |
+| Scheduling | APScheduler, in process, UTC |
+| Frontend | Static HTML, CSS and JS, no build step and no framework. Classic script tags, not ES modules |
+| Auth | Discord OAuth2 with signed session cookies; `SameSite=Strict` is the CSRF defense |
+| Tooling | Ruff (Python), ESLint (public page scripts only), pytest (SQLite), vitest (public page pure functions) |
+
+## CS.3 Tenancy and data model
+
+- **Kingdom**: a Kingshot game server. Carries optional `public_site_title` and `admin_console_title` (§38.7).
+- **Tenant**: an alliance, with `color` and an optional `icon_image_data` (a data URI, §38.7). It points at a **DiscordServer**, which holds `guild_id`, `bot_token` and `public_key`. Several tenants may share one DiscordServer, and a shared guild gets exactly one Discord Scheduled Event per occurrence (§52).
+- **Event scope**: `alliance` or `kingdom-wide`. A kingdom-wide event has one `Occurrence` and one independent `PostLog` row per tenant. Alliance-scope events can also reach other tenants through explicit `EventTarget` rows (§20). Kingdom-wide visibility is independent of notification targets (§61).
+- **Tables**: `kingdoms`, `tenants`, `discord_servers`, `users`, `user_tenants`, `user_kingdoms`, `invites`, `audit_log`, `event_definitions` (with `cover_image_data`, §35), `event_tenant_notifications`, `event_targets`, `occurrences`, `post_log`, `announcements` (with `scope`, `recurring`, `interval_days`, `event_offset_minutes`), `announcement_targets`, `announcement_templates`, `tickets`, `ticket_votes`, `scheduler_state`.
+- All timestamps are UTC. Use `services/time_utils.ensure_utc()` when reading them, because asyncpg and aiosqlite differ on `tzinfo`.
+
+## CS.4 Roles and access
+
+- Access is by invite only. Discord OAuth is the only authentication and the only way a user is created. There is no self-service signup.
+- Backend roles: `owner`, `coordinator`, `viewer` per tenant (`user_tenants`), a separate kingdom-coordinator grant (`user_kingdoms`, superadmin-issued, not implied by owning an alliance), and the superadmin flag, bootstrapped only from `SUPERADMIN_DISCORD_IDS`.
+- A `viewer` can read everything a coordinator can but every mutating call returns 403 (`require_not_viewer`).
+- The admin UI shows two tiers: superadmin, and everyone else. Access, Platform and Audit Log are superadmin-only in the UI. The backend role checks are unchanged underneath (§38.6).
+
+## CS.5 API surface
+
+Public, unauthenticated:
+- Pages: `/events`, `/t/{slug}/events`, `/feedback`.
+- Data: `/api/events`, `/t/{slug}/api/events`, `/api/alliances`, `/api/kingdom-branding`, `/api/last-activity`, `/t/{slug}/api/last-activity`, `GET/POST /api/tickets`, `POST /api/tickets/{id}/vote`.
+- Calendars: `/ics/events.ics` and `/t/{slug}/ics/events.ics`.
+- Other: `/health`, `POST /webhooks/discord` (signature verified).
+- The three ticket endpoints are rate limited per client IP (§65).
+
+Auth: `/auth/login`, `/auth/discord/callback`, `/invite/{token}`, `POST /auth/logout`, and two static failure pages.
+
+Admin (`/admin`, session required, tenant chosen by the `X-Tenant-Slug` header): events (CRUD, notification override, CSV import and export), occurrences (list, patch, post, remove from Discord), announcements (CRUD, cancel, retry failed targets), announcement templates, post log, Discord sync, Discord config, scheduler preview and regenerate, status and delivery health, audit log, invites and members, kingdoms, tenants, Discord servers, users, tickets triage, and `/api/me`. The authoritative route list is the router files listed in `CLAUDE.md`.
+
+## CS.6 Background jobs
+
+| Job | Schedule | Purpose |
+|---|---|---|
+| `regenerate_occurrences` | Daily 00:00 UTC, and on demand per tenant | Rebuild occurrences from event definitions |
+| `send_pre_event_reminders` | Every minute | Pre-event Discord pings |
+| `send_scheduled_announcements` | Every minute | Deliver due announcements per target; a recurring one re-arms (§13.5) |
+| `auto_post_upcoming_occurrences` | Daily 16:00 UTC | Post occurrences starting within 7 days; flag conflicts, never overwrite (§51) |
+
+Every job function takes an injectable `session_factory`, because jobs run outside any request.
+
+## CS.7 Frontend
+
+- **Admin console** (`admin.html`, `admin.css`, `js/*.js`): PatternFly, one script per view, tab order Dashboard, Events, Announcements, Schedule (table or timeline), Post Log, Sync, Config, Tickets, Access and Platform, Audit Log (§38). Each view has its own alliance filter kept in `localStorage`. No inline styles or inline event handlers in the markup (§65). The `js/*.js` files are not covered by ESLint.
+- **Public events page** (`events.html`, `events.css`, `events-public.js`): standalone light theme with a gold accent, no PatternFly. One IIFE with no globals. Alliance filter chips, a live-now hero with countdown, schedule grouped by day, list and calendar views, 24-hour time, and a time zone choice kept under `samaya_display_tz` (§62). Pure functions are unit tested through the `__SAMAYA_TEST__` hook.
+- **Feedback board** (`feedback.html`, `.css`, `.js`): separate files, same conventions as the events page (§40 to §43, §65).
+- Cloudflare caches `/static/*` by extension, so every static change bumps `STATIC_ASSET_VERSION` in `services/static_assets.py`.
+
+## CS.8 Configuration, deployment and operations
+
+- Variables: `DB_PASSWORD`, `SECRET_KEY`, `DISCORD_OAUTH_CLIENT_ID`, `_SECRET`, `_REDIRECT_URI`, `SUPERADMIN_DISCORD_IDS`, `PLATFORM_BOT_TOKEN`, `PLATFORM_PUBLIC_KEY`, and the SMTP settings. The app refuses to boot without `SECRET_KEY` and the OAuth client ID and secret.
+- Docker Compose runs `app` (127.0.0.1:8000) and `db` (postgres:16-alpine). Caddy runs natively on `lxc-taraka`, outside the repository and outside Compose, in front of the app. Its config is `/etc/caddy/Caddyfile` with `admin off`, so a change needs `systemctl restart caddy`, and each new public route needs a matching `reverse_proxy` line there. Cloudflare Tunnel and Access sit in front of that, and Access gates `/admin`.
+- Deploy: apply the patch locally, commit, push, then on `lxc-taraka` pull, run `alembic upgrade head` if a migration is included, and restart.
+- Backups: `ops/backup.sh` takes a nightly gzipped `pg_dump` with 14 day rotation (cron on the LXC host), and `restic` covers `/opt/taraka/postgres/`.
+- Recovery: `docs/rollback-runbook.md` covers code rollback, Alembic downgrade (and when it cannot be trusted), and restore from a dump.
+
+## CS.9 Testing and CI
+
+- pytest runs against in-memory SQLite and never touches production. The suite is organized by what is tested; see `CLAUDE.md` for the file list.
+- vitest covers the public events page's pure functions.
+- CI (`.github/workflows/ci.yml`, every push and pull request to `master`): pytest after `ruff check`, a frontend job (ESLint and vitest), a Docker build that boots the image against a real Postgres and checks `/api/kingdom-branding`, and an `alembic upgrade head` plus `alembic check` job that fails when a model change has no migration.
+
+## CS.10 Conventions
+
+- UTC everywhere; normalize with `ensure_utc()`.
+- Admin routes scope by `X-Tenant-Slug`; public routes scope by `/t/{slug}`, because calendar apps cannot send headers.
+- Reuse `deps.py` checks and `services/db_errors.py` instead of writing inline lookups or substring-matching driver errors.
+- Update `CLAUDE.md` when files are added, removed or renamed, and this spec first for any functional change.
+
+## CS.11 Known issues and open work
+
+- **Recurring announcements do not re-post (reported, not diagnosed).** See §13.5. Not being fixed: the announcement code is replaced by §66.
+- **Delivery tick hazards (confirmed in code).** One failing announcement blocks later ones in the same tick, and a send followed by a rollback can duplicate a post. §66.4 designs both out.
+- **Planned, not built:** §66 unified event model, the current priority. §63 alliance branding and §64 scheduled theme resolution are deferred.
+- **Roadmap ideas** are collected in §44.
+- **Known gaps:** no per-tenant custom Discord Interactions endpoint (§22); anonymous votes are per browser, not per person; the public page has no analytics; admin `js/*.js` has no lint coverage; Google Fonts load from an external host unless self-hosted.
+
+## CS.12 Section map
+
+| Group | Sections |
+|---|---|
+| Original baseline, corrected where facts changed | 1 to 12 |
+| Current and still describing the system | 13, 15, 17 (tab list superseded, rationale kept), 19 (server name column, admin UI superseded by 38.5), 20 to 35, 37, 38, 40 to 46, 49 to 53, 55 to 57, 59 to 62 |
+| Planned | 66 (unified event model, replaces 13, 20, 27, 37, 49, 50 when built) |
+| Deferred | 63, 64 |
+| Reconciliation and audit remediation | 65 |
+| Archived (fully superseded) | 14, 18, 36, 39, 47, 54, 58 |
+| Intentionally empty | 16, 48 |
+
+# Part II: Specification Sections
+
+The sections below are the original build-up record, kept for the reasoning behind each decision. Sections that were fully replaced are in the Archive at the end. Section numbers never change, so cross-references still resolve.
 
 ## 1. Purpose and Scope
 
@@ -22,7 +134,7 @@ Samaya is a self-hosted, multi-tenant event scheduler for the Kingshot game comm
 | Deployment | Docker Compose (app + db); Caddy reverse proxy and Cloudflare Tunnel/Access sit in front, outside this repo |
 | Calendar export | `icalendar` (ICS feeds) |
 | Discord signature verification | `pynacl` |
-| Migrations | Alembic is a listed dependency but has never actually been used; the one production schema migration (`migrate_to_multitenant.py`) was hand-written and run once |
+| Migrations | Alembic (`app/alembic/`) is the only convention for schema changes, from the baseline revision `6fc935931248` onward (§65). The ten earlier hand-written `migrate_*.py` scripts are historical and never run again |
 
 ### 2.2 Process model
 
@@ -30,12 +142,12 @@ A single Uvicorn worker is mandatory. APScheduler runs in-process inside the Fas
 
 ### 2.3 Startup behavior (`app/main.py`)
 
-The app refuses to boot if `SECRET_KEY`, `DISCORD_OAUTH_CLIENT_ID`, or `DISCORD_OAUTH_CLIENT_SECRET` are unset (fail-closed, replacing a prior shared `X-Admin-Key` scheme). On startup the lifespan handler creates all tables, then for every tenant checks whether occurrence regeneration is overdue (no state row, or last run >25 hours ago) and runs a catch-up regeneration across all tenants if so. It then registers three APScheduler jobs and starts the scheduler.
+The app refuses to boot if `SECRET_KEY`, `DISCORD_OAUTH_CLIENT_ID`, or `DISCORD_OAUTH_CLIENT_SECRET` are unset (fail-closed, replacing a prior shared `X-Admin-Key` scheme). On startup the lifespan handler no longer creates tables (schema is Alembic's job, run as a deploy step, §65). It checks, for every tenant, whether occurrence regeneration is overdue (no state row, or last run >25 hours ago) and runs a catch-up regeneration across all tenants if so. It then registers four APScheduler jobs and starts the scheduler.
 
 ## 3. Multi-Tenancy Model
 
 - **Kingdom**: a Kingshot game server (e.g. "Kingdom 138"), distinct from a Discord server. Holds multiple Tenants.
-- **Tenant**: an alliance. Each has its own Discord guild, admin access, and optionally its own bot token/public key (nullable — falls back to the platform-wide bot/public key if unset). Tenants can share a guild or a bot token.
+- **Tenant**: an alliance. Each has its own admin access and references a `DiscordServer` (§25), which carries the guild ID, bot token and public key; the bot token falls back to the platform-wide bot token if unset. Several tenants can share one `DiscordServer`.
 - **Scope**: every `EventDefinition` is either `alliance` (single tenant) or `kingdom-wide` (fans out to every tenant in the owning tenant's Kingdom). A kingdom-wide event has exactly one `Occurrence` row but produces one independent `PostLog` row per tenant when posted — each tenant's Discord post succeeds, fails, or is cancelled independently.
 - Being an `owner` of one alliance does **not** grant kingdom-wide event rights. That is a separate `UserKingdom` grant, issued only by a superadmin.
 
@@ -48,7 +160,11 @@ Public routes scope by URL path segment (`/t/{tenant_slug}/...`) because calenda
 | Table | Purpose |
 |---|---|
 | `kingdoms` | Game server; `name`, unique `slug` |
-| `tenants` | Alliance; `kingdom_id`, `slug`, `guild_id`, optional `bot_token`/`public_key`, `color` |
+| `tenants` | Alliance; `kingdom_id`, `server_id` (FK to `discord_servers`), `slug`, `color`, optional `icon_image_data` (§38.7). Guild and bot credentials live on `discord_servers`, not here (§25) |
+| `discord_servers` | A Discord guild with its `guild_id`, `bot_token` and `public_key`; shared by every tenant that points at it (§25) |
+| `event_targets` | Explicit extra notification destinations for an event, independent of Kingdom membership (§20) |
+| `announcement_templates` | Reusable named starting points for announcements (§27) |
+| `tickets`, `ticket_votes` | The public feedback, request and error-report board and its anonymous upvotes (§40 to §43) |
 | `users` | Discord-identified person; created only on first OAuth login, never on invite creation; `is_superadmin` flag |
 | `user_tenants` | Per-user, per-tenant grant; `role` ∈ {`owner`, `coordinator`, `viewer`} — see §31 for `viewer` |
 | `user_kingdoms` | Per-user, per-kingdom grant of kingdom-wide event rights (flag only, no sub-tiers) |
@@ -72,6 +188,9 @@ Every timestamp is UTC. `services/time_utils.ensure_utc()` normalizes `tzinfo` b
 - `GET /t/{tenant_slug}/events` — renders `static/events.html`
 - `GET /t/{tenant_slug}/ics/events.ics` — public ICS feed
 - `GET /health`
+- `GET /events`, `GET /api/events`, `GET /ics/events.ics` — the combined, all-alliance versions of the three per-tenant routes above
+- `GET /api/alliances`, `GET /api/kingdom-branding`, `GET /api/last-activity` (and `/t/{tenant_slug}/api/last-activity`) — public page support
+- `GET /feedback`, `GET/POST /api/tickets`, `POST /api/tickets/{id}/vote` — the public feedback board (§40 to §43)
 
 ### 5.2 Auth
 
@@ -106,13 +225,14 @@ Manually triggering a regeneration requires a logged-in session and an `X-Tenant
 
 ## 6. Background Jobs (`app/scheduler/`)
 
-Three independent jobs, each in its own file (split from an earlier monolithic `jobs.py`). Every public function accepts an optional `session_factory` (default `models.AsyncSessionLocal`) since jobs run outside any HTTP request and can't use FastAPI's `get_db` dependency — tests must inject a test session factory or the job will hit the real database.
+Four independent jobs, each in its own file (split from an earlier monolithic `jobs.py`). Every public function accepts an optional `session_factory` (default `models.AsyncSessionLocal`) since jobs run outside any HTTP request and can't use FastAPI's `get_db` dependency — tests must inject a test session factory or the job will hit the real database.
 
 | Job | Schedule | Function |
 |---|---|---|
 | Occurrence regeneration | Daily, UTC 00:00, plus on-demand per tenant | Rebuilds `occurrences` from `event_definitions` + recurrence rules |
 | Pre-event reminders | Every minute | `send_pre_event_reminders` |
 | Scheduled announcements | Every minute | `send_scheduled_announcements`; independent per-`AnnouncementTarget` delivery |
+| Auto-post upcoming occurrences | Daily, UTC 16:00 | `auto_post_upcoming_occurrences` (§51) |
 
 ## 7. Services Layer (`app/services/`)
 
@@ -187,6 +307,8 @@ Run via: `pip install -r app/requirements-dev.txt && cd app && pytest`. `require
 
 ## 13. Admin UI — Announcements
 
+**Replacement planned:** §66 (unified event model) merges announcements into events. Remains accurate for the running code until that ships.
+
 **Status:** Implemented and deployed. All three revisions specced below (recurring delivery, the leadership/general distinction, live Discord channel dropdowns) are live: `routers/admin/announcements.py`, `scheduler/announcements.py`, the `leadership_only`/`recurring`/`interval_days` columns on `announcements` (§4), `admin.html`'s Announcements tab, and `js/announcements.js`.
 
 ### 13.1 Relationship to Events
@@ -249,16 +371,14 @@ In `scheduler/announcements.py`'s per-minute job, when a due announcement has `r
 
 **Out of scope for v1:** a fixed occurrence count or an end date for a recurring series (e.g. "repeat 10 times" or "repeat until March"). The interval-only model matches what was asked for; a bounded series is a natural follow-up if needed later, but adds another field and another piece of scheduler logic that wasn't requested.
 
+**Known issue (2026-10-01, diagnosis only, no fix designed).** Recurring announcements were reported to deliver the first round and then not post again. A static review found the re-arm logic correct and covered by `test_recurring_announcement_rearms_instead_of_going_terminal`, so the cause is expected in production data, scheduler runtime, or an unhandled failure. Two structural hazards were confirmed regardless of cause: the delivery tick runs inside one `try`/`except` with a single rollback, so one failing announcement blocks every announcement after it in that tick; and the Discord send and the database commit are not atomic, so a rollback after a successful send can cause a duplicate post on the next tick. See Part I, section CS.11. **Resolution (2026-10-01):** the cause will not be diagnosed. Announcements are being replaced by the unified event model (§66), which removes this recurrence implementation.
+
 ### 13.6 Out of Scope
 
 - Draft/save-without-scheduling workflow. Not needed: creation always goes straight to `status="scheduled"`, and the `draft` value in the schema stays unused.
 - Editing a scheduled announcement's body/time/recurrence before it fires. Not needed: cancel-and-recreate is the intended workflow, matching the API's cancel-only surface (no update endpoint). (Built in §49 — `PATCH /api/announcements/{id}` now supports in-place editing while `status == "scheduled"`.)
 - Rich Discord embeds (the API sends plain markdown text via the same `send_channel_message` path used for occurrence pings).
 - Gating `leadership_only` behind a permission check (e.g. restricting it to owners or kingdom coordinators). It is a display/categorization flag only, same as it is for events.
-
-## 14. Admin UI — Combined Multi-Tenant View
-
-**Superseded by §38.** This section's design (a `tenantPicker` "All my alliances" option, a single global combined-mode flag alongside `getCurrentTenantSlug()`/`setCurrentTenantSlug()`, and Config/Access/Platform/Announcements staying single-tenant-only) was the first version of cross-alliance viewing. §38 replaced it outright: the header tenant picker was removed entirely, every combined-capable tab gained its own independent per-tab alliance filter (`getTabFilter`/`setTabFilter`, `COMBINED_SLUG = '*'`), and Announcements became combined-capable too (via `get_current_tenants` and its own `announcementsFilter`). See §38 for the current model; §14.4's rejection of merging tenants into one row, and its "writes stay single-tenant" principle, both still hold under §38's design.
 
 ## 15. Time Zone Display — Header Control (Admin) and Public Events Page
 
@@ -314,10 +434,6 @@ That list is superseded in two ways by later sections: Gantt is no longer its ow
 
 Rationale for the original grouping still holds for the tabs it covers: Events and Announcements are adjacent since both are coordinator-authored, scheduled content (§20's shared target-validation logic); Schedule/Post Log are the "what's actually happening" occurrence-tracking group; Sync/Config are tenant-level admin; Access & Platform and Audit Log are last, being the least-frequently-used, highest-privilege (superadmin-only, §38.6) tabs. No functional change from reordering alone — `showView()`/`applyRoleVisibility()` in `common.js` look up tabs by `id`, not position.
 
-## 18. Platform — Tenant Editing
-
-**Superseded.** This section's `prompt()`-chain editor (pre-filled `name`/`slug`/`guild_id` prompts, a `bot_token` prompt with a `CLEAR` keyword) no longer exists in either shape it once had: §25 moved `guild_id`/`bot_token`/`public_key` off `Tenant` entirely onto `DiscordServer` (so a Tenant edit was never going to prompt for a bot token again), and §38.7 replaced the whole prompt-chain mechanism with a real **Tenant** modal (`platform.js`'s `openTenantModal()`/`saveTenantModal()`) — needed once the modal also had to handle a file-picker upload for the tenant's icon. See §25 for where bot credentials live now and §38.7 for the current Tenant create/edit UI.
-
 ## 19. Config — Server Name Column
 
 **Status:** Implemented and deployed. The Config tab's Channels table only ever showed a channel's name and Discord ID, with no indication of which physical Discord server it belongs to — a gap that matters because a **Tenant** (alliance) and a **Discord guild** are not one-to-one: MOD and NSR, for example, share one `guild_id`, and HTD is described as the de facto Kingshot-wide server. Added:
@@ -329,6 +445,8 @@ Rationale for the original grouping still holds for the tabs it covers: Events a
 **Admin UI superseded by §38.5.** The single-tenant Channels table with a Server column (described above as originally built) was replaced by a Discord Config tab that groups by `DiscordServer` instead of by Tenant — a `<details>` accordion section per server, since more than one alliance can share one server and a flat per-tenant table would repeat that server's identical channel/role list under each alliance's name. `get_guild_info`/`GET /api/discord/guild` (above) is still the function that resolves a server's display name; it's now called from `GET /api/discord/config-overview` (§38.5) rather than rendered as a per-row table column.
 
 ## 20. Events — Multi-Server Notification Targets
+
+**Replacement planned:** §66 replaces event targets with `event_alliances`. Remains accurate for the running code until that ships.
 
 **Status:** Implemented and deployed. Originally specced as a Discord-*posting* multi-target mechanism mirroring Announcements' (`{tenant_slug, discord_channel_id}`); revised during implementation once it became clear the actual complaint driving this (event notifications reaching only one channel/role) is about the **pre-event ping**, not the Discord Scheduled Event post itself — the ping is the only piece that's genuinely per-guild-channel-scoped. The event's own Discord Scheduled Event `location` field (`discord_channel`) is free text reused identically across every target's guild already (see kingdom-wide fan-out, unchanged), so there was nothing to generalize there.
 
@@ -391,7 +509,7 @@ Rationale for the original grouping still holds for the tabs it covers: Events a
 
 - No per-tenant custom Discord Interactions Endpoint support — all inbound webhooks go through one platform-level endpoint verified against `PLATFORM_PUBLIC_KEY`.
 - No named recurrence types (weekly, monthly, etc.) — recurrence is purely interval-in-days from an anchor date.
-- Alembic is declared as a dependency but unused; schema changes to date have been hand-written, one-off migration scripts.
+- ~~Alembic is declared as a dependency but unused.~~ Corrected: Alembic is now the only schema-change convention (§65). The hand-written scripts remain in the repo as a record only.
 - Audit log is append-only and explicitly not a rollback mechanism, since many logged actions have already reached Discord by the time they're logged.
 - A separate architecture document ("Samaya Self-Hosted Architecture PRD v2.0", Google Drive) predates the multi-tenant/auth rework and is superseded by the repository's own `CLAUDE.md`, which this specification is derived from alongside direct inspection of the source.
 
@@ -448,7 +566,7 @@ Addresses a real gap: once an announcement reaches a terminal state (`posted`/`f
 
 ### 25.1 Migration Plan
 
-Hand-written, idempotent script (no Alembic in this repo, per established convention — §22), run once before the app restarts on that deploy:
+Hand-written, idempotent script (no Alembic in this repo, per established convention — §22), run once before the app restarts on that deploy: (Historical: since §65, new schema changes use Alembic revisions instead.)
 
 1. For each distinct `guild_id` currently on `tenants`, create one `discord_servers` row. Name it after the first tenant found with that `guild_id` (a human can rename it afterward via the new Platform UI).
 2. **Bot token conflict resolution**: if multiple tenants share a `guild_id` and have *different* non-null `bot_token` values today (a real possibility, since nothing enforced consistency before this), the migration cannot silently pick one — it logs every such conflict (guild_id, the differing tenant slugs, and which token it chose) to stdout for manual review, and defaults to the **first non-null token found**, ordered by `tenant.id`. This is a real data-quality question that needs eyes on the actual production values, not something to guess safely from here.
@@ -501,6 +619,8 @@ The masthead's Log Out button uses PatternFly's `pf-m-secondary` button variant,
 - Deduplicating the clock/modal implementation between `admin.html` and `events.html` into a shared file — out of scope per §22's established standalone-page convention for the public events page.
 
 ## 27. Announcement Templates
+
+**Replacement planned:** §66 replaces templates with event types. Remains accurate for the running code until that ships.
 
 **Status:** Implemented, pending deployment. §27.1's migration script must run against production before the new application code is deployed, same order as every other schema-changing migration in this repo.
 
@@ -742,15 +862,9 @@ The masthead's Log Out button uses PatternFly's `pf-m-secondary` button variant,
 - Server-side image resizing, cropping, or re-encoding — whatever the admin uploads (subject to the format/size checks above) is exactly what Discord receives; getting the aspect ratio Discord recommends (16:9) is left to the admin picking a reasonably-shaped source image, same as this app has never resized a Discord avatar/icon anywhere else either.
 - Bulk import/export (§32.1) carrying cover images — `_BULK_EVENT_COLUMNS` is unchanged; a multi-megabyte base64 blob per row would make the CSV format actively worse for its one real use case (skimming/editing event lineups in a spreadsheet), so an imported event always starts with no cover image, set afterward through the modal if wanted.
 
-## 36. Public Events Page: Off-Center Layout Fix
-
-**Superseded by §62.** This was a PatternFly-specific CSS fix (`.pf-v6-c-page` grid-template-area quirk) for the old `events.html`. §62's redesign dropped PatternFly from the public events page entirely in favor of a standalone `events.css`, so the class this section patched no longer exists on that page and the underlying bug it fixed isn't applicable to the current layout. `admin.html` still uses PatternFly and still carries the equivalent fix for itself, unaffected by this.
-
-### 36.1 Out of Scope
-
-- Auditing every other PatternFly component on `admin.html` for the same grid-auto-placement class of bug — this fix addressed the one reported symptom (the page-level container) on the page that had it, not a general PatternFly-hardening pass. `events.html` no longer uses PatternFly at all (§62), so this bullet no longer applies there.
-
 ## 37. Public Events Page: Announcements and Notification Lead Time
+
+**Replacement planned:** §66 lists duration-less events as messages instead of announcements. Remains accurate for the running code until that ships.
 
 **Status:** Implemented, pending deployment. Server-side query/serialization change plus client-side rendering — no migration, no new tables (every field used already existed).
 
@@ -844,15 +958,6 @@ A thin strip on `events.html` (`#lastActivityMarquee`), under the masthead's inf
 - Any change to the `UserTenant`/`is_superadmin` access-control model itself, or to what any of the three roles can actually do server-side — §38.6's two-tier model is a UI visibility simplification only.
 - Granular (more than two-tier) UI role distinctions — explicitly deferred per the user's own stated assumption that this deployment doesn't have enough distinct admins to warrant it yet.
 - A live re-fetch of Discord's actual current channel/role list on every Discord Config page load — the accordion (§38.5) shows this app's own stored config, exactly as the old single-tenant page already did.
-
-## 39. Public Status/Kind Legend
-
-**Superseded by §62.** The always-visible legend card this section built (`#statusLegend`/`renderLegend()`, first thing in `<main>`, no dismiss control by design) is gone: §62's redesign replaced it with a collapsed-by-default "Key ▾" panel the visitor opens on demand. The underlying goal — explaining the kind badges and status vocabulary somewhere on the page — is still met by that panel; only the always-visible-card mechanism this section specified no longer exists.
-
-### 39.1 Out of Scope
-
-- A dismiss/collapse control for returning visitors — at the time, the legend was judged short enough not to need one. (Effectively superseded by §62, which made the legend a collapsed-by-default panel instead.)
-- Per-alliance customization of the legend's wording — still true: the status vocabulary remains fixed and shared across every alliance.
 
 ## 40. Feedback Form
 
@@ -957,7 +1062,7 @@ The public page has no login, so "one vote per person" is approximated rather th
 
 ### 43.4 Migration
 
-A new hand-written, idempotent migration script (`migrate_add_tickets.py`, same no-Alembic convention as every prior schema change) creates `tickets` and `ticket_votes`.
+A new hand-written, idempotent migration script (`migrate_add_tickets.py`, same no-Alembic convention as every prior schema change) creates `tickets` and `ticket_votes`. (Historical: since §65, new schema changes use Alembic revisions instead.)
 
 ### 43.5 Out of Scope
 
@@ -1034,15 +1139,13 @@ Every row-level click handler (`handleRowPreviewClick`, `common.js`) ignores cli
 - A live re-fetch of Discord's actual current role/channel names for the public page's preview — the public page has no authenticated path to that data at all (see §46.2); this is an inherent limitation of previewing from an unauthenticated context, not a bug.
 - Any interactivity in the preview itself (actually clicking "Interested," reacting, replying) — it's a static visual approximation, not an embedded Discord widget.
 
-## 47. Calendar View Legibility and Accessibility Pass
-
-**Superseded by §62.** This section's fixes were all CSS/markup changes to the old PatternFly-based `events.html` (`.cal-item`, `.samaya-legend-kinds`, `.samaya-modal-close`, `buildEventCardHtml`'s cards) — none of those classes or functions exist in the page §62 replaced it with. The goals this section addressed (legible calendar items, a scannable legend, larger touch targets, full keyboard access) carried forward as requirements into §62's rewrite, which built its own accessibility pass (skip link, focus rings, `aria-expanded`/`aria-pressed`, Escape-to-close, `prefers-reduced-motion`, 44px touch targets) from scratch rather than reusing this section's specific fixes.
-
 ## 48. Reserved
 
 (Number skipped in the working session that produced §47/§49 — no content was ever assigned to it.)
 
 ## 49. Combined Owning-Alliance/Scope Selector, Event/Announcement Reassignment, and In-Place Announcement Editing
+
+**Replacement planned:** §66 merges announcement editing into event editing. Remains accurate for the running code until that ships.
 
 **Status:** Implemented.
 
@@ -1076,6 +1179,8 @@ Follow-up feedback on the same batch: the Alliance Events, Leadership Notificati
 Out of scope: resolving channel/role names server-side into the API response itself (kept as a client-side, cached lookup — consistent with how the Announcement composer's own preview already resolves mentions).
 
 ## 50. Scheduled Announcements in the Admin Schedule View
+
+**Replacement planned:** §66 merges announcements into the Schedule view of events. Remains accurate for the running code until that ships.
 
 **Status:** Implemented.
 
@@ -1152,10 +1257,6 @@ Both public endpoints now attach `notification_channel_name` to every row: `GET 
 - Showing the role that gets pinged — see above; only the channel is exposed publicly.
 - A live Discord API call per page view — see the caching rationale above; a coordinator who renames a channel won't see the public page reflect it for up to 5 minutes.
 
-## 54. Legend Badge Truncation Fix
-
-**Superseded by §62.** This was a CSS fix (`.samaya-legend-item`, PatternFly's `.pf-v6-c-label__text`) for the always-visible legend §39 built, which §62's redesign replaced with a collapsible "Key" panel using entirely new markup/CSS — the classes this fix touched no longer exist on the page.
-
 ## 55. Lower-Friction "Add to Calendar"
 
 **Status:** Implemented.
@@ -1198,10 +1299,6 @@ Only the combined view is affected (`COMBINED_MODE` gate, same as `tenantBadge()
 **Problem.** §56's `groupCombinedAnnouncements()` collapses an announcement's fanned-out rows into one card, but the query behind it has no `ORDER BY` on the tenant side of the join — two same-timestamp announcements could come back with their `AnnouncementTarget`/`Tenant` rows in a different order each fetch, so the resulting badge order (e.g. "MOD, HTD" on one card, "HTD, MOD" on the next) looked inconsistent between otherwise-identical cards.
 
 **Fix.** `groupCombinedAnnouncements()` sorts each grouped announcement's `targets` array alphabetically by `tenant_name` after grouping, once per card (only when there's more than one target — a single-target row has nothing to sort).
-
-## 58. Removed the "Today" Card's Blue Outline
-
-**Superseded by §62.** This was a fix to PatternFly's `.pf-m-selected` modifier on the old `events.html`'s cards, replaced with a `.samaya-today-card` tint class. §62's redesign dropped PatternFly and that card markup entirely in favor of its own styling (the calendar view's current-day cell uses an `is-today` class); today's items are simply no longer marked up the way this section's fix touched.
 
 ## 59. Calendar Month Grid Shows Adjacent-Month Days
 
@@ -1267,3 +1364,307 @@ Two backend fixes surfaced while integrating this, both narrowly scoped and cove
 - Self-hosting Noto Sans under `static/vendor/` instead of loading it from Google Fonts — the `<link>` in `events.html` is a one-line change to make later if the external font request becomes a concern.
 - Translating the page's interface text — every string lives in `events-public.js`/`events.html`, not baked into markup elsewhere, specifically so this stays straightforward later, but no translation was requested or done here.
 - Covering `app/static/js/*.js` (the admin console's own scripts) with ESLint — see the note above; unrelated to this page and untouched.
+
+## 63. Public Events Page: Alliance Branding
+
+**Status:** Deferred (2026-10-01). Does not serve the current priority, the unified event model (§66). Kept as a worked design. No code yet. Admin pages are untouched except the Tenant modal's icon validation (§63.1).
+
+**Problem.** `Tenant.color` is an unvalidated string, the page picks readable text color with a heuristic that is not the WCAG formula (it selects an ink below 4.5:1 for roughly one in five colors), the selected alliance does not recolor the page beyond a chip border, and `events-public.js` builds ten inline `style="..."` attributes in template strings, which this repo's own HTML/CSS rule forbids.
+
+### 63.1 Validation and contrast (backend)
+
+- `TenantIn.color` and `TenantPatch.color` are validated against `^#[0-9A-Fa-f]{6}$` by a new `parse_hex_color()` in `services/validators.py`. On `TenantPatch` the check runs only when `color` is present in the payload, so editing any other field of a tenant with a legacy non-hex color cannot start failing. Existing rows are never rewritten by this section.
+- New pure module `services/contrast.py`: `relative_luminance(hex)`, `contrast_ratio(a, b)`, and `pick_ink(hex)`, which returns whichever of `#000000` or `#FFFFFF` has the higher contrast ratio against the color. Every 6-digit hex color reaches at least 4.58:1 with one of the two, so no color is ever rejected for contrast. The module exists to choose ink, not to gate input. A pytest sweep over the RGB cube asserts the 4.58:1 floor as an invariant.
+- The frontend mirrors this in the pure section of `events-public.js`, replacing `inkOn()`. Both implementations are tested against one shared fixture table (hex, expected ink), which includes `#E65100` (black, 5.54:1; white would be 3.79:1) and `#1565C0` (white, 5.75:1).
+- Tenant icons get their own validator, `parse_tenant_icon_data()`, so event cover images keep their current rules. It accepts `data:image/(png|jpeg|jpg|gif|svg+xml);base64,...` under 256 KB of text. Base64 only, because `FileReader.readAsDataURL()` produces base64 for SVG too. An SVG is rendered only through an `<img>` element and is never inlined or passed to `innerHTML` as markup; an `<img>` context executes no script, which is the entire XSS mitigation, so no server-side sanitizing is done.
+- Before deploy, a read-only query on the production database lists every `tenants.color` that does not match the hex pattern, so a legacy value is a known quantity.
+
+### 63.2 Frontend behavior
+
+- `applyBrand(color)` sets `--brand` and `--brand-ink` on `#main` (`.page`) through `element.style.setProperty`. It runs on a single-alliance page as soon as alliances load, and on the combined page whenever the filter chip changes. Selecting "All" resets to the kingdom gold and `DARK_INK`.
+- Elements that adapt: the selected filter chip (fill and text), the hero accent border, and the active view-toggle segment. Elements that never take brand color: status colors (Live, Failed, Cancelled), the per-row alliance accent (each row keeps its own `--c`, since several alliances share one list), the Add to calendar button, dialogs, and the Discord preview. Kingdom-wide items keep the kingdom color.
+- Inline styles are removed from `events-public.js`. Dynamic values (`--c`, `--ink-on`, `--s`) are emitted as `data-c`, `data-ink` and `data-s` attributes, and one `hydrateVars(container)` pass after each render applies them through the CSSOM. The two static `color:#949ba4` styles become CSS classes. Every color still passes `safeColor()` first.
+- Cache: bump `STATIC_ASSET_VERSION` in `services/static_assets.py`.
+- Tests: vitest covers `pick_ink` parity and `applyBrand` reset logic against the jsdom hook; `tests/frontend/events-public.test.js` gains the exported names.
+
+### 63.3 Theme presets
+
+Themes are CSS presets in `events.css`, selected by a `data-theme` attribute on `<html>` and keyed by an id from the shipped allow-list (`season_default` plus one per season or holiday). A preset overrides tokens only (`--bg`, the gold accent family, `--hero-banner`). A hero banner is a static file under `/static/themes/`, never an upload and never inside an API payload. `.hero-banner` reserves space with `aspect-ratio`, and its `background-color` plus gradient are declared beneath the image layer, so a missing or failed image shows the gradient with no layout shift. Every new preset's text and background token pairs must reach 4.5:1 before it ships. Which preset is active is decided by §64.
+
+### Out of Scope
+
+- Uploading banners, and any per-alliance theme.
+- Alliance leaders editing their own color or crest; a superadmin does it in the Platform tenant modal.
+- Analytics for the engagement targets in the product brief; the page has none today.
+- Renaming existing flat CSS classes to BEM. New classes use BEM.
+
+## 64. Scheduled Theme Resolution
+
+**Status:** Deferred (2026-10-01), with §63.
+
+**Problem.** A seasonal base theme, a week-long celebration and a one-day event theme must switch on and off by date with no code change, and one date has to be that date for players in every time zone.
+
+### 64.1 Windows
+
+- **Global day.** For calendar date D, the window starts at 10:00:00 UTC on D-1 (UTC+14 midnight) and ends at 12:00:00 UTC on D+1 (UTC-12 end of day): 50 hours. Example: April 4 runs 10:00 UTC April 3 to 12:00 UTC April 5.
+- **Build-up.** The end stays at the global-day end. The start moves back exactly 168 hours from the global-day start.
+- `services/theme_windows.py` holds two pure functions, `global_day_window(date)` and `buildup_window(date, days=7)`, unit-tested against the April 4 example and a DST-adjacent date.
+
+### 64.2 Data model
+
+New table `scheduled_themes`: `id` Integer primary key (every other table here uses Integer keys), `kingdom_id` FK to `kingdoms` (branding is per Kingdom), `theme_id` Text, `start_utc` and `end_utc` `DateTime(timezone=True)`, `priority_level` Integer 0 to 1000. `CHECK (start_utc < end_utc)` and a named constraint on `priority_level`, so `services/db_errors.py` can translate violations. Index on `(kingdom_id, start_utc, end_utc)`. Convention for tiers, not enforced: 10 base season, 50 week-long celebration, 100 global day. `theme_id` is validated on write against the shipped preset allow-list.
+
+There is no `Kingdom.theme_id` column. The base season is a priority-10 row.
+
+Schema change goes through the first real Alembic revision (`alembic revision --autogenerate`, `alembic check` in CI). Production must be `alembic stamp head` on the baseline before `upgrade head`; confirm that before deploy. The change is additive, so a code-only rollback is safe, and `docs/rollback-runbook.md` covers the migration.
+
+### 64.3 Resolution
+
+`services/themes.py::resolve_active_theme(rows, now)` is pure and takes an injected clock:
+
+1. Keep rows with `start_utc <= now < end_utc` for the Kingdom.
+2. Sort by `priority_level` descending, then `start_utc` descending (the most recently started wins), then `id` descending, so overlapping equal-priority rows always resolve the same way.
+3. Return the first row's `theme_id`, or `season_default` when none is active.
+
+Datetimes read from the database pass through `ensure_utc()`, since aiosqlite drops `tzinfo`. `GET /api/kingdom-branding` calls it with `datetime.now(timezone.utc)` and returns `theme_id` alongside the existing titles. Unknown ids read from the table also resolve to `season_default`.
+
+### 64.4 Client refresh and caching
+
+The page fetches branding at load and again on the existing 10-minute interval, and sets `data-theme` on `<html>` from the result. `/api/kingdom-branding` is sent with `Cache-Control: no-cache`, and the Cloudflare cache rules for `/api/*` are checked before deploy so a rollover is not delayed at the edge. That check is open; it has not been made yet.
+
+### 64.5 Admin
+
+Superadmin-only `GET/POST/PATCH/DELETE /admin/api/scheduled-themes` (`require_superadmin`), each mutation through `services/audit.log_change`. The Platform-section table that edits these rows is a second patch; until then rows are created through the API. No new public route, so no Caddyfile change.
+
+### Out of Scope
+
+- Generating recurring yearly holiday windows automatically.
+- Per-alliance schedules.
+- Previewing a future theme on the public page.
+
+## 65. Audit Remediation, Phases 1 to 5
+
+**Status:** Implemented, repository commit `4cb4d15`. This section is reconstructed from `CLAUDE.md`, which recorded the work as it happened, because the spec was not updated at the time. No behavior visible to a visitor changed; this is correctness, safety and tooling work.
+
+**Phase 1: schema management.** `app/alembic/` was added with a tool-generated, `alembic check`-verified baseline revision (`6fc935931248`) matching the schema as of §62. `main.py`'s lifespan stopped calling `create_all()`. Production must adopt the baseline with `alembic stamp head`, not `upgrade head`, since it already has the schema from the ten hand-written scripts; whether that was done in production is not recorded here and needs confirming. CI gained an `alembic-baseline` job (`upgrade head`, then `alembic check`) so a model change with no migration fails the build.
+
+**Phase 2: shared services.** Discord posting logic (`_post_to_one_tenant`, `_resolve_notification`, `_resolve_post_targets`, `find_post_log`, `_send_pre_event_ping`, `_record_shared_guild_post`) moved from the admin routers into `services/discord_posting.py`, removing about seven function-local imports that existed only to avoid circular imports. `services/db_errors.py` translates `IntegrityError` into friendly 422 responses for both SQLite and Postgres, replacing substring matching on driver text, and fixing two update endpoints that previously returned a 500 on a duplicate slug or guild ID.
+
+**Phase 3: admin and feedback markup.** `admin.html` and `feedback.html` lost their inline `<style>`, `style` attributes and inline event handlers. `feedback.html` was split into `feedback.html`, `feedback.css` and `feedback.js`. A generic `.hidden` utility replaced direct `.style.display` writes. `common.js` gained `focusModal()`, `unfocusModal()` and delegated handlers for tabs, modal dismissal and the markdown toolbar. The `/feedback` page began busting the static cache like the events page.
+
+**Phase 4: frontend and service tests.** A `__SAMAYA_TEST__` hook in `events-public.js` exports its pure functions for vitest without running its DOM wiring. New tests cover `services/notifications.py` and `services/discord_oauth.py`, which had no direct coverage.
+
+**Phase 5: CI, recovery and abuse limits.** Ruff runs in CI. A Docker build job boots the image against a real Postgres. `docs/rollback-runbook.md` documents three recovery procedures. The three public ticket endpoints sit behind an in-memory sliding-window rate limiter per client IP (create 5 per 10 minutes, vote 30 per 10 minutes, list 60 per minute), which is safe only because the app runs a single worker.
+
+### Out of Scope
+
+- Sharing the rate limiter across workers.
+- Lint coverage for the admin `js/*.js` files.
+
+## 66. Unified Event Model
+
+**Status:** Planned, decided 2026-10-01. Nothing here is built. Until it ships, the sections it replaces (13, 20, 27, 37, 49, 50) stay accurate for the running code.
+
+**Problem.** Events and announcements are two parallel systems: two tables, two recurrence implementations, two target tables, two posting paths and two sets of tests, merged back together only on the public page. One notification channel and role serve both the "has been scheduled" notice and the timed reminder, so a creation notice goes out whether or not anyone wanted it. Leadership-only items are hidden from the public page and feeds but are not otherwise handled. A reported recurring-announcement failure (§13.5) sits in the second recurrence implementation and is not being diagnosed, because the code is being replaced.
+
+**Decisions.**
+- An announcement is an event with no duration. A reminder is a delivery on an event, not a separate announcement.
+- One combined Events list in the admin console. No existing event, announcement or ticket data needs to survive, and the admin console is rebuilt around this model.
+- One label, the **event type**, replaces any separate importance, frequency or category label. Scope (kingdom-wide or alliance) stays its own field, and "daily" is just a recurrence of every 1 day.
+- Wording is one default message with an optional per-alliance override. No per-channel wording.
+- Publishing an event is silent. Notifications go to one named destination per alliance. A creation notice is not built now.
+- Recurrence stays "every N days from an anchor date", plus "none" for one-off items. Monthly patterns are a later, additive change (§66.9).
+- The audit log and the feedback board survive the rebuild. The feedback board also gains moderation, public responses and an archive (§66.10).
+- Subset audiences stay: an event can target any set of alliances, not only one or all (decided 2026-10-01; the need is not proven yet, but requests are expected).
+- Roles stay as they are (owner, coordinator, viewer, plus the kingdom-coordinator grant). Letting a superadmin limit which alliances a given coordinator may create events for is a later change (§66.9).
+- The message composer, live preview and placeholders stay as built (§27, §28, §34).
+- Editing a recurring event asks for a scope: this occurrence only, this and following, or all (§66.4a).
+- No continuity is required from the running system. The old Discord Scheduled Events are deleted at cutover and recreated by the new engine (§66.8).
+
+### 66.1 Data model
+
+Kept unchanged: `kingdoms`, `discord_servers`, `user_tenants`, `user_kingdoms`, `invites`, `audit_log`, `scheduler_state`. `tenants` is kept and gains `notification_channel_id` and `notification_role_id` (the alliance's one named Notifications destination, both default empty). `users` is kept and gains a nullable `display_name`: the name shown publicly next to a coordinator's feedback responses. When empty, the Discord username is used. A user edits their own display name, and a superadmin can edit anyone's.
+
+Replaced: `event_definitions`, `announcements`, `announcement_targets`, `announcement_templates`, `event_tenant_notifications`, `event_targets`, `occurrences`, `post_log`, `tickets`, `ticket_votes`.
+
+| Table | Purpose and key columns |
+|---|---|
+| `event_types` | Reusable template. `kingdom_id`, `name` (unique per Kingdom), `color` (6-digit hex), `default_duration_hours` (nullable), `default_interval_days` (nullable, empty means one-off), `default_message`, `default_reminder_minutes` (JSON list of integers), `default_mention_role` (bool), `sort_order`. A seeded "General" type exists |
+| `events` | The definition. `owning_tenant_id`, `type_id` (required), `name`, `scope` (`alliance` or `kingdom-wide`), `leadership_only`, `message` (default message, supports the six placeholders of §27), `location` (free text), `start_time_utc`, `duration_hours` (nullable and positive when set), `recurrence_kind` (`none` or `interval_days`), `interval_days`, `anchor_date` (date of the first or only occurrence), `until_date` (nullable; last date an occurrence may fall on, set when a series is split, §66.4a), `series_id` (shared by every part of a split series, so the admin list can show them as one), `mention_role`, `active`, `cover_image_data` (§35), timestamps |
+| `event_alliances` | Audience. For an `alliance` event, one row per participating alliance (the owner included). For a `kingdom-wide` event every alliance in the Kingdom takes part and rows exist only to carry an override. Columns: `event_id`, `tenant_id`, `message_override` (nullable), `notification_channel_id` and `notification_role_id` (nullable overrides of the alliance default) |
+| `event_reminders` | Delivery rules. `event_id`, `minutes_before` (0 or more; 0 means at the start). Copied from the type's defaults when the event is created, so editing a type later does not silently change existing events |
+| `occurrences` | One dated instance. `event_id`, `occurrence_date`, `start_datetime_utc`, `end_datetime_utc` (nullable when the event has no duration), `status` (`scheduled` or `cancelled`), per-occurrence overrides that are all nullable (`start_datetime_utc_override`, `message_override`), unique on `(event_id, occurrence_date)`. Regeneration never overwrites an occurrence that has an override or is `cancelled` |
+| `deliveries` | Replaces `post_log`, announcement target status and `reminder_sent`. `occurrence_id`, `tenant_id`, `kind` (`discord_event` or `reminder`), `reminder_id` (null for `discord_event`), `due_at_utc`, `status` (`pending`, `sending`, `posted`, `error`, `cancelled`), `discord_event_id`, `discord_message_id`, `detail`, `posted_at_utc`; unique on `(occurrence_id, tenant_id, kind, reminder_id)` |
+| `tickets`, `ticket_votes` | Same board as §40 to §43. An error report references `related_occurrence_id`; `related_announcement_id` is removed. Tickets gain the moderation fields and the `ticket_responses` table of §66.10 |
+| `ticket_responses` | Public replies on a ticket (§66.10): `ticket_id`, `author_user_id`, `body`, `created_at`, `edited_at` |
+
+Rules:
+- A calendar entry exists exactly when `duration_hours` is set. That is what creates a Discord Scheduled Event, an ICS entry and an end time. Without a duration the item is a plain message: reminders only.
+- Constraints: `recurrence_kind = 'interval_days'` requires `interval_days > 0`; `'none'` requires it null; `duration_hours` is null or positive; `minutes_before >= 0`.
+- Placeholders resolve per alliance at send time, as in §27.
+
+### 66.2 Audience and visibility
+
+- Scope picks the audience: the whole Kingdom, or the listed alliances. Kingdom-wide visibility needs no target rows (§61).
+- `leadership_only` events are absent from every public page, public API response and ICS feed, as today. This stays covered by a test on every public query.
+- Until leadership-only Discord channels exist (roadmap, §66.9), sending a leadership event to a private channel is done with the per-event destination override on `event_alliances`.
+- **Decided 2026-10-01:** a leadership-only event never creates a Discord Scheduled Event, because those appear in the guild's Events tab for everyone. It is an announcement for the leadership team, not a public calendar item. Its reminders and notifications still go to a channel, which an admin points at a leadership-only channel with the per-event destination override.
+- Nobody is pinged individually. A role mention is used only when `mention_role` is true and the destination has a role.
+
+### 66.3 Publishing and notifying
+
+- **Publishing** creates the Discord Scheduled Event and makes the occurrence visible on the public page and feeds. It needs no channel and sends no message. Automatic publishing keeps the semantics of §51: seven days ahead, skipped inside 15 minutes, a same-named Discord event with a different time is flagged and never overwritten, and a same-named same-time event is recorded without a second API call.
+- **Notifying** is the `reminder` deliveries, sent to the alliance's Notifications destination, or the event's override. The text is the effective message (the alliance override, else the default). If that is empty the system sends "{name} starts {event_time_relative}".
+- **Shared Discord servers** still produce one Scheduled Event per guild (§52); each alliance keeps its own delivery rows and its own reminder.
+- There is no creation notice. Publishing never sends a channel message by itself.
+
+### 66.4 Delivery engine
+
+One per-minute tick replaces `send_pre_event_reminders`, `send_scheduled_announcements` and `auto_post_upcoming_occurrences`. Occurrence regeneration (daily 00:00 UTC, on demand and at startup catch-up, 28-day window) creates occurrences and their delivery rows, each with a `due_at_utc`: a `discord_event` delivery is due seven days before the start, a `reminder` delivery at start minus `minutes_before`.
+
+The tick selects `pending` deliveries with `due_at_utc <= now` and handles each one independently:
+1. Claim: set `status = 'sending'` and commit, before any Discord call.
+2. Send.
+3. Record `posted` with the Discord IDs, or `error` with the reason, and commit.
+
+This gives at-most-once delivery and isolation. A failure in one delivery never aborts another, and a crash after the claim cannot cause a repeat. A `sending` row older than ten minutes is shown as an error in the delivery log and is never retried automatically. Retry is a manual action on an `error` row, as today (§30.1).
+
+Editing an event regenerates its future `pending` deliveries and leaves `posted` ones alone. Deactivating or deleting an event cancels its pending deliveries and, where a Discord event exists, removes it as §32 and §51 do today.
+
+### 66.4a Editing recurring events
+
+Editing a recurring event asks which part of the series the change applies to. A one-off event has no choice and edits in place.
+
+| Scope | What happens |
+|---|---|
+| This occurrence only | Writes an override on that occurrence: cancel it, move its start time (`start_datetime_utc_override`), or change its message (`message_override`). The series is untouched. Its pending deliveries are regenerated from the override; a `posted` Discord event is updated or deleted through §32 |
+| This and following | Splits the series. The original event gets `until_date` set to the day before the chosen occurrence, its later pending deliveries are cancelled, and a new event is created from the chosen date with the new values, sharing the original's `series_id` and reminders. Past occurrences, deliveries and log rows stay under the original |
+| All occurrences | Edits the event in place. Future pending deliveries are regenerated; `posted` ones and past occurrences stay as history |
+
+Rules:
+- A cancelled or overridden occurrence survives regeneration and any later "all" edit.
+- "This and following" on the first occurrence is the same as "all".
+- The audit log records the scope, the event IDs involved and the before and after values.
+
+### 66.5 Recurrence
+
+`services/recurrence.py` keeps `does_occur_on(anchor, interval_days, date)` for `interval_days` and adds `none` (only the anchor date). All dates are UTC. Weekly is 7.
+
+### 66.6 Public surface
+
+Routes are unchanged (§5.1, §62). Each row carries the event type name and color. An event with a duration is an event row; one without is listed as a message on the public page and left out of the ICS feeds, matching what announcements did. The page colors rows by type, and the existing per-alliance crests remain.
+
+### 66.7 Admin console
+
+A smaller console, rebuilt on the same static-file stack (no build step). The tabs:
+- **Events**: one list filtered by type, scope, alliance and status; one form for create and edit (type, name, message, schedule, recurrence, audience, reminders, calendar entry toggle, leadership flag, per-alliance overrides). The composer, live preview and emoji picker of §28 and §34 are reused for the message.
+- **Schedule**: upcoming occurrences, as a table and a timeline.
+- **Delivery log**: every delivery, with filters and manual retry; includes the delivery-health summary of §31.2 recomputed on `deliveries`.
+- **Event types**: create and edit types.
+- **Feedback**: the tickets triage view (§40 to §43), with status changes, dismiss, edit, delete, public responses and an archive (§66.10).
+- **Setup**: alliances, Discord servers, channel and role pickers for each alliance's Notifications destination, access and invites, and each coordinator's display name (own name editable by the user, any name by a superadmin). Superadmin-only parts stay superadmin-only (§38.6).
+- **Audit log**: unchanged behavior (§31.1); every new mutation calls `log_change`.
+
+The open UI problems recorded on 2026-09-28 (broken "Add Target" and "New Announcement" buttons, announcement list clean-up, header modals for alliance and time zone) are subsumed by the rebuild. Whether the rebuild keeps PatternFly is decided when this tab set is designed.
+
+### 66.8 Migration and build plan
+
+- One Alembic revision drops the replaced tables and creates the new ones. It is destructive and has no meaningful downgrade; the rollback is restoring the pre-change dump from `ops/backup.sh` (`docs/rollback-runbook.md`). Take that backup first. Setup data is kept (§66.1). Existing ticket rows are discarded unless exported first.
+- Production must have adopted the Alembic baseline (`alembic stamp head`) before this revision. That is not confirmed and is a blocking check.
+- **Production adopted the baseline (confirmed 2026-10-01):** `alembic_version` holds `6fc935931248`. `alembic check` on production still reports drift between the live schema and the models, because production was built by the old hand-written scripts: unique constraints on `user_tenants` and `user_kingdoms` carry Postgres default names (`user_tenants_user_id_tenant_id_key`, `user_kingdoms_user_id_kingdom_id_key`) where the models say `uq_user_tenant` and `uq_user_kingdom`, and `discord_servers.created_at` is nullable where the model says `NOT NULL`. The same check also lists `announcement_targets`, `event_tenant_notifications` and `announcement_templates`, which this revision drops. The new revision therefore also renames those two constraints and backfills then sets `NOT NULL` on `discord_servers.created_at` (guarded so it is a no-op on a database built from the baseline), so `alembic check` passes on production afterwards.
+- **Cutover and Discord events (decided 2026-10-01).** The old system does not need to keep posting before the cutover. The cutover step deletes the Discord Scheduled Events the old system created, identified by the `discord_event_id` values in `post_log`, and never touches events created by hand. The new engine then creates fresh ones. There is no adoption of matching events at cutover. The §51 same-name, same-time check stays for events created by hand later.
+- **Test environment.** The branch runs against a separate dev database and a separate bot token (`PLATFORM_BOT_TOKEN` in the dev `.env`), with that bot invited to a private test Discord server. The dev environment never receives production credentials, because the new engine would post to real alliances.
+- Because the schema is replaced, the build happens on a branch and cuts over once, not incrementally on production. Phases:
+  1. **Foundation:** models, the Alembic revision, recurrence `none`, event type and event APIs, validators; tests ported first.
+  2. **Delivery engine:** occurrence and delivery generation, the single tick, auto-publish, shared-guild dedupe, reminders, manual retry; tests including at-most-once and failure isolation.
+  3. **Public surface:** public API, ICS, last-activity and the events page adapted; a test that leadership events appear nowhere public.
+  4. **Admin console:** the tabs in §66.7.
+  5. **Closure:** feedback moderation, responses and archive (§66.10), audit integration, `CLAUDE.md` map, this spec's Part I rewritten, dead code and old tests removed, cutover with backup.
+
+### 66.9 Roadmap, not built now
+
+- Monthly recurrence kinds, each one predicate plus one enum value and one validation rule: `monthly_day` (the Nth day; for day 29 to 31 the default will be to use the last day of a shorter month) and `monthly_nth_weekday` (first to fourth or last Monday to Sunday).
+- Leadership-only Discord channels (a tick box on a channel, so leadership items only go there) and a private leadership calendar.
+- Per-coordinator alliance limits: a superadmin chooses which alliances a given coordinator may create events for. To be designed after the core model is built.
+- A creation-notice destination and an "on publish" trigger.
+- A separate importance label, if filtering across types ever becomes necessary.
+- Downstream systems (player points, KVK buff slot requests, conduct and NAP information). The event ID is the attachment point; nothing is designed for them now.
+
+### 66.10 Feedback board: moderation, responses and archive
+
+**Requirement recorded 2026-10-01.** Today a ticket can only change status (`PATCH /api/tickets/{id}`, §43.3), the public list hides only `declined` ones, and there is no way to delete, dismiss or edit a ticket or to reply, so tickets stay on the board forever and the team cannot answer publicly. The rebuilt board must allow:
+
+- **Dismiss:** hide a ticket from the public board without deleting it, through a new `dismissed` status (for spam or off-topic items). It stays visible in the admin Feedback tab and can be restored.
+- **Delete:** remove a ticket permanently, with its votes and responses. Superadmin only, and always written to the audit log.
+- **Edit:** coordinators can correct the title or text of a ticket (for example to remove personal details or fix a typo) and change its type. The original submitter is not told; the audit log keeps the before and after.
+- **Public responses:** coordinators and superadmins can post replies on a ticket. Responses show on the public board under the ticket, with the author's display name and the time, so players can follow progress as the team works on it. The display name comes from `users.display_name` (§66.1) and is resolved when the page is shown, so changing a name updates earlier responses too. A response can be edited or deleted by its author or a superadmin. Responses are plain text, at most 2,000 characters.
+- **Status as progress:** a ticket's current status is shown beside its responses on the public board.
+- **Archive:** the public board has two sections. The main section lists active tickets (`open`, `planned`, `in_progress`). A separate, collapsed **Archived** section lists finished ones (`done` and `declined`), read-only, with their responses, so people can look up older tickets and the reasoning behind decisions. There is no time window: a ticket moves to the archive when its status changes, not after a delay. `dismissed` tickets appear in neither section.
+
+Rules:
+- Statuses become `open`, `planned`, `in_progress`, `done`, `declined`, `dismissed`. This changes today's behavior, where `declined` is hidden from the public board. A declined ticket is now public in the archive so a response can explain the decision.
+- Viewers see everything and change nothing (§31.3). Coordinators and owners can respond, dismiss and edit; permanent deletion is superadmin only.
+- Submitters stay anonymous. `submitter_contact` is still never shown publicly.
+- The three public ticket endpoints keep their rate limits (§65); the response and moderation endpoints are admin routes behind a session.
+
+### 66.11 Disposition of earlier sections
+
+| Section | Disposition |
+|---|---|
+| 13 Announcements, 27 Templates, 49 and 50 (announcement editing and schedule view), 37 (announcements on the public page) | Replaced |
+| 20 Event targets | Replaced by `event_alliances` |
+| 28, 34 Composer | Reused for the event message |
+| 30.1 Retry | Becomes delivery retry |
+| 31.1 Audit log, 31.3 Viewer role | Kept |
+| 31.2 Delivery health | Rewritten on `deliveries` |
+| 32.1 CSV import and export | Not carried over unless requested |
+| 35 Cover images | Kept, on events |
+| 40 to 43 Feedback board | Kept; error reports reference occurrences only; moderation, public responses and an archive added (§66.10) |
+| 51 Auto-post, 52 Shared guilds, 53 Channel name, 61 Kingdom-wide visibility | Semantics kept |
+| 62 Public events page | Kept, adapted |
+| 63, 64 | Deferred |
+
+### Out of Scope
+
+Everything in §66.9, plus any change to authentication, Kingdoms, alliances or Discord server setup.
+
+# Archive
+
+Fully superseded designs, moved here unchanged except for position. Each begins with its own "Superseded" note. They stay for historical reasoning only and do not describe the current system.
+
+## 14. Admin UI — Combined Multi-Tenant View
+
+**Superseded by §38.** This section's design (a `tenantPicker` "All my alliances" option, a single global combined-mode flag alongside `getCurrentTenantSlug()`/`setCurrentTenantSlug()`, and Config/Access/Platform/Announcements staying single-tenant-only) was the first version of cross-alliance viewing. §38 replaced it outright: the header tenant picker was removed entirely, every combined-capable tab gained its own independent per-tab alliance filter (`getTabFilter`/`setTabFilter`, `COMBINED_SLUG = '*'`), and Announcements became combined-capable too (via `get_current_tenants` and its own `announcementsFilter`). See §38 for the current model; §14.4's rejection of merging tenants into one row, and its "writes stay single-tenant" principle, both still hold under §38's design.
+
+## 18. Platform — Tenant Editing
+
+**Superseded.** This section's `prompt()`-chain editor (pre-filled `name`/`slug`/`guild_id` prompts, a `bot_token` prompt with a `CLEAR` keyword) no longer exists in either shape it once had: §25 moved `guild_id`/`bot_token`/`public_key` off `Tenant` entirely onto `DiscordServer` (so a Tenant edit was never going to prompt for a bot token again), and §38.7 replaced the whole prompt-chain mechanism with a real **Tenant** modal (`platform.js`'s `openTenantModal()`/`saveTenantModal()`) — needed once the modal also had to handle a file-picker upload for the tenant's icon. See §25 for where bot credentials live now and §38.7 for the current Tenant create/edit UI.
+
+## 36. Public Events Page: Off-Center Layout Fix
+
+**Superseded by §62.** This was a PatternFly-specific CSS fix (`.pf-v6-c-page` grid-template-area quirk) for the old `events.html`. §62's redesign dropped PatternFly from the public events page entirely in favor of a standalone `events.css`, so the class this section patched no longer exists on that page and the underlying bug it fixed isn't applicable to the current layout. `admin.html` still uses PatternFly and still carries the equivalent fix for itself, unaffected by this.
+
+### 36.1 Out of Scope
+
+- Auditing every other PatternFly component on `admin.html` for the same grid-auto-placement class of bug — this fix addressed the one reported symptom (the page-level container) on the page that had it, not a general PatternFly-hardening pass. `events.html` no longer uses PatternFly at all (§62), so this bullet no longer applies there.
+
+## 39. Public Status/Kind Legend
+
+**Superseded by §62.** The always-visible legend card this section built (`#statusLegend`/`renderLegend()`, first thing in `<main>`, no dismiss control by design) is gone: §62's redesign replaced it with a collapsed-by-default "Key ▾" panel the visitor opens on demand. The underlying goal — explaining the kind badges and status vocabulary somewhere on the page — is still met by that panel; only the always-visible-card mechanism this section specified no longer exists.
+
+### 39.1 Out of Scope
+
+- A dismiss/collapse control for returning visitors — at the time, the legend was judged short enough not to need one. (Effectively superseded by §62, which made the legend a collapsed-by-default panel instead.)
+- Per-alliance customization of the legend's wording — still true: the status vocabulary remains fixed and shared across every alliance.
+
+## 47. Calendar View Legibility and Accessibility Pass
+
+**Superseded by §62.** This section's fixes were all CSS/markup changes to the old PatternFly-based `events.html` (`.cal-item`, `.samaya-legend-kinds`, `.samaya-modal-close`, `buildEventCardHtml`'s cards) — none of those classes or functions exist in the page §62 replaced it with. The goals this section addressed (legible calendar items, a scannable legend, larger touch targets, full keyboard access) carried forward as requirements into §62's rewrite, which built its own accessibility pass (skip link, focus rings, `aria-expanded`/`aria-pressed`, Escape-to-close, `prefers-reduced-motion`, 44px touch targets) from scratch rather than reusing this section's specific fixes.
+
+## 54. Legend Badge Truncation Fix
+
+**Superseded by §62.** This was a CSS fix (`.samaya-legend-item`, PatternFly's `.pf-v6-c-label__text`) for the always-visible legend §39 built, which §62's redesign replaced with a collapsible "Key" panel using entirely new markup/CSS — the classes this fix touched no longer exist on the page.
+
+## 58. Removed the "Today" Card's Blue Outline
+
+**Superseded by §62.** This was a fix to PatternFly's `.pf-m-selected` modifier on the old `events.html`'s cards, replaced with a `.samaya-today-card` tint class. §62's redesign dropped PatternFly and that card markup entirely in favor of its own styling (the calendar view's current-day cell uses an `is-today` class); today's items are simply no longer marked up the way this section's fix touched.
