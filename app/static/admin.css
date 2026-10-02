@@ -469,3 +469,9 @@ textarea.pf-v6-c-form-control { min-height: 5rem; resize: vertical; }
 .warn-mark { color: var(--bad-ink); font-weight: 600; }
 .audience-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .delivery-members { margin: var(--space-1) 0 0; padding-left: var(--space-4); }
+
+/* Kingdom modal: enabled public-page languages (spec §72.2). */
+.locale-picker { display: grid; gap: 6px; margin-block: 6px 12px; }
+.locale-picker__item { display: flex; align-items: center; gap: 8px; }
+.locale-picker__tag { color: var(--muted); font-size: 12px; }
+.locale-picker__badge { padding: 0 6px; border-radius: 4px; background: #fdf0d5; color: #7a4b00; font-size: 12px; }

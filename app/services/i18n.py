@@ -203,3 +203,39 @@ def json_for_script_tag(data: dict) -> str:
     text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     return (text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
                 .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
+
+
+def kingdom_locale_settings(kingdom) -> tuple[str, list[str]]:
+    """(default locale, enabled locales) for a Kingdom row, or None for a
+    deployment without one. Only shipped locales count, the default is always
+    enabled, and a missing setting means English only (spec §72.2)."""
+    shipped = shipped_locales()
+    wanted = list(getattr(kingdom, "enabled_locales", None) or [BASE_LOCALE])
+    enabled = [t for t in wanted if t in shipped]
+    default = getattr(kingdom, "default_locale", None) or BASE_LOCALE
+    if default not in shipped:
+        default = BASE_LOCALE
+    if default not in enabled:
+        enabled.insert(0, default)
+    return default, enabled_locales(enabled)
+
+
+def locale_choices(enabled: list[str]) -> list[dict]:
+    """[{tag, name}] for the language select, each name in its own language."""
+    return [{"tag": tag, "name": catalogue(tag)["_meta"]["name"]} for tag in enabled]
+
+
+def script_font(locale: str) -> str | None:
+    """A Google Fonts family to add for a script the page font lacks, from the
+    locale's `_meta.font` (Noto Sans covers Latin and Cyrillic, not Han or Arabic)."""
+    return catalogue(locale)["_meta"].get("font")
+
+
+def available_locales() -> list[dict]:
+    """Every shipped locale with the facts the admin Languages panel shows."""
+    out = []
+    for tag in shipped_locales():
+        meta = catalogue(tag)["_meta"]
+        out.append({"tag": tag, "name": meta["name"], "dir": meta.get("dir", "ltr"),
+                    "script": meta.get("script", ""), "reviewed": bool(meta.get("reviewed"))})
+    return out

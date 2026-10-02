@@ -253,3 +253,95 @@ class TestPages:
     async def test_static_assets_are_versioned(self, client_no_session):
         r = await client_no_session.get("/events")
         assert re.search(r'/static/i18n\.js\?v=', r.text)
+
+
+class TestKingdomLanguages:
+    @staticmethod
+    async def _patch(client, tenant, **body):
+        return await client.patch(f"/admin/api/kingdoms/{tenant['kingdom_id']}", json=body)
+
+    async def test_defaults_to_english_only_and_lists_every_shipped_language(self, client, tenant):
+        k = next(k for k in (await client.get("/admin/api/kingdoms")).json() if k["id"] == tenant["kingdom_id"])
+        assert k["default_locale"] == "en" and k["enabled_locales"] == ["en"]
+        assert {"en", "zh-Hans", "ar", "fr", "es", "tr", "ru", "de"} <= {loc["tag"] for loc in k["available_locales"]}
+        assert next(loc for loc in k["available_locales"] if loc["tag"] == "ar")["dir"] == "rtl"
+
+    async def test_enable_languages_and_choose_default(self, client, tenant, client_no_session):
+        r = await self._patch(client, tenant, enabled_locales=["en", "fr", "de"], default_locale="fr")
+        assert r.status_code == 200, r.text
+        assert r.json()["enabled_locales"] == ["en", "de", "fr"] and r.json()["default_locale"] == "fr"
+        page = await client_no_session.get("/events")
+        assert '<html lang="fr" dir="ltr">' in page.text
+        block = TestPages._block(page.text)
+        assert [x["tag"] for x in block["locales"]] == ["en", "de", "fr"]  # English first, the rest alphabetical
+        assert {x["tag"]: x["name"] for x in block["locales"]}["fr"] == "Français"
+        assert block["strings"]["public.events.today"] != "Today"
+
+    async def test_visitor_choice_order_with_enabled_languages(self, client, tenant, client_no_session):
+        await self._patch(client, tenant, enabled_locales=["en", "fr", "de"], default_locale="en")
+        get = client_no_session.get
+        assert '<html lang="de"' in (await get("/events", headers={"Accept-Language": "de-DE,de;q=0.9"})).text
+        assert '<html lang="en"' in (await get("/events", headers={"Accept-Language": "ja"})).text
+        assert '<html lang="fr"' in (await get("/events?lang=fr", headers={"Accept-Language": "de"})).text
+        client_no_session.cookies.clear()  # the ?lang=fr visit above set the language cookie
+        assert '<html lang="en"' in (await get("/events?lang=es")).text  # es is shipped but not enabled
+
+    async def test_cookie_keeps_the_language_on_the_next_visit(self, client, tenant, client_no_session):
+        await self._patch(client, tenant, enabled_locales=["en", "fr"])
+        first = await client_no_session.get("/events?lang=fr")
+        assert "samaya_lang=fr" in first.headers["set-cookie"]
+        second = await client_no_session.get("/events")  # the client keeps the cookie, like a browser
+        assert '<html lang="fr"' in second.text
+
+    async def test_single_language_hides_the_select(self, client_no_session):
+        assert TestPages._block((await client_no_session.get("/events")).text)["locales"] == []
+
+    async def test_arabic_is_right_to_left_and_zh_adds_its_font(self, client, tenant, client_no_session):
+        await self._patch(client, tenant, enabled_locales=["en", "ar", "zh-Hans"], default_locale="ar")
+        ar = (await client_no_session.get("/events")).text
+        assert '<html lang="ar" dir="rtl">' in ar and "Noto+Sans+Arabic" in ar
+        zh = (await client_no_session.get("/events?lang=zh-Hans")).text
+        assert '<html lang="zh-Hans" dir="ltr">' in zh and "Noto+Sans+SC" in zh
+        assert "Noto+Sans+SC" not in (await client_no_session.get("/events?lang=en")).text
+
+    async def test_traditional_chinese_visitor_is_not_given_simplified(self, client, tenant, client_no_session):
+        await self._patch(client, tenant, enabled_locales=["en", "zh-Hans"])
+        r = await client_no_session.get("/events", headers={"Accept-Language": "zh-TW,zh;q=0.8"})
+        assert '<html lang="zh-Hans"' in r.text  # zh;q=0.8 is plain Chinese, which is Simplified here
+        r = await client_no_session.get("/events", headers={"Accept-Language": "zh-TW"})
+        assert '<html lang="en"' in r.text
+
+    async def test_validation(self, client, tenant):
+        assert (await self._patch(client, tenant, enabled_locales=["en", "xx"])).status_code == 422
+        assert (await self._patch(client, tenant, enabled_locales=[])).status_code == 422
+        r = await self._patch(client, tenant, enabled_locales=["fr"])
+        assert r.status_code == 422 and "default" in r.json()["detail"].lower()
+        assert (await self._patch(client, tenant, default_locale="de")).status_code == 422
+
+    async def test_back_to_english_only_stores_nothing(self, client, tenant, db_session):
+        from models.db import Kingdom
+        await self._patch(client, tenant, enabled_locales=["en", "fr"], default_locale="fr")
+        r = await self._patch(client, tenant, enabled_locales=["en"], default_locale="en")
+        assert r.status_code == 200
+        k = await db_session.get(Kingdom, tenant["kingdom_id"])
+        await db_session.refresh(k)
+        assert k.default_locale is None and k.enabled_locales is None
+
+    async def test_change_is_audited(self, client, tenant, db_session):
+        from sqlalchemy import select
+
+        from models.db import AuditLog
+        await self._patch(client, tenant, enabled_locales=["en", "de"])
+        row = (await db_session.execute(select(AuditLog).where(AuditLog.table_name == "kingdoms")
+                                         .order_by(AuditLog.id.desc()))).scalars().first()
+        assert "de" in row.after
+
+
+class TestFontsAndRtlMeta:
+    def test_script_fonts(self):
+        assert i18n.script_font("zh-Hans") == "Noto Sans SC" and i18n.script_font("ar") == "Noto Sans Arabic"
+        assert i18n.script_font("en") is None
+
+    def test_arabic_is_rtl_everything_else_ltr(self):
+        assert i18n.text_direction("ar") == "rtl"
+        assert all(i18n.text_direction(t) == "ltr" for t in ("en", "fr", "de", "es", "tr", "ru", "zh-Hans"))

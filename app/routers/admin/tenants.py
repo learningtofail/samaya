@@ -19,6 +19,7 @@ from models.db import DiscordServer, EventType, Kingdom, Tenant, TenantSecondary
 from services.audit import log_change
 from services.contrast import faint_on_white_note
 from services.db_errors import raise_friendly_integrity_error
+from services.i18n import BASE_LOCALE, PSEUDO_LOCALE, available_locales, kingdom_locale_settings, shipped_locales
 from services.images import TENANT_ICON, process_data_uri_async
 from services.discord_api import verify_token
 
@@ -50,6 +51,9 @@ def _kingdom_dict(k: Kingdom) -> dict:
         "admin_console_title": k.admin_console_title,
         "color":               k.color,
         "color_note":          faint_on_white_note(k.color),
+        "default_locale":      kingdom_locale_settings(k)[0],
+        "enabled_locales":     [t for t in kingdom_locale_settings(k)[1] if t != PSEUDO_LOCALE],
+        "available_locales":   available_locales(),
     }
 
 
@@ -143,6 +147,24 @@ async def create_kingdom(
     return _kingdom_dict(kingdom)
 
 
+def _apply_locale_settings(kingdom: Kingdom, payload: KingdomPatch) -> None:
+    """Spec §72.2: enabled locales must be shipped, and the default must be one
+    of them. Nothing is written unless the whole combination is valid."""
+    current_default, current_enabled = kingdom_locale_settings(kingdom)
+    enabled = list(dict.fromkeys(payload.enabled_locales)) if payload.enabled_locales is not None \
+        else [t for t in current_enabled if t != PSEUDO_LOCALE]
+    default = (payload.default_locale or BASE_LOCALE) if payload.default_locale is not None else current_default
+    unknown = [t for t in enabled if t not in shipped_locales()]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"No such language: {', '.join(unknown)}")
+    if not enabled:
+        raise HTTPException(status_code=422, detail="Enable at least one language")
+    if default not in enabled:
+        raise HTTPException(status_code=422, detail="The default language must be one of the enabled languages")
+    kingdom.default_locale = None if default == BASE_LOCALE else default
+    kingdom.enabled_locales = None if enabled == [BASE_LOCALE] else enabled
+
+
 @router.patch("/api/kingdoms/{kingdom_id}")
 async def update_kingdom(
     kingdom_id: int, payload: KingdomPatch,
@@ -152,7 +174,8 @@ async def update_kingdom(
     if not kingdom:
         raise HTTPException(status_code=404, detail="Kingdom not found")
 
-    before = {"name": kingdom.name, "slug": kingdom.slug, "color": kingdom.color}
+    before = {"name": kingdom.name, "slug": kingdom.slug, "color": kingdom.color,
+              "default_locale": kingdom.default_locale, "enabled_locales": kingdom.enabled_locales}
     if payload.name is not None: kingdom.name = payload.name
     if payload.slug is not None: kingdom.slug = payload.slug
     if payload.public_site_title is not None:
@@ -161,12 +184,15 @@ async def update_kingdom(
         kingdom.admin_console_title = payload.admin_console_title or None
     if payload.color is not None:
         kingdom.color = payload.color or None
+    if payload.default_locale is not None or payload.enabled_locales is not None:
+        _apply_locale_settings(kingdom, payload)
 
     try:
         await log_change(
             db, user_id=user.id, tenant_id=None,
             table_name="kingdoms", row_id=kingdom.id, action="update",
-            before=before, after={"name": kingdom.name, "slug": kingdom.slug, "color": kingdom.color},
+            before=before, after={"name": kingdom.name, "slug": kingdom.slug, "color": kingdom.color,
+                                  "default_locale": kingdom.default_locale, "enabled_locales": kingdom.enabled_locales},
         )
         await db.commit()
         await db.refresh(kingdom)

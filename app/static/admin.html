@@ -888,6 +888,14 @@
             <label class="check"><input type="checkbox" id="kgColorDefault"> Use the built-in Kingdom gold</label>
             <p class="pf-v6-c-form__helper-text">Colors the "All alliances" chip and Kingdom-wide events on the public pages.</p>
           </div>
+          <div class="pf-v6-c-form__group">
+            <span class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Public page languages</span></span>
+            <div class="locale-picker" id="kgLocales"></div>
+            <p class="pf-v6-c-form__helper-text">Visitors choose from the enabled languages; a language is only shown if it is enabled. "Draft" means a native speaker has not reviewed the translation yet.</p>
+            <label class="pf-v6-c-form__label" for="kgDefaultLocale"><span class="pf-v6-c-form__label-text">Default language</span></label>
+            <select class="pf-v6-c-form-control" id="kgDefaultLocale"></select>
+            <p class="pf-v6-c-form__helper-text">Used when a visitor's browser language is not enabled.</p>
+          </div>
         </form>
       </div>
       <footer class="pf-v6-c-modal-box__footer">

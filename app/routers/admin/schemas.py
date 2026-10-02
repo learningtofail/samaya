@@ -78,6 +78,11 @@ class KingdomPatch(BaseModel):
     admin_console_title: Optional[str] = None
     # Kingdom brand color (hex). "" resets to the built-in Kingdom gold.
     color: Optional[str] = None
+    # Spec §72.2 interface languages. default_locale "" resets to English;
+    # enabled_locales replaces the whole list. Validated against the shipped
+    # catalogues in the router, where the current values are known.
+    default_locale:  Optional[str] = None
+    enabled_locales: Optional[list[str]] = None
 
     _validate_color = field_validator("color", mode="before")(parse_clearable_hex_color)
 

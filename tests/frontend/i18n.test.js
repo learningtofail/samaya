@@ -102,3 +102,15 @@ describe("apply and fromDocument", () => {
     expect(i.t("a.hello")).toBe("a.hello");
   });
 });
+
+describe("firstWeekday and iso", () => {
+  test("English keeps the Monday start; other languages follow their region", () => {
+    expect(SamayaI18n.create({ locale: "en" }).firstWeekday()).toBe(1);
+    expect(SamayaI18n.create({ locale: "de" }).firstWeekday()).toBe(1);
+    expect(SamayaI18n.create({ locale: "ar" }).firstWeekday()).toBe(6);
+  });
+
+  test("iso wraps a name in directional isolates", () => {
+    expect(SamayaI18n.create({ locale: "ar" }).iso("MOD")).toBe("⁨MOD⁩");
+  });
+});
