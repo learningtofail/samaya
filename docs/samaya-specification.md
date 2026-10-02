@@ -100,7 +100,7 @@ A Discord Scheduled Event is due 7 days before start and is skipped for leadersh
 
 ## CS.11 Known issues and open work
 
-- **Not built, by decision (§66.9):** monthly recurrence, leadership-only Discord channels, per-coordinator alliance limits, a creation-notice destination, downstream systems. §63 alliance branding and §64 scheduled theme resolution are deferred.
+- **Not built, by decision (§66.9):** monthly recurrence, leadership-only Discord channels, per-coordinator alliance limits, a creation-notice destination, downstream systems. §63.3 themes and §64 scheduled theme resolution are superseded by the §71 design (not built).
 - **Admin API gaps found while building the console (§66.7):** `/api/me` does not expose kingdom-coordinator grants, so the UI cannot hide event-type and kingdom-wide controls from users who lack them (the server returns 403); event list responses carry `cover_image_data` inline; the delivery list sorts by due time, so an old error row can fall behind the page limit (the UI asks for 200 and filters); a non-superadmin editing an event whose audience includes alliances they cannot see would drop those alliances.
 - **Known gaps:** no per-tenant custom Discord Interactions endpoint (§22); anonymous votes are per browser, not per person; the public page has no analytics; admin `js/*.js` has no lint coverage; Google Fonts load from an external host unless self-hosted.
 - **Roadmap ideas** are collected in §44 and §66.9.
@@ -112,7 +112,7 @@ A Discord Scheduled Event is due 7 days before start and is skipped for leadersh
 | Original baseline, corrected where facts changed | 1 to 12 (4, 5, 6 and 12 describe the previous system; see CS.3, CS.5, CS.6, CS.9) |
 | Current and still describing the system | 15, 17 (rationale only), 19 (rationale only), 21 to 26, 28, 29, 31 (audit log, viewer role), 33 to 35, 38, 40 to 46, 52, 53, 55 to 57, 59 to 62, 65, 66 |
 | Replaced by §66 (kept as design history) | 13, 20, 27, 30.1, 32, 37, 45, 49, 50, 51 (semantics kept) |
-| Deferred | 63, 64 |
+| Designed, not built | 71 (supersedes the deferred parts of 63 and 64; 63.1 and 63.2 are built, 64.1 is reused) |
 | Archived (fully superseded) | 14, 18, 36, 39, 47, 54, 58 |
 | Intentionally empty | 16, 48 |
 
@@ -1398,7 +1398,7 @@ Two backend fixes surfaced while integrating this, both narrowly scoped and cove
 
 ## 63. Public Events Page: Alliance Branding
 
-**Status:** Partly built (2026-10-02). Built: hex validation of alliance colors, `services/contrast.py`, a Kingdom brand color (`kingdoms.color`, revision `a1f0c0de0006`, returned by `/api/kingdom-branding`), a color field in the alliance modal, and a Kingdom modal (name, slug, titles, color) that replaced the `prompt()` chain. Frontend: brand variables, theme and banner hooks (inert). Not built: themes and banners (§63.3, §64), which are being redesigned so a superadmin can create and edit them in the admin console, images included.
+**Status:** Partly built (2026-10-02). Built: hex validation of alliance colors, `services/contrast.py`, a Kingdom brand color (`kingdoms.color`, revision `a1f0c0de0006`, returned by `/api/kingdom-branding`), a color field in the alliance modal, and a Kingdom modal (name, slug, titles, color) that replaced the `prompt()` chain. Frontend: brand variables, theme and banner hooks (inert). Not built: themes and banners (§63.3, §64), superseded by the design in §71 so a superadmin or Kingdom coordinator can create and edit them in the admin console, images and fonts included.
 
 **Built behavior.** A superadmin sets an alliance color in Setup, Alliances, and the Kingdom color in Setup, Kingdoms. Both must be 6-digit hex; the alliance PATCH checks the color only when it is sent, so a legacy non-hex value (the column was never validated) survives edits to other fields, and the admin form sends the color only after the person touches it. A very light color is accepted with a note (`color_note`, under 3:1 against white) because a faint stripe is a choice, not an error. The page's "All alliances" chip, view toggle, hero accent and Kingdom-wide events use the Kingdom color; a single selected alliance uses its own. `tests/frontend/ink-fixtures.json` is the one table both `pick_ink` (Python) and `brandInk` (JS) are tested against. No Kingdom crest: the public page shows no crests.
 
@@ -1433,7 +1433,7 @@ Themes are CSS presets in `events.css`, selected by a `data-theme` attribute on 
 
 ## 64. Scheduled Theme Resolution
 
-**Status:** Deferred (2026-10-01), with §63.
+**Status:** Superseded by §71 (2026-10-02), except §64.1 (windows), which §71 reuses. Kept as design history.
 
 **Problem.** A seasonal base theme, a week-long celebration and a one-day event theme must switch on and off by date with no code change, and one date has to be that date for players in every time zone.
 
@@ -1921,6 +1921,146 @@ The Setup tab no longer has an "Alliances and audiences" panel. Which alliances 
 **Not built.** Coordinator commands (create, cancel), personal reminders, buttons on posts. They need the Discord ID to Samaya user mapping and a permission pass, and come after read-only has proven stable.
 
 **Setup (owner).** Slash commands belong to the application the bot token belongs to, which may differ from the OAuth login application. Use that application's Public Key for `PLATFORM_PUBLIC_KEY`, set its Interactions Endpoint URL to `https://ks138.taraka.dev/webhooks/discord`, invite the bot with the `applications.commands` scope, then run the registration script.
+
+## 71. Public Page Theming, Page Text and Fonts
+
+**Status:** Designed 2026-10-02, not built. Supersedes §63.3 (theme presets in CSS) and §64.2 to §64.5 (scheduled theme storage and admin). §64.1 (global-day windows) and §63.1, §63.2 (colors, brand variables; built) stand.
+
+**Problem.** The Kingdom wants to change how the public pages look for a season or a festival, and what their headers and titles say, without a deploy. A superadmin or Kingdom coordinator should create and edit themes in the admin console, including a banner image and fonts, and schedule them by date. Today the palettes live in `events.css`, the titles are one Kingdom field, and the fonts are fixed.
+
+**Principles.**
+- A theme is data, never code. The admin edits a fixed set of values; there is no free-form CSS. A bad value can then neither break the layout nor make text unreadable.
+- Every text and background pair a theme can change is checked for WCAG contrast on save, in the browser for feedback and on the server for enforcement. A theme that fails cannot be saved.
+- The server resolves the active theme and writes it into the page before first paint. No script applies a theme, so there is no flash of the wrong theme.
+- Page text and theme are separate systems. A theme may override some text (for example a festival title); the Kingdom's own text is the fallback.
+
+### 71.1 What a theme contains
+
+| Field | Rule |
+|---|---|
+| `name` | Required, at most 60 characters, unique per Kingdom. |
+| `bg` | Page background, hex. Contrast against the fixed `ink` token at least 7:1 and against `muted` at least 4.5:1. |
+| `accent` | Accent fill (the "All alliances" chip, live accents), hex. Text on it is `pick_ink(accent)` (§63.1), so no pairing rule. |
+| `accent_text` | Accent-colored text (the kicker, links), hex. At least 4.5:1 against white and against `bg`. |
+| `primary` | Primary buttons and the active view toggle, hex. White text on it at least 4.5:1. |
+| `font_heading`, `font_body`, `font_numerals` | Keys from the font catalogue (§71.2). Null means the page default. |
+| `banner_asset_id` | Optional image (§71.4). |
+| `banner_overlay` | A number from 0.90 to 1.00, default 0.96. The strength of the near-white overlay between the banner and the hero text. At 0.90 or more, any image, including pure black, keeps the fixed `ink` and `muted` text above their contrast floors; a test computes the worst case. |
+| `copy` | Optional JSON object of text overrides (§71.3). |
+| `archived` | Hides the theme from pickers; a scheduled or base theme cannot be archived. |
+
+Derived by the server, not edited: `--gold-deep` (accent, darker), `--navy-hover` (primary, lighter), and the live, line, tint and surface tokens stay as shipped. The generated stylesheet maps these onto the existing CSS variables (`--bg`, `--gold`, `--gold-deep`, `--gold-ink`, `--navy`, `--navy-hover`, `--font`, `--mono`) and adds `--font-heading`, `--banner` and `--hero-overlay`. `events.css` keeps the shipped defaults, so a page with no theme looks as it does today, and the `[data-theme]` presets are removed. The five seasonal palettes become starter templates in code (`services/theme_templates.py`, converted to hex and checked by the same contrast rules); the editor offers "Start from a template". No seed rows.
+
+### 71.2 Fonts
+
+**Catalogue in code, not free text.** `services/fonts.py` holds an allow-list of Google Fonts families. Each entry has a key, display name, the Google family string, the weights loaded (at most three), a CSS fallback stack, the scripts covered, the roles it may fill (`heading`, `body`, `numerals`) and a `tabular` flag. Adding a family is a reviewed code change. The launch list is about 15 families (the page's current Noto Sans and IBM Plex Mono, a few more neutral sans families, a few serif and display faces for headings such as Cinzel and Merriweather, and a few monospace faces); each is checked for availability, license (open source), weights and scripts when the catalogue is built.
+- `numerals` accepts only monospace families and proportional families whose tabular figures were verified, so the time column does not shift.
+- Decorative faces are limited to `heading`.
+- A catalogue key that no longer exists (removed in a later deploy) renders as the default for that slot and logs a warning. It never fails the page.
+
+**Loading.** One Google Fonts CSS2 request, built by the server from the resolved theme's three keys, with `display=swap` and `preconnect`. Google serves per-script chunks, so a visitor downloads only the scripts a page uses. Alliance names in scripts the font lacks fall back through the stack to system fonts. Each visitor's IP address reaches Google; self-hosting the catalogue is a later per-font change and needs no data change, because themes store keys. To limit layout shift when a heading font swaps in, each catalogue entry carries a fallback stack chosen to match its metrics.
+
+### 71.3 Page text
+
+A fixed registry in `services/page_copy.py` lists every editable string: key, default, page, maximum length and the placeholders it accepts (`{alliance_name}`, `{kingdom_name}`). Text only: it is length-capped, stripped of control characters, and rendered with `textContent`, never as HTML.
+
+| Key | Where | Default |
+|---|---|---|
+| `events.title` | Page heading, tab title | "Event Schedule" (tab: "Kingshot Event Schedule"). Stored in the existing `kingdoms.public_site_title`. |
+| `events.kicker_all` | Line above the heading, combined view | "Kingshot · All alliances" |
+| `events.kicker_alliance` | Same, one alliance | "Kingshot · {alliance_name}" |
+| `events.description` | Meta and link-preview description | "Upcoming events for {kingdom_name}." |
+| `events.hero_live`, `events.hero_next`, `events.hero_then` | Hero labels | "Live now", "Next up", "Then" |
+| `events.all_chip` | Filter chip | "All alliances" |
+| `events.footer` | Footer line | "Times shown in your time zone and UTC · Powered by Samaya" |
+| `feedback.title` | Feedback page heading and tab title | "Feedback & Requests" |
+| `feedback.intro` | Feedback page introduction | The current paragraph |
+| `feedback.back_link` | Link back to events | "← Back to Events" |
+
+**Resolution:** the active theme's `copy`, then the Kingdom's `kingdoms.page_copy` (new JSON column), then the default. A blank value means "inherit". The admin shows the inherited value as the field's placeholder. The registry grows by adding a row to it and an element in the page; there is no per-page editor.
+
+**Delivery.** The server writes the resolved values into the HTML: the `<title>`, `<meta name="description">` and Open Graph tags at a marker in `<head>`, and a `<script type="application/json" id="page-copy">` block (with `<` escaped) that the page scripts read at start-up. Link previews in Discord, which as far as is known do not run JavaScript, therefore show the custom title and description. Both pages keep their default text in the markup, so a page still reads correctly if the block is missing.
+
+### 71.4 Banner images
+
+- **Storage.** Table `theme_assets`: `id`, `kingdom_id`, `sha256`, `content_type`, `width`, `height`, `byte_size`, `data` (bytea), `created_at`. Unique on `(kingdom_id, sha256)`. In Postgres, so the nightly `pg_dump` (`ops/backup.sh`) covers them and no volume is added.
+- **Upload.** `POST /admin/api/theme-assets` takes a base64 data URI in JSON, as tenant icons do (no multipart dependency). Limits: 4 MB encoded, PNG, JPEG or WebP, at most 4000 by 4000 pixels, not animated. The server decodes with Pillow (a new dependency, to be added to `requirements.txt`), applies a pixel-count guard, strips EXIF, resizes to at most 1600 pixels wide and stores a WebP at quality 82. SVG is refused: opened directly in a browser it can run script on this origin.
+- **Serving.** `GET /theme-assets/{sha256}.webp`, public, `Cache-Control: public, max-age=31536000, immutable`, `X-Content-Type-Options: nosniff`. The hash makes the URL unguessable and cache-safe; a replaced image gets a new URL.
+- **Lifecycle.** Replacing or removing a theme's banner deletes the old asset in the same transaction when no other theme uses it. Deleting a theme does the same.
+- **Rendering.** The hero keeps its reserved height, and its gradient and `background-color` sit beneath the image layer, so a missing or slow image shows the gradient with no layout shift (§63.3 rule, kept).
+
+### 71.5 Scheduling and resolution
+
+- **Base theme.** `kingdoms.default_theme_id` (nullable FK). Null means the shipped defaults. This replaces §64.2's "base season is a priority-10 row".
+- **Scheduled themes.** Table `scheduled_themes` as §64.2: `kingdom_id`, `theme_id` (FK, restrict on delete), `start_utc`, `end_utc`, `priority_level` 0 to 1000, `CHECK (start_utc < end_utc)`, index on `(kingdom_id, start_utc, end_utc)`. Convention: 50 week-long celebration, 100 global day. The admin offers the §64.1 windows (global day, build-up) as one-click date ranges.
+- **Resolution.** `services/themes.py::resolve_active_theme(kingdom, rows, now)` is pure with an injected clock: rows with `start_utc <= now < end_utc`, ordered by priority, then latest start, then id, all descending; the first wins; none falls back to the base theme, then to the defaults. Datetimes pass through `ensure_utc()`.
+- **Deleting** a theme that is the base theme or is scheduled returns a 409 naming where it is used.
+
+### 71.6 Delivery to the pages
+
+- `/events`, `/t/{slug}/events` and `/feedback` resolve the theme and copy per request (one small query, with a short in-process cache of the result; the app has one worker) and replace marker comments in the static HTML. This removes the hard-coded Google Fonts `<link>` from both pages.
+- Generated stylesheet: `GET /theme/{theme_id}.css?v={updated_at}.{STATIC_ASSET_VERSION}` (`/theme/default.css` when no theme is active). It contains only `:root { --variable: value; }` declarations from validated values, so there is nothing to escape beyond hex colors, catalogue font strings, a hash-based banner URL and two numbers. It is cached for a year because the URL changes whenever the theme or the code changes.
+- The HTML itself must not be cached at the edge for longer than a theme change should take to appear. Whether Cloudflare caches `/events`, `/feedback` or `/api/kingdom-branding` today is not checked and is a pre-deploy task.
+- `GET /events?preview_theme={id}` renders that theme for a signed-in user with a Kingdom grant (superadmin included); for anyone else the parameter is ignored. Previews send `Cache-Control: no-store` and `X-Robots-Tag: noindex`. The admin editor shows the real page in an iframe from this URL, so the preview cannot drift from the page. Whether Caddy or Cloudflare sends `X-Frame-Options` or a CSP `frame-ancestors` that blocks this same-origin iframe is not checked and is a pre-deploy task.
+
+### 71.7 Admin
+
+A new **Appearance** tab (Kingdom grant required) with four panels:
+1. **Themes.** List with a swatch, fonts and an in-use marker. The editor has color pickers with live contrast ratios, font selects that load a family only when chosen and show sample text, a banner upload with a crop preview of the hero, the overlay slider, a copy-overrides section, "Start from a template", and the iframe preview. Save is disabled while any rule fails.
+2. **Schedule.** The base theme select and the scheduled windows table, with the §64.1 shortcuts and a warning when windows overlap at the same priority.
+3. **Page text.** The Kingdom's values for every registry key, with defaults as placeholders and a link to preview the page.
+4. **Kingdom branding.** The existing Kingdom color and titles move here from the Setup modal; the modal keeps name and slug.
+
+**Permissions.** Superadmin and Kingdom coordinators (a `UserKingdom` grant on that Kingdom). Today Kingdom titles are superadmin-only, so this widens access (see decision 1). Viewers and alliance owners without a Kingdom grant cannot read or write. Every write goes through `services/audit.log_change` (asset rows log metadata, never bytes).
+
+### 71.8 API
+
+All under `/admin/api`, Kingdom-scoped by `kingdom_id`:
+- `GET/POST/PATCH/DELETE /themes`, `GET /theme-templates`, `GET /fonts` (the catalogue)
+- `POST /theme-assets`, `DELETE /theme-assets/{id}` (only when unreferenced)
+- `GET/POST/PATCH/DELETE /scheduled-themes`
+- `GET/PUT /page-copy` (Kingdom values)
+- `PATCH /kingdoms/{id}` gains `default_theme_id`
+
+Public, unauthenticated: `GET /theme/{id}.css`, `GET /theme-assets/{sha256}.webp`. Neither returns anything about an unscheduled theme beyond what its own stylesheet contains. `/api/kingdom-branding` keeps its current fields for the admin console and gains none.
+
+### 71.9 Schema change (one revision, `a1f0c0de0007`)
+
+Additive. New tables `themes`, `theme_assets`, `scheduled_themes`; new columns `kingdoms.page_copy` (JSON text, nullable) and `kingdoms.default_theme_id` (nullable FK to `themes`, `ON DELETE RESTRICT`; created after `themes`). Named constraints so `db_errors.py` can translate them. The downgrade drops them. A code-only rollback is safe because nothing reads the new columns when the code is old. The migration needs the usual PG test under `SAMAYA_MIGRATION_TEST_PG`.
+
+### 71.10 Failure behavior
+
+| Case | Result |
+|---|---|
+| No themes, no copy set | Pages render exactly as today. |
+| Theme row fails validation at render (hand-edited data) | Log, use the shipped defaults. |
+| Font key not in the catalogue | Default font for that slot, warning logged. |
+| Banner asset missing or the image fails to load | The hero gradient, no layout shift. |
+| Copy value over its limit or unknown key | Rejected on save; ignored at render. |
+| Google Fonts unreachable | System fallback stack. |
+
+### 71.11 Tests
+
+Contrast rules (each accept and reject case, shared fixtures with the frontend), overlay worst-case math, theme CRUD, permissions (superadmin, coordinator, owner, viewer), copy resolution order and escaping, HTML marker injection and the JSON block's escaping (`</script>` in a value), resolution with overlapping windows and equal priorities, 409 on deleting a used theme, asset upload limits (size, dimensions, animation, wrong type, SVG, pixel bomb), re-encoding strips EXIF, asset serving headers, stylesheet content, preview parameter ignored for anonymous users, the §64.1 window functions, the 0007 migration upgrade and downgrade on Postgres.
+
+### 71.12 Build order
+
+Three deployable steps; each leaves the site working.
+1. **Page text** (`page_copy` column, registry, server-side head and JSON injection, admin text panel, feedback page wiring). No images, no fonts.
+2. **Themes, fonts and schedule** (tables, editor, catalogue, generated stylesheet, base theme, scheduled windows, preview).
+3. **Banner images** (assets table, upload, serving, hero rendering).
+
+### 71.13 Out of scope
+
+Per-alliance themes (an alliance's color still tints the page while it is selected, §63.2), dark mode, free-form CSS, uploaded font files, per-visitor theme choice, animated or video banners, themes for the admin console, translated text per language, and self-hosted fonts (a later per-font change).
+
+### 71.14 Decisions to confirm
+
+1. **Who edits.** Superadmin and Kingdom coordinators (assumed). Alternative: superadmin only, as for Kingdom titles today.
+2. **Numerals font.** Restricted to monospace and verified tabular families (assumed), so times stay aligned. Alternative: any font, accepting uneven columns.
+3. **Pillow.** Adding it to `requirements.txt` for image checks and resizing (assumed). Alternative: store the uploaded bytes unchanged with only header checks, which keeps EXIF and large files.
+4. **Base theme as a column.** `kingdoms.default_theme_id` (assumed) instead of §64.2's priority-10 row.
+5. **Single language.** One set of text per Kingdom, with no per-language variants (assumed).
 
 # Archive
 
