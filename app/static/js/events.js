@@ -334,6 +334,7 @@ function syncRecurrenceGroups() {
 function syncScopeGroups() {
   const kingdomWide = byId('evScope').value === 'kingdom-wide';
   byId('evKingdomNote').classList.toggle('hidden', !kingdomWide);
+  byId('evOwnerLabel').textContent = kingdomWide ? 'Anchor alliance' : 'Owning alliance';
   byId('evAudienceLegend').textContent = kingdomWide ? 'Per-alliance messages' : 'Alliances';
   byId('evAudienceIntro').textContent = kingdomWide
     ? 'Every alliance in the Kingdom takes part. You can still give an alliance its own message.'
