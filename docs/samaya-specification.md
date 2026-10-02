@@ -2095,8 +2095,8 @@ Pre-deploy checks, made 2026-10-02 from `lxc-taraka` and from the owner's knowle
 ### 72.1 Scope
 
 1. **Public pages** (`/events`, `/t/{slug}/events`, `/feedback`): in the first release.
-2. **Discord slash command replies and command names** (§70): with the languages release.
-3. **Admin console:** later, with the same mechanism (§72.10).
+2. **Admin console:** second, with the same mechanism (§72.10).
+3. **Discord slash command replies and command names** (§70): last, handled later (decided 2026-10-02). Until then Discord replies stay English. The `t()` catalogue is shared, so the `discord.*` keys are added when this phase starts, not before.
 
 Not translated: event names, descriptions and messages, message templates, alliance and Kingdom names. Leaders write those in whatever language they choose. Translating them is a separate feature (§72.9).
 
@@ -2181,21 +2181,23 @@ Additive: `kingdoms.default_locale` (text, not null, default `en`), `kingdoms.en
 ### 72.14 Build order
 
 1. **Foundation, English only.** The catalogue and `t()`, extraction of the public pages, locale selection and `<html lang dir>`, the `i18n` JSON block, `Intl` formatting, `en-XA`, tests. Nothing changes for visitors except the small wording shifts of §72.4.
-2. **Languages and page text.** Revision 0007, the page-text editor with a tab per language, the Languages panel, the language select, the logical-CSS and bidi work (needed for `ar`), the launch translations (seven languages besides English, about 150 strings each, an estimate), Discord localisation. Languages are enabled one at a time as each is reviewed, so the step can ship with English and the first reviewed languages and add the rest without a deploy.
+2. **Languages and page text.** Revision 0007, the page-text editor with a tab per language, the Languages panel, the language select, the logical-CSS and bidi work (needed for `ar`), the launch translations (seven languages besides English, about 150 strings each, an estimate; public pages only). Languages are enabled one at a time as each is reviewed, so the step can ship with English and the first reviewed languages and add the rest without a deploy.
 3. Then §71's theme, font, schedule and banner steps (§71.12).
-4. **Admin console** translation, after demand.
+4. **Admin console** translation (`admin.*` keys), next after the public pages.
+5. **Discord** localisation (§72.8), last: replies, `name_localizations`, and the Arabic remedy.
 
 ### 72.15 Decisions
 
 Decided 2026-10-02: plan for multilingual UI soon; per-language page text from the start (not one language and a later migration); the launch languages are English, Simplified Chinese, Modern Standard Arabic, French, Spanish, Turkish, Russian and German (§72.2).
 
+Decided 2026-10-02: scope order is public pages, then admin pages, then Discord (§72.1). The Arabic-in-Discord question (below) waits for the Discord phase.
+
 Open, with the recommended default:
-1. **Scope order:** public pages, then Discord, then admin (as §72.1).
 2. **Who translates:** Claude drafts, community natives review (§72.12), with `reviewed` shown in the admin only. Arabic and Chinese in particular should have a native read before they are enabled.
 3. **Digits:** Western digits for times and counts in every language, including Arabic (§72.4).
 4. **Language in the URL:** `?lang=` plus cookie (§72.3), not a path prefix (`/tr/events`). A path prefix is friendlier to search engines but needs a second copy of every route.
 5. **Server plural rules:** the `Babel` library. With Russian and Arabic in the launch set, count-free Discord strings are impractical, and Babel supplies CLDR rules for any language added later.
-6. **Arabic in Discord:** per-server reply language (§72.8), or accept English there for now.
+6. **Arabic in Discord:** deferred to the Discord phase.
 
 # Archive
 
