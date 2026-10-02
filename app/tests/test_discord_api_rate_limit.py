@@ -89,3 +89,36 @@ class TestSendAndCreate:
 async def test_the_cutover_script_paces_its_deletes():
     from cutover_delete_old_discord_events import INTER_CALL_DELAY
     assert INTER_CALL_DELAY >= 0.5
+
+
+class TestBadRequestDetail:
+    BODY = {"code": 50035, "message": "Invalid Form Body", "errors": {
+        "description": {"_errors": [{"code": "BASE_TYPE_MAX_LENGTH", "message": "Must be 1000 or fewer in length."}]},
+        "entity_metadata": {"location": {"_errors": [{"code": "X", "message": "Required"}]}},
+    }}
+
+    async def test_create_names_the_rejected_fields(self, monkeypatch):
+        _client_returning(monkeypatch, [httpx.Response(400, json=self.BODY)])
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        event_id, error = await discord_api.create_discord_event("t", "g", "n", now, now, "d", "l")
+        assert event_id == ""
+        assert error == ("400 Invalid Form Body (description: Must be 1000 or fewer in length.; "
+                         "entity_metadata.location: Required)")
+
+    async def test_a_non_json_400_still_returns_an_error(self, monkeypatch):
+        _client_returning(monkeypatch, [httpx.Response(400, text="<html>nope</html>")])
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        _, error = await discord_api.create_discord_event("t", "g", "n", now, now, "d", "l")
+        assert error == "400 Bad request"
+
+    async def test_description_and_location_are_cut_to_discords_limits(self, monkeypatch):
+        calls = _client_returning(monkeypatch, [httpx.Response(200, json={"id": "9"})])
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        await discord_api.create_discord_event("t", "g", "n", now, now, "x" * 1500, "y" * 300)
+        import json
+        sent = json.loads(calls[0].content)
+        assert len(sent["description"]) == discord_api.EVENT_DESCRIPTION_MAX and sent["description"].endswith("…")
+        assert len(sent["entity_metadata"]["location"]) == discord_api.EVENT_LOCATION_MAX
