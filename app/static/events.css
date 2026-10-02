@@ -85,11 +85,11 @@ h1 { margin: 0; font-weight: 700; font-size: 32px; line-height: 1.1; overflow-wr
 .menu a small { display: block; font-size: 14px; color: var(--muted); }
 
 /* Page */
-.page { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+.page { --brand: var(--gold); --brand-ink: var(--dark-ink); max-width: 1080px; margin: 0 auto; padding: 0 20px; }
 .hero-row { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 26px; }
 .hero {
   --c: var(--line); flex: 2 1 480px; min-width: 0; border-radius: 14px; border: 1px solid var(--c);
-  background: linear-gradient(120deg, oklch(0.96 0.035 90), var(--surface)); padding: 22px 24px;
+  background: linear-gradient(120deg, oklch(0.96 0.035 90 / .94), oklch(1 0 0 / .9)), var(--banner, none) center / cover, linear-gradient(120deg, oklch(0.96 0.035 90), var(--surface)); padding: 22px 24px; min-height: 160px;
   display: flex; flex-wrap: wrap; gap: 18px; align-items: center; justify-content: space-between;
 }
 .hero-main { flex: 1 1 260px; min-width: 0; }
@@ -107,7 +107,7 @@ h1 { margin: 0; font-weight: 700; font-size: 32px; line-height: 1.1; overflow-wr
 .then h2 { margin: 0 0 6px; font-size: 15px; font-weight: 600; color: var(--muted); }
 .then-item { display: flex; gap: 12px; align-items: baseline; padding: 7px 0; border-top: 1px solid var(--line); }
 .then-time { min-width: 64px; font-weight: 700; font-size: 18px; color: var(--gold-ink); font-variant-numeric: tabular-nums; }
-.then-item small { color: var(--muted); font-size: 14px; }
+.then-item small { display: block; color: var(--muted); font-size: 14px; }
 .activity { margin: 12px 0 0; font-size: 14px; color: var(--muted); }
 
 /* Controls */
@@ -118,15 +118,13 @@ h1 { margin: 0; font-weight: 700; font-size: 32px; line-height: 1.1; overflow-wr
   border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-weight: 600; text-decoration: none;
 }
 .chip:hover { background: var(--tint); }
-.chip[aria-pressed="true"], .chip[aria-current="page"] { background: oklch(0.93 0.04 255); border-color: var(--c); color: var(--ink); }
+.chip[aria-pressed="true"], .chip[aria-current="page"] { background: var(--c); border-color: var(--c); color: var(--ink-on, var(--dark-ink)); }
 .chip .crest { width: 22px; height: 25px; padding-top: 5px; font-size: 9px; }
 .chip .crest img { margin-top: -5px; }
 .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
 .seg button { min-height: 44px; padding: 0 18px; border: 0; background: transparent; font-weight: 700; }
-.seg button[aria-pressed="true"] { background: var(--gold); color: oklch(0.2 0.03 80); }
-.keyline { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 10px 0; font-size: 14px; color: var(--muted); }
-.keyline span { display: flex; align-items: center; gap: 6px; }
-.swatch { width: 8px; height: 8px; border-radius: 50%; background: var(--s); }
+.seg button[aria-pressed="true"] { background: var(--brand); color: var(--brand-ink); }
+.swatch { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .legend { border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px 28px; }
 .legend-item { display: flex; gap: 10px; align-items: flex-start; font-size: 15px; color: var(--muted); }
 .tag { flex: none; margin-top: 2px; padding: 1px 9px; border-radius: 4px; font-weight: 700; font-size: 14px; background: var(--s); color: #fff; white-space: nowrap; }
@@ -218,6 +216,7 @@ h1 { margin: 0; font-weight: 700; font-size: 32px; line-height: 1.1; overflow-wr
 .discord-preview-event-body { padding: 14px 16px; }
 .discord-preview-event-title { font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 4px; }
 .discord-preview-event-time { font-size: 15px; margin-bottom: 4px; }
+.discord-preview-muted { color: #949ba4; }
 .discord-preview-event-meta { font-size: 14px; color: #949ba4; margin-bottom: 8px; }
 .discord-preview-event-desc { margin-bottom: 12px; }
 .discord-preview-event-interested { background: transparent; border: 1px solid #4e5058; color: #dbdee1; border-radius: 4px; padding: 6px 14px; font-size: 14px; }
@@ -235,3 +234,11 @@ h1 { margin: 0; font-weight: 700; font-size: 32px; line-height: 1.1; overflow-wr
   .cal-chip { height: 6px; padding: 0; font-size: 0; }
   .cal-chip.is-cont { margin-left: -3px; }
 }
+
+/* Kingdom theme presets: set via <html data-theme="...">. Palette variables only. */
+[data-theme="season_default"] { --gold: oklch(0.82 0.13 85); }
+[data-theme="theme_nine_nights"] { --gold: oklch(0.7 0.2 350); --gold-deep: oklch(0.6 0.2 350); --gold-ink: oklch(0.45 0.18 350); --bg: oklch(0.97 0.015 340); }
+[data-theme="theme_hallowed_ancestors"] { --gold: oklch(0.45 0.16 305); --gold-deep: oklch(0.38 0.16 305); --gold-ink: oklch(0.38 0.16 305); --bg: oklch(0.96 0.012 300); }
+[data-theme="theme_illuminated_keep"] { --gold: oklch(0.78 0.16 65); --gold-deep: oklch(0.68 0.16 60); --gold-ink: oklch(0.48 0.13 55); }
+[data-theme="theme_crimson_festival"] { --gold: oklch(0.55 0.2 27); --gold-deep: oklch(0.47 0.2 27); --gold-ink: oklch(0.45 0.18 27); --bg: oklch(0.97 0.012 30); }
+[data-theme="theme_frost_festival"] { --gold: oklch(0.8 0.08 225); --gold-deep: oklch(0.7 0.09 230); --gold-ink: oklch(0.42 0.1 235); --bg: oklch(0.97 0.012 230); }
