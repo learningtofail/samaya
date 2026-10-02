@@ -1851,9 +1851,9 @@ Deleting an Audience that is linked or used by an event returns 409 listing the 
 ### 68.3 Routes and console
 
 - `GET/POST /api/audiences`, `PATCH/DELETE /api/audiences/{id}` act on the Kingdom of the selected alliance. Each Audience carries `destinations` (`server_id`, `channel_id`, `role_id`) and `links` (`tenant_id`, `post_by_default`). A PATCH that sends `destinations` replaces the list.
-- `PUT /api/alliance-audiences` sets the selected alliance's links: a list of `{audience_id, post_by_default}`.
+- `PUT /api/alliance-audiences` sets the selected alliance's links: a list of `{audience_id, post_by_default}`. The console no longer calls it (see Setup below); it stays for API use and keeps the alliance-owner permission.
 - `/api/destinations` and `/api/audience-groups` are removed. `POST /api/events/preview-destinations` keeps its name and now returns Audiences with their destinations.
-- Setup: a **Kingdom audiences** panel (coordinators and superadmins) where each Audience has a list of server and channel rows; each alliance shows a checklist of the Kingdom's Audiences with "Post by default". The Events form shows **Audiences** as multi-select chips.
+- Setup: a **Kingdom audiences** panel (coordinators and superadmins) where each Audience has a list of server and channel rows and a checklist of the alliances that use it, each with "Post by default". There is no separate per-alliance panel, so an alliance owner who is not a Kingdom coordinator cannot change links from the console (revision of the first §68 build, which had one). The Events form shows **Audiences** as multi-select chips.
 
 ### 68.4 Migration
 

@@ -276,12 +276,6 @@
     </div>
   </section>
 
-  <section class="panel" aria-labelledby="h-setup-alliances">
-    <h3 class="panel__title" id="h-setup-alliances">Alliances and audiences</h3>
-    <p class="samaya-muted">Choose which audiences each alliance may post to. "Post by default" means the alliance's events post there unless an event opts out. An owner of the alliance, a Kingdom coordinator or a superadmin changes these.</p>
-    <div id="setupAlliances"></div>
-  </section>
-
   <div class="hidden" id="setupSuperadmin">
     <section class="panel" aria-labelledby="h-setup-access">
       <h3 class="panel__title" id="h-setup-access">Access</h3>
@@ -367,7 +361,7 @@
     <div class="about-page__body">
       <p>Your own settings come first. Superadmins also see access, kingdoms, Discord servers, alliances and users below them.</p>
       <ul>
-        <li>An alliance that uses no audience by default cannot receive reminders, so choose one before creating events.</li>
+        <li>An alliance that uses no audience by default cannot receive reminders. Tick it under "Alliances that use this audience" when you edit an audience, and use "Post by default" for the ones its events should post to.</li>
         <li>When two alliances, or two audiences, post to the same channel at the same offset, the engine sends one message that mentions each role once.</li>
         <li>Discord Scheduled Events are created only on an alliance's primary server. An audience can post messages to any server of the Kingdom.</li>
         <li>If Discord cannot be reached, the pickers turn into plain boxes where you can type the numeric ID.</li>
