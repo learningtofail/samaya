@@ -430,7 +430,7 @@ function renderHero() {
       <div class="hero-main">
         <div class="hero-label">${live ? '<span class="dot"></span>' : ''}${escapeHtml(label)}</div>
         <div class="hero-name">${bdi(e.event_name)}</div>
-        <div class="hero-meta">${escapeHtml(heroMeta(e, live, tz))}</div>
+        <div class="hero-meta">${heroMetaParts(e, live, tz).map(bdi).join(' · ')}</div>
       </div>
       <div class="hero-cd"><small>${escapeHtml(t(EVENTS_KEY + (live ? 'endsIn' : 'startsIn')))}</small><b class="js-cd" data-target="${live ? e._end : e._start}">${cd((live ? e._end : e._start) - now)}</b></div>
       ${live ? `<span class="hero-bar js-bar" data-start="${e._start}" data-end="${e._end}" data-vars="--p:${progressPct(e._start, e._end, now)}%"></span>` : ''}
@@ -451,11 +451,17 @@ function renderHero() {
     `<div class="then-item"><span class="then-time">${hm(e._start, tz)}</span><span class="then-name">${bdi(e.event_name)}</span><span class="then-when">${escapeHtml(fmtDay(e._start, tz, { weekday: 'short' }))} · ${escapeHtml(rel(e._start - now))}</span></div>`).join('') : `<p class="muted">${escapeHtml(t(EVENTS_KEY + 'thenNone'))}</p>`}</aside>`;
   $('hero').innerHTML = html;
 }
-function heroMeta(h, live, tz) {
+/**
+ * The hero's detail line as separate parts, each wrapped in its own <bdi> by the caller so a part in
+ * the other direction (the Arabic hour unit, "UTC") cannot reorder its neighbours. The UTC time is
+ * left out when the display zone is already UTC, where it would repeat the local time.
+ */
+function heroMetaParts(h, live, tz) {
   const local = `${hm(h._start, tz)} ${tzShort(tz)}`;
-  const parts = [evAlliances(h).map((x) => iso(x.name)).join(', '), live ? t(EVENTS_KEY + 'heroStarted', { time: local }) : local, `${hm(h._start, 'UTC')} UTC`];
+  const parts = [evAlliances(h).map((x) => iso(x.name)).join(', '), live ? t(EVENTS_KEY + 'heroStarted', { time: local }) : local];
+  if (tz !== 'UTC') parts.push(`${hm(h._start, 'UTC')} UTC`);
   if (h.duration_hours) parts.push(formatDuration(h.duration_hours));
-  return parts.join(' · ');
+  return parts;
 }
 function progressPct(start, end, now) { return Math.max(0, Math.min(100, Math.round(((now - start) / (end - start)) * 100))); }
 function tickCountdown() {
