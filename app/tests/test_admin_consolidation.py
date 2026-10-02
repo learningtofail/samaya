@@ -2,6 +2,7 @@
 Kingdom branding titles, and the public last-activity endpoints.
 """
 
+import pytest
 from httpx import AsyncClient
 
 
@@ -9,6 +10,35 @@ TINY_PNG_DATA_URI = (
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQV"
     "R42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
+
+
+class TestTenantSlug:
+    """A slug is one path segment of /events/{slug} and /events/{slug}.ics, so it cannot hold a dot or a slash."""
+
+    async def _server(self, client, tenant):
+        return (await client.post("/admin/api/discord-servers", json={
+            "kingdom_id": tenant["kingdom_id"], "name": "Slug Server", "guild_id": "555444333",
+        })).json()
+
+    @pytest.mark.parametrize("slug", ["Mod", "a.b", "a/b", "-ab", "ab-", "a b", "", "x" * 33, "mod_2"])
+    async def test_create_rejects_bad_slugs(self, client, tenant, slug):
+        server = await self._server(client, tenant)
+        r = await client.post("/admin/api/tenants", json={
+            "kingdom_id": tenant["kingdom_id"], "name": "Bad", "slug": slug, "server_id": server["id"]})
+        assert r.status_code == 422, (slug, r.text)
+
+    @pytest.mark.parametrize("slug", ["m", "mod2", "k138-mod", "x" * 32])
+    async def test_create_accepts_good_slugs(self, client, tenant, slug):
+        server = await self._server(client, tenant)
+        r = await client.post("/admin/api/tenants", json={
+            "kingdom_id": tenant["kingdom_id"], "name": "Good", "slug": slug, "server_id": server["id"]})
+        assert r.status_code == 201, (slug, r.text)
+
+    async def test_patch_checks_the_slug_only_when_present(self, client, tenant):
+        ok = await client.patch(f"/admin/api/tenants/{tenant['id']}", json={"name": "Renamed"})
+        assert ok.status_code == 200, ok.text
+        bad = await client.patch(f"/admin/api/tenants/{tenant['id']}", json={"slug": "has.dot"})
+        assert bad.status_code == 422
 
 
 class TestTenantIcon:

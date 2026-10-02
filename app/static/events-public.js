@@ -1,5 +1,5 @@
 /* Public events page logic. Standalone (no shared JS with admin). Data contract is unchanged:
-   GET /api/events | /t/{slug}/api/events, /api/alliances, /api/last-activity, /api/kingdom-branding, POST /api/tickets. */
+   GET /api/events | /api/events/{slug}, /api/alliances, /api/last-activity, /api/kingdom-branding, POST /api/tickets. */
 (function () {
 'use strict';
 
@@ -14,10 +14,10 @@ const SAMAYA_TEST = typeof globalThis !== 'undefined' && globalThis.__SAMAYA_TES
 
 // ── Page mode ───────────────────────────────────────────────────
 const PATH_PARTS = window.location.pathname.split('/').filter(Boolean);
-const COMBINED_MODE = PATH_PARTS[0] !== 't';
-const TENANT_SLUG = COMBINED_MODE ? '' : (PATH_PARTS[1] || '');
-const API_URL = COMBINED_MODE ? '/api/events' : `/t/${TENANT_SLUG}/api/events`;
-const ICS_URL = COMBINED_MODE ? '/ics/events.ics' : `/t/${TENANT_SLUG}/ics/events.ics`;
+const COMBINED_MODE = PATH_PARTS[0] !== 'events' || PATH_PARTS.length < 2;
+const TENANT_SLUG = COMBINED_MODE ? '' : decodeURIComponent(PATH_PARTS[1]);
+const API_URL = COMBINED_MODE ? '/api/events' : `/api/events/${encodeURIComponent(TENANT_SLUG)}`;
+const ICS_URL = COMBINED_MODE ? '/events.ics' : `/events/${encodeURIComponent(TENANT_SLUG)}.ics`;
 const ICS_ABSOLUTE_URL = window.location.origin + ICS_URL;
 const ICS_WEBCAL_URL = ICS_ABSOLUTE_URL.replace(/^https?:\/\//, 'webcal://');
 const DAY = 86400000, HOUR = 3600000;
@@ -394,7 +394,7 @@ function renderChips() {
     const crest = '';
     const cc = safeColor(a.color, KINGDOM_COLOR);
     const style = `data-vars="--c:${cc};--ink-on:${inkOn(cc)}"`;
-    const href = a.slug === 'all' ? '/events' : `/t/${encodeURIComponent(a.slug)}/events`;
+    const href = a.slug === 'all' ? '/events' : `/events/${encodeURIComponent(a.slug)}`;
     const current = a.slug === (COMBINED_MODE ? 'all' : TENANT_SLUG);
     return `<a class="chip" ${style} href="${href}"${current ? ' aria-current="page"' : ''}>${crest}${bdi(a.name)}</a>`;
   }).join('');
@@ -821,7 +821,7 @@ async function loadEvents() {
 async function loadLastActivity() {
   const el = $('lastActivity');
   try {
-    const a = await (await fetch(COMBINED_MODE ? '/api/last-activity' : `/t/${TENANT_SLUG}/api/last-activity`)).json();
+    const a = await (await fetch(COMBINED_MODE ? '/api/last-activity' : `/api/last-activity/${encodeURIComponent(TENANT_SLUG)}`)).json();
     if (!a) { el.hidden = true; return; }
     const tz = getDisplayTz(), at = parseIso(a.at);
     el.innerHTML = `${I18N.tHtml(EVENTS_KEY + (a.kind === 'announcement' ? 'activityMessageHtml' : 'activityEventHtml'), { name: iso(a.name) })}${COMBINED_MODE && a.tenant_name ? ' · ' + escapeHtml(a.tenant_name) : ''} · ${escapeHtml(fmtDay(at, tz, { day: 'numeric', month: 'short' }))} ${hm(at, tz)}`;

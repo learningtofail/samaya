@@ -127,14 +127,14 @@ def _window() -> tuple[date, date]:
     return today, today + timedelta(days=WINDOW_DAYS)
 
 
-@router.get("/t/{tenant_slug}/api/events")
+@router.get("/api/events/{tenant_slug}")
 async def list_events(tenant_slug: str, db: AsyncSession = Depends(get_db)):
     tenant = await _get_tenant_by_slug(tenant_slug, db)
     start, end = _window()
     return JSONResponse(await _rows_to_json(await public_rows(db, start, end, tenant)))
 
 
-@router.get("/t/{tenant_slug}/events", response_class=HTMLResponse)
+@router.get("/events/{tenant_slug}", response_class=HTMLResponse)
 async def events_page(request: Request, tenant_slug: str, db: AsyncSession = Depends(get_db)):
     await _get_tenant_by_slug(tenant_slug, db)  # 404s early for an unknown slug
     return await _render_events(request, db)
@@ -147,7 +147,7 @@ async def list_alliances(db: AsyncSession = Depends(get_db)):
     public events pages (spec §26). Not gated the way admin's
     GET /admin/api/tenants is: a Tenant's name/slug/color are already
     exposed via the combined /api/events payload (for the tenant badge)
-    and via the /t/{slug}/events URL itself, so this adds no new
+    and via the /events/{slug} URL itself, so this adds no new
     exposure, just a way to list them without already knowing one."""
     result = await db.execute(select(Tenant).order_by(Tenant.name))
     return JSONResponse([
@@ -212,7 +212,7 @@ async def _last_activity_for_tenants(db: AsyncSession, tenant_ids: list[int]) ->
     }
 
 
-@router.get("/t/{tenant_slug}/api/last-activity")
+@router.get("/api/last-activity/{tenant_slug}")
 async def last_activity(tenant_slug: str, db: AsyncSession = Depends(get_db)):
     tenant = await _get_tenant_by_slug(tenant_slug, db)
     activity = await _last_activity_for_tenants(db, [tenant.id])

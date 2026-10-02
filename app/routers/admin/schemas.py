@@ -5,7 +5,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from services.validators import parse_clearable_hex_color, parse_cover_image_data, parse_hex_color
+from services.validators import parse_clearable_hex_color, parse_cover_image_data, parse_hex_color, parse_slug
 
 
 class TenantIn(BaseModel):
@@ -19,6 +19,7 @@ class TenantIn(BaseModel):
 
     _validate_icon = field_validator("icon_image_data", mode="before")(parse_cover_image_data)
     _validate_color = field_validator("color", mode="before")(parse_hex_color)
+    _validate_slug = field_validator("slug", mode="before")(parse_slug)
 
 
 class TenantPatch(BaseModel):
@@ -37,6 +38,8 @@ class TenantPatch(BaseModel):
     # that still has a legacy non-hex color cannot start failing.
     _validate_color = field_validator("color", mode="before")(
         lambda cls, v: parse_hex_color(v, allow_none=True))
+    _validate_slug = field_validator("slug", mode="before")(
+        lambda cls, v: parse_slug(v, allow_none=True))
 
 
 class DiscordServerIn(BaseModel):

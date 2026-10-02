@@ -6,9 +6,9 @@ events are shared across every alliance in a Kingdom.
 
 ## Live
 
-- MOD's calendar: https://ks138.taraka.dev/t/mod/events
-- NSR's calendar: https://ks138.taraka.dev/t/nsr/events
-- ICS feeds: https://ks138.taraka.dev/t/{tenant_slug}/ics/events.ics
+- MOD's calendar: https://ks138.taraka.dev/events/mod
+- NSR's calendar: https://ks138.taraka.dev/events/nsr
+- ICS feeds: https://ks138.taraka.dev/events.ics (all alliances) and https://ks138.taraka.dev/events/{slug}.ics
 - Admin UI: https://ks138.taraka.dev/admin (Cloudflare Access gated at the network edge, Discord OAuth login required within)
 
 ## Stack

@@ -96,10 +96,11 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# ics before events: /events/{slug}.ics must be matched before the page route /events/{slug}.
+app.include_router(ics.router)
 app.include_router(events.router)
 app.include_router(admin.router, prefix="/admin")
 app.include_router(webhooks.router, prefix="/webhooks")
-app.include_router(ics.router)
 app.include_router(auth_router.router)
 app.include_router(auth_pages.router)
 app.include_router(tickets_public.router)

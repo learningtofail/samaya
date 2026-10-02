@@ -39,8 +39,8 @@ validation-error handler, and router/static wiring. It does not create tables:
 
 ## `app/routers/`
 
-- `events.py` — public, unauthenticated. `GET /t/{slug}/api/events`, `/api/events`, `/events`, `/t/{slug}/events`, `/api/alliances`, `/api/kingdom-branding`, `/api/last-activity`. Rows come from `services/public_events.public_rows`; HTML goes through `bust_static_cache()`
-- `ics.py` — public ICS feeds, `/t/{slug}/ics/events.ics` and the combined feed, also via `public_rows`
+- `events.py` — public, unauthenticated. `GET /api/events`, `/api/events/{slug}`, `/events`, `/events/{slug}`, `/api/alliances`, `/api/kingdom-branding`, `/api/last-activity` and `/api/last-activity/{slug}` (spec §74). Rows come from `services/public_events.public_rows`; HTML goes through `bust_static_cache()`
+- `ics.py` — public ICS feeds, `/events.ics` and `/events/{slug}.ics`, also via `public_rows`; included before `events.py` in `main.py` so `.ics` is never read as a page slug
 - `tickets_public.py` — the public feedback board: `GET /feedback`, `GET/POST /api/tickets` (`GET` returns `{active, archived}`), `POST /api/tickets/{id}/vote` (anonymous toggle keyed by `X-Voter-Id` hashed with `SECRET_KEY`). Rate limited per IP via `services/rate_limit.py`. Never returns `submitter_contact`
 - `webhooks.py` — `POST /webhooks/discord`, signature verified against `PLATFORM_PUBLIC_KEY`; answers PING and dispatches slash commands, autocomplete and modal submits to `services/discord_commands.py` (spec §70)
 - `auth.py`, `auth_pages.py` — Discord OAuth login, invite claim, logout, and the two static failure pages. OAuth only grants access by consuming a pending `Invite`
@@ -135,7 +135,7 @@ Run with `pip install -r app/requirements-dev.txt && cd app && pytest`.
 - All timestamps are UTC. Use `services/time_utils.ensure_utc()`: aiosqlite does not round-trip `tzinfo` the way asyncpg does
 - A Postgres CHECK passes on NULL, so write `IS NOT NULL` explicitly when a column must be set
 - Pydantic `allow_none` validators need `lambda cls, v:` wrapping
-- Admin tenant selection is the `X-Tenant-Slug` header; public routes use `/t/{slug}` because calendar apps cannot send headers
+- Admin tenant selection is the `X-Tenant-Slug` header; public routes use `/events/{slug}` because calendar apps cannot send headers; alliance slugs are one path segment (`services/validators.parse_slug`)
 - Event types and kingdom-wide events need a `UserKingdom` grant; owning an alliance does not imply it
 - Leadership-only events never create Discord Scheduled Events and are never public. Anything public must read through `services/public_events.public_rows`
 - Jobs open their own sessions, so engine functions take an injectable `session_factory` and Discord client; a test must pass the test factory
