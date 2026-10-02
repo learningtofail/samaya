@@ -184,3 +184,12 @@ describe("matchesFilter", () => {
     expect(fns.matchesFilter({ scope: "kingdom-wide" })).toBe(true);
   });
 });
+
+// Shared with app/tests/test_contrast.py: the backend's pick_ink() and the
+// page's brandInk() must agree on every color in this table (spec §63.1).
+describe("brandInk matches the backend", () => {
+  const fixtures = JSON.parse(readFileSync(new URL("./ink-fixtures.json", import.meta.url), "utf8"));
+  test.each(fixtures)("%s -> %s", (hex, ink) => {
+    expect(fns.brandInk(hex).toLowerCase()).toBe(ink.toLowerCase());
+  });
+});

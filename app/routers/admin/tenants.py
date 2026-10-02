@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 from models import get_db
 from models.db import DiscordServer, EventType, Kingdom, Tenant, TenantSecondaryServer, User, UserTenant
 from services.audit import log_change
+from services.contrast import faint_on_white_note
 from services.db_errors import raise_friendly_integrity_error
 from services.discord_api import verify_token
 
@@ -46,6 +47,8 @@ def _kingdom_dict(k: Kingdom) -> dict:
         "id": k.id, "name": k.name, "slug": k.slug,
         "public_site_title":   k.public_site_title,
         "admin_console_title": k.admin_console_title,
+        "color":               k.color,
+        "color_note":          faint_on_white_note(k.color),
     }
 
 
@@ -65,6 +68,11 @@ def _server_dict(s: DiscordServer, tenant_names: list[str] | None = None) -> dic
     }
 
 
+def _is_hex(v: str | None) -> bool:
+    """Legacy tenant colors were never validated, so only hex ones can be scored."""
+    return bool(v) and len(v) == 7 and v[0] == "#" and all(c in "0123456789abcdefABCDEF" for c in v[1:])
+
+
 def _tenant_dict(t: Tenant) -> dict:
     return {
         "id":          t.id,
@@ -75,6 +83,7 @@ def _tenant_dict(t: Tenant) -> dict:
         "server_name": t.server.name,
         "guild_id":    t.server.guild_id,
         "color":       t.color,
+        "color_note":  faint_on_white_note(t.color) if _is_hex(t.color) else None,
         "icon_image_data": t.icon_image_data or None,
         "secondary_servers": [
             {"id": x.server_id, "name": x.server.name, "guild_id": x.server.guild_id}
@@ -142,19 +151,21 @@ async def update_kingdom(
     if not kingdom:
         raise HTTPException(status_code=404, detail="Kingdom not found")
 
-    before = {"name": kingdom.name, "slug": kingdom.slug}
+    before = {"name": kingdom.name, "slug": kingdom.slug, "color": kingdom.color}
     if payload.name is not None: kingdom.name = payload.name
     if payload.slug is not None: kingdom.slug = payload.slug
     if payload.public_site_title is not None:
         kingdom.public_site_title = payload.public_site_title or None
     if payload.admin_console_title is not None:
         kingdom.admin_console_title = payload.admin_console_title or None
+    if payload.color is not None:
+        kingdom.color = payload.color or None
 
     try:
         await log_change(
             db, user_id=user.id, tenant_id=None,
             table_name="kingdoms", row_id=kingdom.id, action="update",
-            before=before, after={"name": kingdom.name, "slug": kingdom.slug},
+            before=before, after={"name": kingdom.name, "slug": kingdom.slug, "color": kingdom.color},
         )
         await db.commit()
         await db.refresh(kingdom)
@@ -240,7 +251,7 @@ async def update_tenant(
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id,
         table_name="tenants", row_id=tenant.id, action="update",
-        after={"name": tenant.name, "slug": tenant.slug, "server_id": tenant.server_id,
+        after={"name": tenant.name, "slug": tenant.slug, "server_id": tenant.server_id, "color": tenant.color,
                "secondary_server_ids": [r.server_id for r in tenant.secondary_servers]},
     )
     try:

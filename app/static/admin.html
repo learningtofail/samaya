@@ -816,6 +816,11 @@
             <input class="pf-v6-c-form-control" type="text" id="tnSlug">
           </div>
           <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="tnColor"><span class="pf-v6-c-form__label-text">Alliance color</span></label>
+            <input class="pf-v6-c-form-control color-input" type="color" id="tnColor" value="#475569">
+            <p class="pf-v6-c-form__helper-text">Colors this alliance's chip, events and page accent on the public pages. Pick one that stands out on white; text on it switches between black and white automatically.</p>
+          </div>
+          <div class="pf-v6-c-form__group">
             <label class="pf-v6-c-form__label" for="tnKingdom"><span class="pf-v6-c-form__label-text">Kingdom</span></label>
             <select class="pf-v6-c-form-control" id="tnKingdom"></select>
           </div>
@@ -843,6 +848,50 @@
       </div>
       <footer class="pf-v6-c-modal-box__footer">
         <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSaveTenantModal">Save</button>
+        <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<div class="pf-v6-c-backdrop" id="kingdomModal" data-close-fn="closeKingdomModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="kingdomModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="kingdomModalTitle">Edit Kingdom</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <input type="hidden" id="kgId">
+        <form class="pf-v6-c-form" novalidate>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="kgName"><span class="pf-v6-c-form__label-text">Kingdom name</span></label>
+            <input class="pf-v6-c-form-control" type="text" id="kgName">
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="kgSlug"><span class="pf-v6-c-form__label-text">URL slug</span></label>
+            <input class="pf-v6-c-form-control" type="text" id="kgSlug">
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="kgPublicTitle"><span class="pf-v6-c-form__label-text">Public events page title</span></label>
+            <input class="pf-v6-c-form-control" type="text" id="kgPublicTitle" placeholder="Kingshot Event Schedule">
+            <p class="pf-v6-c-form__helper-text">Blank uses the default.</p>
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="kgAdminTitle"><span class="pf-v6-c-form__label-text">Admin console title</span></label>
+            <input class="pf-v6-c-form-control" type="text" id="kgAdminTitle" placeholder="Samaya">
+            <p class="pf-v6-c-form__helper-text">Blank uses the default.</p>
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="kgColor"><span class="pf-v6-c-form__label-text">Kingdom color</span></label>
+            <input class="pf-v6-c-form-control color-input" type="color" id="kgColor" value="#C9A227">
+            <label class="check"><input type="checkbox" id="kgColorDefault"> Use the built-in Kingdom gold</label>
+            <p class="pf-v6-c-form__helper-text">Colors the "All alliances" chip and Kingdom-wide events on the public pages.</p>
+          </div>
+        </form>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSaveKingdomModal">Save</button>
         <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
       </footer>
     </div>

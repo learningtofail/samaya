@@ -103,11 +103,12 @@ async function loadPlatformKingdoms() {
     KINGDOMS = await api('GET', '/api/kingdoms', null, true);
     byId('kingdomsBody').innerHTML = KINGDOMS.length
       ? KINGDOMS.map((k) => `<tr class="pf-v6-c-table__tr">
-          ${platformCell('Name', escapeHtml(k.name))}
+          ${platformCell('Name', `${k.color ? `<span class="type-chip__dot" data-color="${escapeHtml(k.color)}"></span> ` : ''}${escapeHtml(k.name)}`)}
           ${platformCell('Slug', escapeHtml(k.slug))}
           ${platformCell('Actions', `<div class="row-actions">${actionButton('Edit', 'edit', { id: k.id })} ${actionButton('Invite coordinator', 'invite', { id: k.id })}</div>`)}
         </tr>`).join('')
       : emptyRow(3, 'No kingdoms yet.');
+    applyTypeColors(byId('kingdomsBody'));
   } catch (e) { toast(e.message, true); }
 }
 
@@ -125,28 +126,54 @@ async function createKingdom() {
 }
 
 // Blank branding titles clear back to the built-in defaults.
-async function editKingdom(k) {
-  const name = prompt('Kingdom name:', k.name);
-  if (name === null) return;
-  const slug = prompt('URL slug:', k.slug);
-  if (slug === null) return;
-  const publicTitle = prompt('Public events page title (blank for the default "Kingshot Event Schedule"):', k.public_site_title || '');
-  if (publicTitle === null) return;
-  const adminTitle = prompt('Admin console title (blank for the default "Samaya"):', k.admin_console_title || '');
-  if (adminTitle === null) return;
+const KINGDOM_DEFAULT_COLOR = '#C9A227';
+
+function editKingdom(k) {
+  byId('kgId').value = k.id;
+  byId('kgName').value = k.name;
+  byId('kgSlug').value = k.slug;
+  byId('kgPublicTitle').value = k.public_site_title || '';
+  byId('kgAdminTitle').value = k.admin_console_title || '';
+  byId('kgColor').value = k.color || KINGDOM_DEFAULT_COLOR;
+  byId('kgColorDefault').checked = !k.color;
+  byId('kgColor').disabled = !k.color;
+  openModalById('kingdomModal');
+}
+
+function closeKingdomModal() {
+  closeModalById('kingdomModal');
+}
+
+byId('kgColorDefault').addEventListener('change', (e) => { byId('kgColor').disabled = e.target.checked; });
+
+async function saveKingdomModal() {
+  const k = KINGDOMS.find((x) => x.id === parseInt(byId('kgId').value, 10));
+  if (!k) return;
+  const name = byId('kgName').value.trim();
+  const slug = byId('kgSlug').value.trim();
+  if (!name || !slug) { toast('Name and slug are required', true); return; }
   const payload = {};
   if (name !== k.name) payload.name = name;
   if (slug !== k.slug) payload.slug = slug;
+  const publicTitle = byId('kgPublicTitle').value.trim();
+  const adminTitle = byId('kgAdminTitle').value.trim();
   if (publicTitle !== (k.public_site_title || '')) payload.public_site_title = publicTitle;
   if (adminTitle !== (k.admin_console_title || '')) payload.admin_console_title = adminTitle;
-  if (!Object.keys(payload).length) { toast('No changes made'); return; }
+  if (byId('kgColorDefault').checked) {
+    if (k.color) payload.color = '';
+  } else if (byId('kgColor').value.toUpperCase() !== (k.color || '')) {
+    payload.color = byId('kgColor').value;
+  }
+  if (!Object.keys(payload).length) { toast('No changes made'); closeKingdomModal(); return; }
   try {
-    await api('PATCH', `/api/kingdoms/${k.id}`, payload, true);
-    toast('Kingdom updated');
+    const saved = await api('PATCH', `/api/kingdoms/${k.id}`, payload, true);
+    toast(saved.color_note || 'Kingdom updated');
+    closeKingdomModal();
     KINGDOM_NAMES_CACHE = null;
     loadPlatformKingdoms();
   } catch (e) { toast(e.message, true); }
 }
+byId('btnSaveKingdomModal').addEventListener('click', saveKingdomModal);
 
 bindActions(byId('kingdomsBody'), {
   edit(btn) {
@@ -273,6 +300,10 @@ async function openTenantForm(t) {
   byId('tnSlug').value = t ? t.slug : '';
   byId('tnKingdom').innerHTML = optionsHtml(kingdoms.map((k) => ({ value: k.id, label: k.name })), t ? t.kingdom_id : '');
   byId('tnKingdom').disabled = !!t;
+  // A legacy non-hex color cannot be shown in a color input; it is left alone
+  // unless the person picks a new one (the field is only sent once touched).
+  byId('tnColor').value = t && /^#[0-9a-f]{6}$/i.test(t.color || '') ? t.color : '#475569';
+  byId('tnColor').dataset.touched = '';
   renderTenantServerChoices(kingdoms, t);
   setTenantIconPreview(t ? (t.icon_image_data || '') : '');
   byId('tnIconFile').value = '';
@@ -326,13 +357,15 @@ async function saveTenantModal() {
   if (!name || !slug) { toast('Name and slug are required', true); return; }
   try {
     if (id) {
-      await api('PATCH', `/api/tenants/${id}`, {
+      const saved = await api('PATCH', `/api/tenants/${id}`, {
         name, slug, server_id: serverId, secondary_server_ids: selectedSecondaryServerIds(), icon_image_data: iconData || '',
+        ...(byId('tnColor').dataset.touched ? { color: byId('tnColor').value } : {}),
       }, true);
-      toast('Alliance updated');
+      toast((saved && saved.color_note) || 'Alliance updated');
     } else {
       await api('POST', '/api/tenants', {
         kingdom_id: parseInt(byId('tnKingdom').value, 10), name, slug, server_id: serverId, secondary_server_ids: selectedSecondaryServerIds(), icon_image_data: iconData || null,
+        color: byId('tnColor').value,
       }, true);
       toast(`${name} created. Invite its leaders from the Access section.`);
     }
@@ -359,4 +392,5 @@ byId('tnIconFile').addEventListener('change', async (e) => {
   else e.target.value = '';
 });
 byId('tnIconRemove').addEventListener('click', () => { setTenantIconPreview(''); byId('tnIconFile').value = ''; });
+byId('tnColor').addEventListener('input', (e) => { e.target.dataset.touched = '1'; });
 byId('btnSaveTenantModal').addEventListener('click', saveTenantModal);

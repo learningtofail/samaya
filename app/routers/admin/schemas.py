@@ -5,7 +5,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from services.validators import parse_cover_image_data
+from services.validators import parse_clearable_hex_color, parse_cover_image_data, parse_hex_color
 
 
 class TenantIn(BaseModel):
@@ -18,6 +18,7 @@ class TenantIn(BaseModel):
     icon_image_data: Optional[str] = None
 
     _validate_icon = field_validator("icon_image_data", mode="before")(parse_cover_image_data)
+    _validate_color = field_validator("color", mode="before")(parse_hex_color)
 
 
 class TenantPatch(BaseModel):
@@ -32,6 +33,10 @@ class TenantPatch(BaseModel):
     # (spec §35): omitted/null leaves the icon unchanged, "" clears it.
     _validate_icon = field_validator("icon_image_data", mode="before")(
         lambda cls, v: parse_cover_image_data(v, allow_none=True))
+    # Checked only when present, so editing any other field of an alliance
+    # that still has a legacy non-hex color cannot start failing.
+    _validate_color = field_validator("color", mode="before")(
+        lambda cls, v: parse_hex_color(v, allow_none=True))
 
 
 class DiscordServerIn(BaseModel):
@@ -71,6 +76,10 @@ class KingdomPatch(BaseModel):
     # "no override set."
     public_site_title:   Optional[str] = None
     admin_console_title: Optional[str] = None
+    # Kingdom brand color (hex). "" resets to the built-in Kingdom gold.
+    color: Optional[str] = None
+
+    _validate_color = field_validator("color", mode="before")(parse_clearable_hex_color)
 
 
 class TenantInviteIn(BaseModel):

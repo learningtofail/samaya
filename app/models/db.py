@@ -47,6 +47,11 @@ class Kingdom(Base):
     public_site_title   = Column(Text, nullable=True)
     admin_console_title = Column(Text, nullable=True)
 
+    # Spec §63: the Kingdom's brand color, a 6-digit hex string. It colors the
+    # "All alliances" chip and Kingdom-wide events on the public page. NULL
+    # means the built-in Kingdom gold.
+    color = Column(Text, nullable=True)
+
     tenants = relationship("Tenant", back_populates="kingdom")
 
 
