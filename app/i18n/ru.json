@@ -47,7 +47,7 @@
  "public.events.calScopeOne": "Подписка добавит только события альянса {alliance}. Для другой ленты смени альянс.",
  "public.events.calGoogle": "Google Calendar",
  "public.events.calGoogleHint": "Откроет Google Calendar и оформит подписку",
- "public.events.calApple": "Apple Calendar / Outlook для компьютера",
+ "public.events.calApple": "Apple Calendar",
  "public.events.calAppleHint": "Использует календарь по умолчанию на устройстве",
  "public.events.calOutlook": "Outlook.com",
  "public.events.calOutlookHint": "Откроет Outlook в браузере и оформит подписку",
@@ -215,5 +215,17 @@
  "public.feedback.archivedCount": "{count} завершено или отклонено, только чтение",
  "public.feedback.optional": "по желанию",
  "public.feedback.reqTimingLabel": "Предлагаемое время",
- "public.feedback.contactHint": "Контакт нужен только для связи. Публично он не показывается."
+ "public.feedback.contactHint": "Контакт нужен только для связи. Публично он не показывается.",
+ "public.events.calCopy": "Скопировать ссылку на ленту",
+ "public.events.calCopyHint": "Вставьте в Outlook для ПК или в пункт «Подписаться по URL» любого приложения",
+ "public.events.calCopied": "Ссылка скопирована",
+ "public.events.calRange": "Период календаря",
+ "public.events.calMonth": "Месяц",
+ "public.events.calWeek": "Неделя",
+ "public.events.cal3Days": "3 дня",
+ "public.events.calAllDay": "Весь день",
+ "public.events.calPrevWeek": "Предыдущая неделя",
+ "public.events.calNextWeek": "Следующая неделя",
+ "public.events.calPrev3Days": "Предыдущие 3 дня",
+ "public.events.calNext3Days": "Следующие 3 дня"
 }

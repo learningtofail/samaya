@@ -205,21 +205,91 @@ describe("evAlliances", () => {
   });
 });
 
-describe("matchesFilter", () => {
-  // matchesFilter reads the module-scoped FILTER variable indirectly
-  // (it's not a parameter), so these only exercise the branch that
-  // doesn't depend on FILTER's current value — a kingdom-wide item always
-  // matches regardless of which alliance filter chip is active.
-  test("a kingdom-wide event always matches, regardless of the active filter", () => {
-    expect(fns.matchesFilter({ scope: "kingdom-wide" })).toBe(true);
-  });
-});
-
 // Shared with app/tests/test_contrast.py: the backend's pick_ink() and the
 // page's brandInk() must agree on every color in this table (spec §63.1).
 describe("brandInk matches the backend", () => {
   const fixtures = JSON.parse(readFileSync(new URL("./ink-fixtures.json", import.meta.url), "utf8"));
   test.each(fixtures)("%s -> %s", (hex, ink) => {
     expect(fns.brandInk(hex).toLowerCase()).toBe(ink.toLowerCase());
+  });
+});
+
+describe("calendarLinks (vendor subscribe URL formats)", () => {
+  const abs = "https://ks138.taraka.dev/t/mod/ics/events.ics";
+  const web = "webcal://ks138.taraka.dev/t/mod/ics/events.ics";
+  let links;
+  beforeAll(() => { links = fns.calendarLinks(abs, web, "Events & More"); });
+
+  test("Google gets the webcal:// form inside cid; https:// there is rejected by Google", () => {
+    expect(links.google).toBe("https://calendar.google.com/calendar/r?cid=webcal%3A%2F%2Fks138.taraka.dev%2Ft%2Fmod%2Fics%2Fevents.ics");
+  });
+  test("Apple opens the bare webcal:// address", () => {
+    expect(links.apple).toBe(web);
+  });
+  test("Outlook.com takes the https feed and an encoded calendar name", () => {
+    const u = new URL(links.outlook);
+    expect(u.origin + u.pathname).toBe("https://outlook.live.com/calendar/0/addfromweb");
+    expect(u.searchParams.get("url")).toBe(abs);
+    expect(u.searchParams.get("name")).toBe("Events & More");
+  });
+  test("download is the plain https feed", () => {
+    expect(links.download).toBe(abs);
+  });
+});
+
+describe("calendar grid geometry", () => {
+  const H = 3600000;
+  const day = Date.UTC(2026, 9, 5); // Monday 2026-10-05 00:00 UTC
+  const ev = (name, startH, hours) => ({ event_name: name, _start: day + startH * H, _end: day + (startH + hours) * H });
+
+  test("weekStartOf honours the locale's first weekday", () => {
+    expect(fns.weekStartOf("2026-10-08", 1)).toBe("2026-10-05"); // Thursday -> Monday
+    expect(fns.weekStartOf("2026-10-08", 7)).toBe("2026-10-04"); // Sunday start
+    expect(fns.weekStartOf("2026-10-05", 1)).toBe("2026-10-05");
+    expect(fns.weekStartOf("2026-10-04", 1)).toBe("2026-09-28"); // Sunday belongs to the week before
+  });
+
+  test("addDays crosses month and year ends", () => {
+    expect(fns.addDays("2026-12-31", 1)).toBe("2027-01-01");
+    expect(fns.addDays("2026-03-01", -1)).toBe("2026-02-28");
+  });
+
+  test("a timed event gets its start and end minute", () => {
+    const [b] = fns.dayBlocks([ev("A", 10, 2)], "2026-10-05", "UTC");
+    expect([b.s, b.e, b.cs, b.ce, b.col, b.n]).toEqual([600, 720, false, false, 0, 1]);
+  });
+
+  test("overlapping events share lanes; a later one starts a new cluster", () => {
+    const out = fns.dayBlocks([ev("A", 10, 3), ev("B", 11, 1), ev("C", 15, 1)], "2026-10-05", "UTC");
+    const by = Object.fromEntries(out.map((b) => [b.ev.event_name, b]));
+    expect([by.A.col, by.A.n, by.B.col, by.B.n]).toEqual([0, 2, 1, 2]);
+    expect([by.C.col, by.C.n]).toEqual([0, 1]);
+  });
+
+  test("a multi-day event continues into the next day", () => {
+    const e = ev("Long", 20, 8); // 20:00 -> 04:00 next day
+    const d1 = fns.dayBlocks([e], "2026-10-05", "UTC")[0], d2 = fns.dayBlocks([e], "2026-10-06", "UTC")[0];
+    expect([d1.s, d1.e, d1.ce]).toEqual([1200, 1440, true]);
+    expect([d2.s, d2.e, d2.cs]).toEqual([0, 240, true]);
+  });
+
+  test("an event covering the whole day goes to the all-day strip", () => {
+    const out = fns.dayBlocks([ev("Day", 0, 48)], "2026-10-06", "UTC");
+    expect(out).toHaveLength(0);
+    expect(out.full).toHaveLength(1);
+  });
+
+  test("an announcement with no duration gets a 30 minute block", () => {
+    const [b] = fns.dayBlocks([{ event_name: "N", _start: day + 9 * H, _end: day + 9 * H }], "2026-10-05", "UTC");
+    expect(b.e - b.s).toBe(30);
+  });
+
+  test("events on other days are left out", () => {
+    expect(fns.dayBlocks([ev("A", 10, 1)], "2026-10-06", "UTC")).toHaveLength(0);
+  });
+
+  test("minsOf reads the display zone", () => {
+    expect(fns.minsOf(day + 10 * H, "UTC")).toBe(600);
+    expect(fns.minsOf(day + 10 * H, "America/Toronto")).toBe(360); // UTC-4 in October
   });
 });

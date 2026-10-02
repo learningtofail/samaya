@@ -2212,6 +2212,40 @@ Decided 2026-10-02, accepting the recommended defaults: (1) Claude drafts transl
 
 No open decisions remain. Build starts with §71.12 step 1 (images).
 
+## 73. Subscribe links and the Week / 3-day calendar
+
+Built 2026-10-02 (revision: no schema change).
+
+### 73.1 Alliance chips
+
+The chips on `/events` and `/t/{slug}/events` are ordinary links (`/events`, `/t/{slug}/events`). A plain click navigates. The earlier in-place filter on the combined page is removed: the alliance pages already show that alliance plus Kingdom-wide events, and the URL is what a visitor needs to subscribe to one alliance's feed.
+
+### 73.2 Subscribe links, checked against vendor documentation
+
+Only the manual paths are documented by the vendors. The one-click deep links are conventions that work in practice but could change without notice, so the menu always offers the copyable feed address next to them.
+
+| Provider | What the vendor documents | What the menu does |
+| --- | --- | --- |
+| Google Calendar | "Add other calendars, From URL" (support.google.com/calendar/answer/37100). The `?cid=` deep link is not documented | `https://calendar.google.com/calendar/r?cid=` plus the **webcal://** feed, percent-encoded. An `https://` value in `cid` is rejected with "Unable to add calendar" (community reports; the previous link used https). Google fetches a webcal feed over http first, so the server must redirect to https (Cloudflare does) |
+| Apple Calendar | "New Calendar Subscription"; clicking a link from a web page or email subscribes (support.apple.com/guide/calendar/icl1022/mac) | `webcal://` link |
+| Outlook.com | "Subscribe from web" (support.microsoft.com, "Import or subscribe to a calendar in Outlook.com or Outlook on the web"). `addfromweb` is not documented | `https://outlook.live.com/calendar/0/addfromweb?url=<https feed>&name=<title>`. Personal accounts only |
+| Outlook desktop | Account Settings, Internet Calendars. Microsoft documents that Outlook desktop can silently fail to add a feed when the server mishandles its modern-authentication probe (learn.microsoft.com, "Can't add an Internet calendar") | No one-click link; "Copy feed link" is the path. The Apple item no longer claims Outlook desktop |
+| Any other app | Subscribe by URL | "Copy feed link" and "Download .ics file" |
+
+Refresh is the provider's choice and cannot be forced: Google about 12 to 24 hours, Outlook.com about 3 hours (Microsoft states up to 24), Apple per the user's Auto-refresh setting. `REFRESH-INTERVAL` and `X-PUBLISHED-TTL` are sent as hints only.
+
+Feed changes: the invalid `CALNAME` property is no longer emitted (`X-WR-CALNAME` stays), and both feeds answer `HEAD`. `DTSTAMP` stays the generation time on purpose: a stale value could make Apple ignore a moved occurrence.
+
+Unverified from this environment (no route to production or to the vendors): that each deep link opens its provider's dialog today. The operator checks the four links once after deploy and, for Google, `curl -sI -A 'Google-Calendar-Importer' https://ks138.taraka.dev/ics/events.ics` to rule out a Cloudflare bot rule on the feed.
+
+### 73.3 Week and 3-day views
+
+The Calendar tab has a Month / Week / 3 days switcher (stored in `samaya_cal_mode`). Each day is a 00:00 to 24:00 column, 56 px per hour, with hour, half-hour and quarter-hour lines. The gutter shows the display zone and, when it is not UTC, UTC beside it. Overlapping events share lanes; events that cover a whole day go to a sticky all-day strip; announcements get a 30 minute block; a red line marks now. Previous and Next move 7 or 3 days; Week starts on the language's first weekday (`SamayaI18n.firstWeekday()`). Clicking a day heading or an event selects that day and opens its row in the list.
+
+Implementation rules that differ from the design handoff: geometry is passed as custom properties through `data-vars` (no inline `style=`), CSS uses logical properties so Arabic mirrors, time ranges are wrapped in `<bdi dir="ltr">`, and the pure geometry (`dayBlocks`, `weekStartOf`, `addDays`, `minsOf`) is unit tested.
+
+Known limit: a day is always 24 rows, so on a daylight-saving change day the hour rows are off by one after the change.
+
 # Archive
 
 Fully superseded designs, moved here unchanged except for position. Each begins with its own "Superseded" note. They stay for historical reasoning only and do not describe the current system.
