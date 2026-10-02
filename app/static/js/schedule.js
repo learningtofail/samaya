@@ -100,19 +100,25 @@ function occStatusHtml(occ) {
   return `<div class="label-stack">${labels.join(' ')}</div>`;
 }
 
+// "2026-10-03 02:00 UTC · Oct 2, 10:00 PM EDT" becomes two lines.
+function whenHtml(iso) {
+  const parts = fmtDateTime(iso).split(' · ');
+  return `<div class="sched">${escapeHtml(parts[0])}</div>${parts[1] ? `<div class="samaya-muted">${escapeHtml(parts.slice(1).join(' · '))}</div>` : ''}`;
+}
+
 function buildScheduleRow(occ) {
   const cancelled = occ.status === 'cancelled';
   let actions = '<span class="samaya-muted">Read only</span>';
   if (occWritable(occ)) {
     actions = `<div class="row-actions">
+      <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="edit" data-id="${occ.id}" title="Move this date or give it its own message">Move or edit</button>
       ${cancelled
         ? `<button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="restore" data-id="${occ.id}">Restore</button>`
-        : `<button type="button" class="pf-v6-c-button pf-m-danger pf-m-small" data-action="cancel" data-id="${occ.id}">Cancel</button>`}
-      <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="edit" data-id="${occ.id}">Move or edit message</button>
+        : `<details class="menu"><summary class="menu__btn" aria-label="More actions for ${escapeHtml(occ.event_name)}">&#8943;</summary><div class="menu__panel"><button type="button" class="menu__item menu__item--danger" data-action="cancel" data-id="${occ.id}">Cancel this date&hellip;</button></div></details>`}
     </div>`;
   }
   return `<tr class="pf-v6-c-table__tr${cancelled ? ' is-cancelled' : ''}">
-    <td class="pf-v6-c-table__td" data-label="When">${escapeHtml(fmtDateTime(occ.start_datetime_utc))}</td>
+    <td class="pf-v6-c-table__td" data-label="When">${whenHtml(occ.start_datetime_utc)}</td>
     <td class="pf-v6-c-table__td" data-label="Event"><strong>${escapeHtml(occ.event_name)}</strong><div>${typeChip(occ.type)}</div></td>
     <td class="pf-v6-c-table__td" data-label="Alliance">${occAudienceHtml(occ)}</td>
     <td class="pf-v6-c-table__td" data-label="Status">${occStatusHtml(occ)}</td>

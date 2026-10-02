@@ -71,6 +71,17 @@ function eventScheduleText(ev) {
   return text;
 }
 
+// Two lines: the rule and time, then the start date and end date.
+function eventScheduleHtml(ev) {
+  const when = dualTimeString(`${ev.anchor_date}T${ev.start_time_utc}:00Z`);
+  if (ev.recurrence_kind === 'interval_days') {
+    let sub = `from ${ev.anchor_date}`;
+    if (ev.until_date) sub += ` until ${ev.until_date}`;
+    return `<div class="sched">${escapeHtml(describeRecurrence(ev))} at ${escapeHtml(when)}</div><div class="samaya-muted">${escapeHtml(sub)}</div>`;
+  }
+  return `<div class="sched">${escapeHtml(ev.anchor_date)} at ${escapeHtml(when)}</div>`;
+}
+
 function shortReminder(m) {
   if (m === 0) return 'start';
   if (m % 1440 === 0) return (m / 1440) + 'd';
@@ -84,9 +95,14 @@ function eventAudienceHtml(ev) {
   const ids = ev.audience_tenant_ids && ev.audience_tenant_ids.length
     ? ev.audience_tenant_ids
     : Array.from(new Set([ev.owning_tenant_id].concat(ev.alliances.map((a) => a.tenant_id))));
-  const chips = ids.map((id) => `<span class="audience-tag">${escapeHtml(tenantName(id))}</span>`).join(' ');
+  // Show the first few alliances; the rest collapse into a "+N" with the names as a tooltip.
+  const names = ids.map((id) => tenantName(id));
+  const shown = names.slice(0, ev.scope === 'kingdom-wide' ? 2 : 3);
+  const chips = shown.map((n) => `<span class="audience-tag">${escapeHtml(n)}</span>`).join(' ');
+  const more = names.length > shown.length
+    ? `<span class="audience-more" title="${escapeHtml(names.slice(shown.length).join(', '))}">+${names.length - shown.length}</span>` : '';
   const kingdom = ev.scope === 'kingdom-wide' ? `${pfLabel('Kingdom-wide', 'pf-m-purple')} ` : '';
-  return `<div class="audience-chips">${kingdom}${chips}</div>${destinationBadgeHtml(ev)}`;
+  return `<div class="audience-chips">${kingdom}${chips}${more}</div>${destinationBadgeHtml(ev)}`;
 }
 
 function destinationBadgeHtml(o) {
@@ -119,14 +135,20 @@ function buildEventRow(ev) {
   const actions = writable
     ? `<div class="row-actions">
         <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="edit" data-id="${ev.id}">Edit</button>
-        <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="duplicate" data-id="${ev.id}">Duplicate</button>
-        <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="toggle" data-id="${ev.id}">${ev.active ? 'Deactivate' : 'Activate'}</button>
-        <button type="button" class="pf-v6-c-button pf-m-danger pf-m-small" data-action="delete" data-id="${ev.id}">Delete</button>
+        <details class="menu">
+          <summary class="menu__btn" aria-label="More actions for ${escapeHtml(ev.name)}">&#8943;</summary>
+          <div class="menu__panel">
+            <button type="button" class="menu__item" data-action="duplicate" data-id="${ev.id}">Duplicate</button>
+            <button type="button" class="menu__item" data-action="toggle" data-id="${ev.id}">${ev.active ? 'Deactivate' : 'Activate'}</button>
+            <hr class="menu__sep">
+            <button type="button" class="menu__item menu__item--danger" data-action="delete" data-id="${ev.id}">Delete&hellip;</button>
+          </div>
+        </details>
       </div>`
     : '<span class="samaya-muted">Read only</span>';
   return `<tr class="pf-v6-c-table__tr">
     <td class="pf-v6-c-table__td" data-label="Event"><strong>${escapeHtml(ev.name)}</strong><div>${typeChip(ev.type)}</div></td>
-    <td class="pf-v6-c-table__td" data-label="Schedule">${escapeHtml(eventScheduleText(ev))}${duration}</td>
+    <td class="pf-v6-c-table__td" data-label="Schedule">${eventScheduleHtml(ev)}${duration}</td>
     <td class="pf-v6-c-table__td" data-label="Audience">${eventAudienceHtml(ev)}</td>
     <td class="pf-v6-c-table__td" data-label="Reminders">${reminders}</td>
     <td class="pf-v6-c-table__td" data-label="Status"><div class="label-stack">${labels.join(' ')}</div></td>
@@ -187,6 +209,29 @@ bindActions(document.getElementById('eventsBody'), {
   toggle(btn) { const ev = eventById(parseInt(btn.dataset.id, 10)); if (ev) toggleEventActive(ev); },
   delete(btn) { const ev = eventById(parseInt(btn.dataset.id, 10)); if (ev) deleteEvent(ev); },
 });
+
+// Close the row menu after a choice, on an outside click, or on Escape.
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('.menu[open]').forEach((m) => {
+    if (!m.contains(e.target) || e.target.closest('.menu__item')) m.removeAttribute('open');
+  });
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.querySelectorAll('.menu[open]').forEach((m) => m.removeAttribute('open'));
+});
+
+// Row density (compact or comfortable), remembered per browser.
+const DENSITY_KEY = 'samaya_admin_density';
+function setDensity(mode) {
+  const comfy = mode === 'comfy';
+  document.body.classList.toggle('density-comfy', comfy);
+  document.getElementById('densityCompact').setAttribute('aria-pressed', String(!comfy));
+  document.getElementById('densityComfy').setAttribute('aria-pressed', String(comfy));
+  try { localStorage.setItem(DENSITY_KEY, mode); } catch { /* not fatal */ }
+}
+document.getElementById('densityCompact').addEventListener('click', () => setDensity('compact'));
+document.getElementById('densityComfy').addEventListener('click', () => setDensity('comfy'));
+setDensity((() => { try { return localStorage.getItem(DENSITY_KEY) === 'comfy' ? 'comfy' : 'compact'; } catch { return 'compact'; } })());
 
 ['eventsType', 'eventsScope', 'eventsStatus'].forEach((id) => {
   document.getElementById(id).addEventListener('change', renderEventsTable);

@@ -109,7 +109,7 @@ function buildTicketHtml(t) {
         ${dismissed
     ? `<button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="restore" data-id="${t.id}">Restore</button>`
     : `<button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="dismiss" data-id="${t.id}">Dismiss</button>`}
-        ${isSuperadmin() ? `<button type="button" class="pf-v6-c-button pf-m-danger pf-m-small" data-action="delete" data-id="${t.id}">Delete</button>` : ''}
+        ${isSuperadmin() ? `<details class="menu"><summary class="menu__btn" aria-label="More actions">&#8943;</summary><div class="menu__panel"><button type="button" class="menu__item menu__item--danger" data-action="delete" data-id="${t.id}">Delete&hellip;</button></div></details>` : ''}
       </div>` : '';
   const respond = moderate
     ? `<form class="response-form" data-ticket="${t.id}">
