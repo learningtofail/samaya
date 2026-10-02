@@ -173,18 +173,26 @@
       </select>
     </div>
   </div>
-  <p class="count" id="deliveryCount" role="status"></p>
-    <div class="table-wrap">
-      <table class="pf-v6-c-table pf-m-grid-md responsive-table">
-        <caption class="sr-only">Deliveries</caption>
-        <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Due</th><th class="pf-v6-c-table__th" scope="col">Event</th><th class="pf-v6-c-table__th" scope="col">Alliance and kind</th><th class="pf-v6-c-table__th" scope="col">Status</th><th class="pf-v6-c-table__th" scope="col">Detail</th><th class="pf-v6-c-table__th" scope="col">Actions</th></tr></thead>
-        <tbody id="deliveryBody"></tbody>
-      </table>
-    </div>
+  <h3 class="view__subtitle" id="h-delivery-upcoming">Upcoming</h3>
+  <p class="count" id="deliveryUpcomingCount" role="status"></p>
+  <div class="table-wrap">
+    <table class="pf-v6-c-table pf-m-grid-md responsive-table" aria-labelledby="h-delivery-upcoming">
+      <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Due</th><th class="pf-v6-c-table__th" scope="col">Event</th><th class="pf-v6-c-table__th" scope="col">Alliance and kind</th><th class="pf-v6-c-table__th" scope="col">Status</th><th class="pf-v6-c-table__th" scope="col">Detail</th><th class="pf-v6-c-table__th" scope="col">Actions</th></tr></thead>
+      <tbody id="deliveryUpcomingBody"></tbody>
+    </table>
+  </div>
+  <h3 class="view__subtitle" id="h-delivery-past">Past</h3>
+  <p class="count" id="deliveryPastCount" role="status"></p>
+  <div class="table-wrap">
+    <table class="pf-v6-c-table pf-m-grid-md responsive-table" aria-labelledby="h-delivery-past">
+      <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Due</th><th class="pf-v6-c-table__th" scope="col">Event</th><th class="pf-v6-c-table__th" scope="col">Alliance and kind</th><th class="pf-v6-c-table__th" scope="col">Status</th><th class="pf-v6-c-table__th" scope="col">Detail</th><th class="pf-v6-c-table__th" scope="col">Actions</th></tr></thead>
+      <tbody id="deliveryPastBody"></tbody>
+    </table>
+  </div>
   <details class="about-page">
     <summary>About this tab</summary>
     <div class="about-page__body">
-      <p>Every Discord post the engine makes or tries to make, one row each. The Detail column says why a post failed or what happened.</p>
+      <p>Every Discord post the engine makes or tries to make, one row each. <strong>Upcoming</strong> lists pending and sending posts, soonest first. <strong>Past</strong> lists posted, failed and cancelled posts, newest first, within the look-back window. The Detail column says why a post failed or what happened.</p>
       <ul>
         <li><strong>Retry</strong> puts a failed post back in the queue. It only works while the event has not started and is not cancelled.</li>
         <li><strong>Needs attention</strong> means there are errors in the last 7 days or a post has waited more than 5 minutes.</li>

@@ -6,7 +6,9 @@
 // destinations underneath.
 // Depends on common.js.
 
-let DELIVERIES = [];
+let UPCOMING_DELIVERIES = [];
+let PAST_DELIVERIES = [];
+const OPEN_DELIVERY_STATES = ['pending', 'sending'];
 
 const DELIVERY_KIND_LABELS = { discord_event: 'Discord event', reminder: 'Reminder', announcement: 'Message' };
 
@@ -29,19 +31,30 @@ async function loadDelivery() {
   if (eventId) params.set('event_id', eventId);
   params.set('limit', '200');
   params.set('days', byId('deliveryDays').value || '7');
+  const fetchSection = (section) => {
+    const wanted = !status || (section === 'upcoming') === OPEN_DELIVERY_STATES.includes(status);
+    if (!wanted) return Promise.resolve([]);
+    const p = new URLSearchParams(params);
+    p.set('section', section);
+    return api('GET', '/api/deliveries?' + p.toString(), null, false, filter);
+  };
   try {
-    const [health, rows, events] = await Promise.all([
+    const [health, upcoming, past, events] = await Promise.all([
       api('GET', '/api/delivery-health', null, false, filter),
-      api('GET', '/api/deliveries?' + params.toString(), null, false, filter),
+      fetchSection('upcoming'),
+      fetchSection('past'),
       api('GET', '/api/events', null, false, filter),
     ]);
     renderDeliveryHealth(health);
     renderDeliveryEventFilter(events, eventId);
-    DELIVERIES = rows;
+    UPCOMING_DELIVERIES = upcoming;
+    PAST_DELIVERIES = past;
     renderDeliveries();
   } catch (e) {
     toast(e.message, true);
-    byId('deliveryBody').innerHTML = emptyRow(6, 'Could not load the delivery log: ' + e.message);
+    const failed = emptyRow(6, 'Could not load the delivery log: ' + e.message);
+    byId('deliveryUpcomingBody').innerHTML = failed;
+    byId('deliveryPastBody').innerHTML = failed;
   }
 }
 
@@ -98,14 +111,19 @@ function buildDeliveryRow(d) {
   </tr>`;
 }
 
-function renderDeliveries() {
-  byId('deliveryBody').innerHTML = DELIVERIES.length
-    ? DELIVERIES.map(buildDeliveryRow).join('')
-    : emptyRow(6, 'No deliveries match these filters.');
-  byId('deliveryCount').textContent = `${DELIVERIES.length} shown, newest first (up to 200).`;
+function renderDeliverySection(rows, bodyId, countId, emptyText, countText) {
+  byId(bodyId).innerHTML = rows.length ? rows.map(buildDeliveryRow).join('') : emptyRow(6, emptyText);
+  byId(countId).textContent = rows.length ? countText(rows.length) : '';
 }
 
-bindActions(byId('deliveryBody'), {
+function renderDeliveries() {
+  renderDeliverySection(UPCOMING_DELIVERIES, 'deliveryUpcomingBody', 'deliveryUpcomingCount',
+    'Nothing is waiting to be sent.', (n) => `${n} shown, soonest first (up to 200).`);
+  renderDeliverySection(PAST_DELIVERIES, 'deliveryPastBody', 'deliveryPastCount',
+    'No past deliveries match these filters.', (n) => `${n} shown, newest first (up to 200).`);
+}
+
+const deliveryActions = {
   async retry(btn) {
     btn.disabled = true;
     try {
@@ -117,7 +135,9 @@ bindActions(byId('deliveryBody'), {
       btn.disabled = false;
     }
   },
-});
+};
+bindActions(byId('deliveryUpcomingBody'), deliveryActions);
+bindActions(byId('deliveryPastBody'), deliveryActions);
 ['deliveryStatus', 'deliveryKind', 'deliveryEvent', 'deliveryDays'].forEach((id) => byId(id).addEventListener('change', loadDelivery));
 
 VIEW_LOADERS.delivery = loadDelivery;

@@ -82,6 +82,7 @@ summary:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--focus
 .view.active { display: block; }
 .view__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-4); }
 .view__title { font-size: var(--fs-lg); font-weight: 600; }
+.view__subtitle { font-size: var(--fs-md); font-weight: 600; margin: var(--space-4) 0 var(--space-1); }
 .view__note { margin-bottom: var(--space-3); }
 .count { color: var(--muted); font-size: var(--fs-sm); margin: var(--space-2) 0; }
 

@@ -577,6 +577,24 @@ class TestDeliveryLog:
         health = (await client.get(f"{BASE}/delivery-health")).json()
         assert health["counts"].get("error") is None or isinstance(health["counts"], dict)
 
+    async def test_sections_split_open_from_finished_and_sort_each_way(self, client, fake_discord, sf, configured):
+        fake_discord.create_error = "boom"
+        await _create_event(client, reminder_minutes=[])
+        await _post_everything(sf, fake_discord)
+        await _create_event(client, reminder_minutes=[])  # new event: still pending
+        params = {"days": 30, "limit": 200}
+        upcoming = (await client.get(f"{BASE}/deliveries", params={**params, "section": "upcoming"})).json()
+        past = (await client.get(f"{BASE}/deliveries", params={**params, "section": "past"})).json()
+        assert upcoming and {d["status"] for d in upcoming} <= {"pending", "sending"}
+        assert past and not {d["status"] for d in past} & {"pending", "sending"}
+        due = [d["due_at_utc"] for d in upcoming]
+        assert due == sorted(due)
+        due = [d["due_at_utc"] for d in past]
+        assert due == sorted(due, reverse=True)
+
+    async def test_unknown_section_is_rejected(self, client):
+        assert (await client.get(f"{BASE}/deliveries", params={"section": "soon"})).status_code == 422
+
     async def test_retry_only_applies_to_errors(self, client, fake_discord, sf):
         await _create_event(client)
         await _post_everything(sf, fake_discord)

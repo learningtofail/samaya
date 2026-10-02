@@ -342,12 +342,16 @@ async def list_deliveries(
     status: str | None = Query(default=None),
     event_id: int | None = Query(default=None),
     kind: str | None = Query(default=None),
+    section: str | None = Query(default=None, pattern="^(upcoming|past)$"),
     days: int = Query(default=7, ge=1, le=90),
     limit: int = Query(default=100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
-    """Newest first, one entry per send (spec §67.6): deliveries merged into
-    another appear under it as `members`. `days` bounds by due time."""
+    """One entry per send (spec §67.6): deliveries merged into another appear
+    under it as `members`. Without `section`: newest first, `days` bounds by
+    due time. `section=upcoming`: pending and sending, soonest first, no
+    bound on how far ahead. `section=past`: everything else, newest first,
+    bounded by `days`."""
     now = datetime.now(timezone.utc)
     tenant_ids = [t.id for t in tenants]
     child = aliased(Delivery)
@@ -361,11 +365,17 @@ async def list_deliveries(
         .where(
             Delivery.merged_into_id.is_(None),
             or_(Delivery.tenant_id.in_(tenant_ids), Delivery.id.in_(in_scope_via_member)),
-            Delivery.due_at_utc >= now - timedelta(days=days),
         )
-        .order_by(Delivery.due_at_utc.desc(), Delivery.id.desc())
         .limit(limit)
     )
+    open_states = ("pending", "sending")
+    if section == "upcoming":
+        stmt = stmt.where(Delivery.status.in_(open_states)).order_by(Delivery.due_at_utc.asc(), Delivery.id.asc())
+    else:
+        if section == "past":
+            stmt = stmt.where(Delivery.status.not_in(open_states))
+        stmt = stmt.where(Delivery.due_at_utc >= now - timedelta(days=days)).order_by(
+            Delivery.due_at_utc.desc(), Delivery.id.desc())
     if status:
         stmt = stmt.where(Delivery.status == status)
     if event_id is not None:
