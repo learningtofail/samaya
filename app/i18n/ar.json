@@ -12,6 +12,8 @@
  "public.common.submit": "إرسال",
  "public.common.done": "تم",
  "public.common.loading": "جارٍ التحميل…",
+ "public.common.standardLook": "استخدام المظهر القياسي",
+ "public.common.themedLook": "استخدام مظهر السمة",
  "public.events.title": "جدول فعاليات Kingshot",
  "public.events.skipLink": "انتقل إلى الجدول",
  "public.events.kicker": "Kingshot",

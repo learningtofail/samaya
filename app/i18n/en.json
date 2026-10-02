@@ -11,6 +11,8 @@
  "public.common.submit": "Submit",
  "public.common.done": "Done",
  "public.common.loading": "Loading…",
+ "public.common.standardLook": "Use the standard look",
+ "public.common.themedLook": "Use the themed look",
  "public.events.title": "Kingshot Event Schedule",
  "public.events.skipLink": "Skip to schedule",
  "public.events.kicker": "Kingshot",

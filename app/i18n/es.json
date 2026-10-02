@@ -11,6 +11,8 @@
  "public.common.submit": "Enviar",
  "public.common.done": "Listo",
  "public.common.loading": "Cargando…",
+ "public.common.standardLook": "Usar el aspecto estándar",
+ "public.common.themedLook": "Usar el aspecto del tema",
  "public.events.title": "Calendario de eventos de Kingshot",
  "public.events.skipLink": "Ir al calendario",
  "public.events.kicker": "Kingshot",

@@ -420,3 +420,38 @@ class TestArtApi:
         t = await make_theme(client, tenant["kingdom_id"], radius=8, tint="#E8EEF8", art_height=300)
         r = (await client.patch(f"/admin/api/themes/{t['id']}", json={"radius": None, "tint": None})).json()
         assert r["radius"] is None and r["tint"] is None and r["art_height"] == 300
+
+
+class TestStandardLook:
+
+    async def _themed(self, client, tenant):
+        t = await make_theme(client, tenant["kingdom_id"])
+        await client.patch(f"/admin/api/kingdoms/{tenant['kingdom_id']}", json={"default_theme_id": t["id"]})
+        return t
+
+    async def test_state_attribute_follows_the_theme(self, client, client_no_session, tenant):
+        assert "data-theme-state" not in (await client_no_session.get("/events")).text
+        t = await self._themed(client, tenant)
+        html = (await client_no_session.get("/events")).text
+        assert 'data-theme-state="on"' in html and f"/theme/{t['id']}.css" in html
+
+    async def test_cookie_opts_out_of_the_theme_on_both_pages(self, client, client_no_session, tenant):
+        await self._themed(client, tenant)
+        client_no_session.cookies.set("samaya_standard", "1")
+        for path in ("/events", "/feedback"):
+            html = (await client_no_session.get(path)).text
+            assert "/theme/" not in html and 'data-theme-state="off"' in html
+        assert "family=Noto+Sans" in (await client_no_session.get("/events")).text
+
+    async def test_opt_out_with_no_theme_offers_nothing(self, client_no_session, tenant):
+        client_no_session.cookies.set("samaya_standard", "1")
+        assert "data-theme-state" not in (await client_no_session.get("/events")).text
+
+    async def test_preview_ignores_the_opt_out(self, client, tenant):
+        t = await make_theme(client, tenant["kingdom_id"], name="P")
+        client.cookies.set("samaya_standard", "1")
+        assert f"/theme/{t['id']}.css" in (await client.get(f"/events?preview_theme={t['id']}")).text
+
+    async def test_feedback_page_is_themed(self, client, client_no_session, tenant):
+        t = await self._themed(client, tenant)
+        assert f"/theme/{t['id']}.css" in (await client_no_session.get("/feedback")).text

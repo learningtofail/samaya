@@ -11,6 +11,8 @@
  "public.common.submit": "Отправить",
  "public.common.done": "Готово",
  "public.common.loading": "Загрузка…",
+ "public.common.standardLook": "Использовать стандартный вид",
+ "public.common.themedLook": "Использовать вид темы",
  "public.events.title": "Расписание событий Kingshot",
  "public.events.skipLink": "К расписанию",
  "public.events.kicker": "Kingshot",

@@ -12,6 +12,8 @@
  "public.common.submit": "提交",
  "public.common.done": "完成",
  "public.common.loading": "加载中…",
+ "public.common.standardLook": "使用标准外观",
+ "public.common.themedLook": "使用主题外观",
  "public.events.title": "Kingshot 活动日程",
  "public.events.skipLink": "跳到日程",
  "public.events.kicker": "Kingshot",

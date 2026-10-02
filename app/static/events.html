@@ -63,6 +63,10 @@
 
 <footer class="ftr">
   <span id="footerText" data-i18n="public.events.footer">Times shown in your time zone and UTC · Powered by Samaya</span>
+  <span class="look" id="lookBox" hidden>
+    <button type="button" class="look__btn" id="lookStandard" hidden data-i18n="public.common.standardLook">Use the standard look</button>
+    <button type="button" class="look__btn" id="lookThemed" hidden data-i18n="public.common.themedLook">Use the themed look</button>
+  </span>
   <span class="ftr-links"><a href="/feedback" data-i18n="public.events.feedbackLink">Feedback</a><a id="icsLink" href="/ics/events.ics" data-i18n="public.events.icsLink">ICS feed</a></span>
 </footer>
 
@@ -111,6 +115,7 @@
 </div>
 
 <script src="/static/i18n.js"></script>
+<script src="/static/look.js"></script>
 <script src="/static/events-public.js"></script>
 </body>
 </html>

@@ -283,3 +283,7 @@ body::before {
   .hero { background: var(--surface); }
   .brand-text { background: transparent; padding: 0; }
 }
+
+.look { margin: 0; }
+.look__btn { min-height: 36px; padding: 0; border: 0; background: none; color: var(--gold-ink); font: inherit; font-size: 13px; text-decoration: underline; cursor: pointer; }
+@media (max-width: 640px) { .look__btn { min-height: 44px; } }

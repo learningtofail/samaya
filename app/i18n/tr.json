@@ -11,6 +11,8 @@
  "public.common.submit": "Gönder",
  "public.common.done": "Tamam",
  "public.common.loading": "Yükleniyor…",
+ "public.common.standardLook": "Standart görünümü kullan",
+ "public.common.themedLook": "Tema görünümünü kullan",
  "public.events.title": "Kingshot Etkinlik Takvimi",
  "public.events.skipLink": "Takvime geç",
  "public.events.kicker": "Kingshot",

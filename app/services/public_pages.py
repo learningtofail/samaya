@@ -28,6 +28,7 @@ from services.themes import active_theme, is_renderable, theme_head_html
 _HTML_TAG_RE = re.compile(r"<html\b[^>]*>", re.IGNORECASE)
 _TITLE_RE = re.compile(r"<title>.*?</title>", re.IGNORECASE | re.DOTALL)
 THEME_MARKER = "<!--theme-head-->"
+STANDARD_LOOK_COOKIE = "samaya_standard"
 _ONE_YEAR = 365 * 24 * 3600
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -54,7 +55,11 @@ async def get_request_theme(request: Request, db: AsyncSession, kingdom):
             theme = await db.get(Theme, int(raw))
             if theme is not None and theme.kingdom_id == kingdom.id and is_renderable(theme):
                 return theme, True
-    return await get_public_theme(db, kingdom), False
+    theme = await get_public_theme(db, kingdom)
+    request.state.theme_available = theme is not None
+    if request.cookies.get(STANDARD_LOOK_COOKIE) == "1":
+        return None, False  # the visitor opted out of themes (spec §71.15)
+    return theme, False
 
 
 def mark_preview(response: HTMLResponse) -> HTMLResponse:
@@ -79,7 +84,10 @@ def render_public_page(
     direction = text_direction(locale)
 
     page = page.replace(THEME_MARKER, theme_head_html(theme, STATIC_ASSET_VERSION), 1)
-    page = _HTML_TAG_RE.sub(f'<html lang="{locale}" dir="{direction}">', page, count=1)
+    # data-theme-state tells the footer toggle what to offer: "on" (a theme is showing), "off" (opted out).
+    state = "on" if theme is not None else ("off" if request.cookies.get(STANDARD_LOOK_COOKIE) == "1" and getattr(request.state, "theme_available", False) else "")
+    state_attr = f' data-theme-state="{state}"' if state else ""
+    page = _HTML_TAG_RE.sub(f'<html lang="{locale}" dir="{direction}"{state_attr}>', page, count=1)
     if title_key:
         title = html_lib.escape(t(locale, title_key), quote=False)
         page = _TITLE_RE.sub(lambda _m: f"<title>{title}</title>", page, count=1)

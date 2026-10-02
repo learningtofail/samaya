@@ -11,6 +11,8 @@
  "public.common.submit": "Senden",
  "public.common.done": "Fertig",
  "public.common.loading": "Lädt …",
+ "public.common.standardLook": "Standarddarstellung verwenden",
+ "public.common.themedLook": "Themendarstellung verwenden",
  "public.events.title": "Kingshot-Eventplan",
  "public.events.skipLink": "Zum Plan springen",
  "public.events.kicker": "Kingshot",

@@ -53,6 +53,10 @@
     <summary data-i18n="public.feedback.aboutTitle">About this page</summary>
     <p data-i18n="public.feedback.aboutBody">Upvotes are per browser, not per person: the first time you visit, this page stores a random anonymous id in your browser (nothing that identifies you). Clearing your browser's storage, or voting from a different browser or device, resets your vote. That is an accepted tradeoff for a page with no login, not a bug. An optional contact you leave on a submission is shown only to admins triaging the list, never on this board.</p>
   </details>
+  <p class="look" id="lookBox" hidden>
+    <button type="button" class="look__btn" id="lookStandard" hidden data-i18n="public.common.standardLook">Use the standard look</button>
+    <button type="button" class="look__btn" id="lookThemed" hidden data-i18n="public.common.themedLook">Use the themed look</button>
+  </p>
 </main>
 
 <!-- Feedback modal (spec §40) -->
@@ -106,6 +110,7 @@
 </div>
 
 <script src="/static/i18n.js"></script>
+<script src="/static/look.js"></script>
 <script src="/static/feedback.js"></script>
 </body>
 </html>
