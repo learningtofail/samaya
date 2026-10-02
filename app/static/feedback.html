@@ -4,137 +4,104 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Feedback &amp; Requests — Kingshot</title>
-<link rel="stylesheet" href="/static/vendor/patternfly/patternfly.min.css">
-<link rel="stylesheet" href="/static/vendor/patternfly/patternfly-addons.css">
 <link rel="stylesheet" href="/static/feedback.css">
+<!--theme-head-->
 </head>
 <body>
+<a class="skip-link" href="#main" data-i18n="public.feedback.skipLink">Skip to the board</a>
 
-<header class="pf-v6-c-masthead samaya-header-bar">
-  <div class="pf-v6-c-masthead__main">
-    <span class="samaya-header-brand"><span aria-hidden="true">💬</span> <span data-i18n="public.feedback.heading">Feedback &amp; Requests</span></span>
+<header class="hdr">
+  <div class="brand">
+    <div class="kicker" data-i18n="public.feedback.kicker">Kingshot</div>
+    <h1 data-i18n="public.feedback.heading">Feedback &amp; Requests</h1>
   </div>
-  <div class="pf-v6-c-masthead__content samaya-header-content-end">
+  <div class="hdr-actions">
     <select id="langSelect" class="lang-select" aria-label="Language" data-i18n-attr="aria-label:public.common.language" hidden></select>
-    <a class="header-link" href="/events" data-i18n="public.feedback.back">← Back to Events</a>
+    <a class="btn-plain" href="/events" data-i18n="public.feedback.back">&larr; Back to events</a>
   </div>
 </header>
 
-<div class="samaya-page-container">
-
-  <div class="pf-v6-c-card pf-v6-u-mb-lg">
-    <div class="pf-v6-c-card__body">
-      <p class="samaya-intro-text" data-i18n="public.feedback.intro">
-        See something confusing, want a new event or announcement, or just have an idea?
-        Submit it below — everyone can see and upvote what's here, and leadership triages it from this same list.
-      </p>
-      <div class="samaya-intro-actions">
-        <button class="pf-v6-c-button pf-m-primary" id="btnOpenFeedbackModal" data-i18n="public.feedback.submitFeedback">+ Submit Feedback</button>
-        <button class="pf-v6-c-button pf-m-secondary" id="btnOpenRequestModal" data-i18n="public.feedback.requestButton">+ Request an Event or Announcement</button>
-      </div>
+<main id="main" class="page" tabindex="-1">
+  <section class="intro" aria-label="Submit" data-i18n-attr="aria-label:public.feedback.submitLabel">
+    <p class="intro-text" data-i18n="public.feedback.intro">See something confusing, want a new event or announcement, or just have an idea? Everyone can see and upvote what's here, and leadership triages it from this list.</p>
+    <div class="intro-actions">
+      <button type="button" class="btn-primary" id="btnOpenFeedbackModal" data-i18n="public.feedback.submitFeedback">Submit feedback</button>
+      <button type="button" class="btn-plain" id="btnOpenRequestModal" data-i18n="public.feedback.requestButton">Request an event or announcement</button>
     </div>
-  </div>
+  </section>
 
-  <div id="ticketsWrap"></div>
+  <section class="toolbar" aria-label="Filter the board" data-i18n-attr="aria-label:public.feedback.filterBoard">
+    <div class="chips" id="kindChips" role="group" aria-label="Filter by type" data-i18n-attr="aria-label:public.feedback.filterType">
+      <button type="button" class="chip" data-kind="all" aria-pressed="true" data-i18n="public.feedback.filterAll">All</button>
+      <button type="button" class="chip" data-kind="feedback" aria-pressed="false" data-i18n="public.feedback.filterFeedback">Feedback</button>
+      <button type="button" class="chip" data-kind="event_request" aria-pressed="false" data-i18n="public.feedback.filterEvents">Event requests</button>
+      <button type="button" class="chip" data-kind="announcement_request" aria-pressed="false" data-i18n="public.feedback.filterAnnouncements">Announcements</button>
+      <button type="button" class="chip" data-kind="error" aria-pressed="false" data-i18n="public.feedback.filterIssues">Issues</button>
+    </div>
+    <label class="sort">
+      <span class="sr-only" data-i18n="public.feedback.sortBy">Sort by</span>
+      <select id="sortSelect">
+        <option value="votes" data-i18n="public.feedback.sortVotes">Most votes</option>
+        <option value="newest" data-i18n="public.feedback.sortNewest">Newest</option>
+      </select>
+    </label>
+  </section>
 
-  <details class="about-page pf-v6-u-mt-lg">
+  <div id="ticketsWrap" aria-live="polite"></div>
+
+  <details class="about">
     <summary data-i18n="public.feedback.aboutTitle">About this page</summary>
-    <div data-i18n="public.feedback.aboutBody">
-      Upvoting here is per-browser, not per-person: the first time you visit, this page stores a random
-      anonymous id in your browser (nothing that identifies you). Clearing your browser's storage, or
-      voting from a different browser or device, resets your vote weight — that's an accepted tradeoff
-      for a page with no login, not a bug. An optional contact you leave on a submission is shown only to
-      admins triaging the list, never on this public board.
-    </div>
+    <p data-i18n="public.feedback.aboutBody">Upvotes are per browser, not per person: the first time you visit, this page stores a random anonymous id in your browser (nothing that identifies you). Clearing your browser's storage, or voting from a different browser or device, resets your vote. That is an accepted tradeoff for a page with no login, not a bug. An optional contact you leave on a submission is shown only to admins triaging the list, never on this board.</p>
   </details>
-</div>
+</main>
 
-<!-- FEEDBACK MODAL (spec §40) -->
-<div class="pf-v6-c-backdrop" id="feedbackModal" data-close-fn="closeFeedbackModal">
-  <div class="pf-v6-l-bullseye">
-    <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="feedbackModalTitle">
-      <header class="pf-v6-c-modal-box__header">
-        <h2 class="pf-v6-c-modal-box__title" id="feedbackModalTitle"><span class="pf-v6-c-modal-box__title-text" data-i18n="public.feedback.modalFeedbackTitle">Submit Feedback</span></h2>
-        <button type="button" class="samaya-modal-close" aria-label="Close" data-i18n-attr="aria-label:public.common.close" data-modal-dismiss>&times;</button>
-      </header>
-      <div class="pf-v6-c-modal-box__body">
-        <div class="pf-v6-c-form">
-          <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="fbCategory" data-i18n="public.feedback.category">Category</label>
-            <select class="pf-v6-c-form-control" id="fbCategory">
-              <option value="Bug" data-i18n="public.feedback.catBug">Bug</option>
-              <option value="Suggestion" data-i18n="public.feedback.catSuggestion">Suggestion</option>
-              <option value="Other" data-i18n="public.feedback.catOther">Other</option>
-            </select>
-          </div>
-          <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="fbTitle" data-i18n="public.feedback.fieldTitle">Title</label>
-            <input class="pf-v6-c-form-control" id="fbTitle" maxlength="120" placeholder="Short summary" data-i18n-attr="placeholder:public.feedback.titlePlaceholder">
-          </div>
-          <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="fbDescription" data-i18n="public.feedback.fieldDescription">Description</label>
-            <textarea class="pf-v6-c-form-control" id="fbDescription" rows="4" maxlength="2000" placeholder="What's the feedback?" data-i18n-attr="placeholder:public.feedback.descriptionPlaceholder"></textarea>
-          </div>
-          <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="fbContact" data-i18n="public.feedback.fieldContact">Contact (optional)</label>
-            <input class="pf-v6-c-form-control" id="fbContact" placeholder="Discord handle or email — for follow-up only, never shown publicly" data-i18n-attr="placeholder:public.feedback.contactPlaceholder">
-          </div>
-        </div>
+<!-- Feedback modal (spec §40) -->
+<div class="modal" id="feedbackModal" data-close-fn="closeFeedbackModal">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="feedbackModalTitle">
+    <header class="modal-head">
+      <h2 id="feedbackModalTitle" data-i18n="public.feedback.modalFeedbackTitle">Submit feedback</h2>
+      <button type="button" class="modal-x" aria-label="Close" data-i18n-attr="aria-label:public.common.close" data-modal-dismiss>&times;</button>
+    </header>
+    <div class="modal-body">
+      <div class="form">
+        <div class="field"><label for="fbCategory" data-i18n="public.feedback.category">Category</label><select id="fbCategory"><option value="Bug" data-i18n="public.feedback.catBug">Bug</option><option value="Suggestion" data-i18n="public.feedback.catSuggestion">Suggestion</option><option value="Other" data-i18n="public.feedback.catOther">Other</option></select></div>
+        <div class="field"><label for="fbTitle" data-i18n="public.feedback.fieldTitle">Title</label><input id="fbTitle" maxlength="120" placeholder="Short summary" data-i18n-attr="placeholder:public.feedback.titlePlaceholder"></div>
+        <div class="field"><label for="fbDescription" data-i18n="public.feedback.fieldDescription">Description</label><textarea id="fbDescription" rows="4" maxlength="2000" placeholder="What's the feedback?" data-i18n-attr="placeholder:public.feedback.descriptionPlaceholder"></textarea></div>
+        <div class="field"><label for="fbContact"><span data-i18n="public.feedback.fieldContact">Contact</span> <span class="opt" data-i18n="public.feedback.optional">optional</span></label><input id="fbContact" placeholder="Discord handle or email" data-i18n-attr="placeholder:public.feedback.contactPlaceholder"></div>
+        <p class="hint" data-i18n="public.feedback.contactHint">Contact is for follow-up only. It is never shown publicly.</p>
       </div>
-      <footer class="pf-v6-c-modal-box__footer">
-        <button class="pf-v6-c-button pf-m-primary" id="btnSubmitFeedback" data-i18n="public.common.submit">Submit</button>
-        <button class="pf-v6-c-button pf-m-link" data-modal-dismiss data-i18n="public.common.cancel">Cancel</button>
-      </footer>
     </div>
+    <footer class="modal-foot">
+      <button type="button" class="btn-primary" id="btnSubmitFeedback" data-i18n="public.common.submit">Submit</button>
+      <button type="button" class="btn-ghost" data-modal-dismiss data-i18n="public.common.cancel">Cancel</button>
+    </footer>
   </div>
 </div>
 
-<!-- REQUEST MODAL (spec §41) -->
-<div class="pf-v6-c-backdrop" id="requestModal" data-close-fn="closeRequestModal">
-  <div class="pf-v6-l-bullseye">
-    <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="requestModalTitle">
-      <header class="pf-v6-c-modal-box__header">
-        <h2 class="pf-v6-c-modal-box__title" id="requestModalTitle"><span class="pf-v6-c-modal-box__title-text" data-i18n="public.feedback.requestTitle">Request an Event or Announcement</span></h2>
-        <button type="button" class="samaya-modal-close" aria-label="Close" data-i18n-attr="aria-label:public.common.close" data-modal-dismiss>&times;</button>
-      </header>
-      <div class="pf-v6-c-modal-box__body">
-        <div class="pf-v6-c-form">
-          <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="reqType" data-i18n="public.feedback.reqType">Request type</label>
-            <select class="pf-v6-c-form-control" id="reqType">
-              <option value="event_request" data-i18n="public.feedback.reqTypeEvent">Event</option>
-              <option value="announcement_request" data-i18n="public.feedback.reqTypeAnnouncement">Announcement</option>
-            </select>
-          </div>
-          <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="reqAlliance" data-i18n="public.feedback.reqAlliance">Alliance</label>
-            <select class="pf-v6-c-form-control" id="reqAlliance">
-              <option value="" data-i18n="public.feedback.reqAllianceNone">Kingdom-wide / not sure</option>
-            </select>
-          </div>
-          <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="reqName" data-i18n="public.feedback.reqName">Proposed name</label>
-            <input class="pf-v6-c-form-control" id="reqName" maxlength="120" placeholder="What should it be called?" data-i18n-attr="placeholder:public.feedback.reqNamePlaceholder">
-          </div>
-          <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="reqTiming" data-i18n="public.feedback.reqTiming">Proposed timing (optional)</label>
-            <input class="pf-v6-c-form-control" id="reqTiming" placeholder="e.g. every Saturday evening, or one-time next week" data-i18n-attr="placeholder:public.feedback.reqTimingPlaceholder">
-          </div>
-          <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="reqDetails" data-i18n="public.feedback.reqDetails">Details</label>
-            <textarea class="pf-v6-c-form-control" id="reqDetails" rows="4" maxlength="2000" placeholder="What is it, and why does it matter?" data-i18n-attr="placeholder:public.feedback.reqDetailsPlaceholder"></textarea>
-          </div>
-          <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="reqContact" data-i18n="public.feedback.fieldContact">Contact (optional)</label>
-            <input class="pf-v6-c-form-control" id="reqContact" placeholder="Discord handle or email — for follow-up only, never shown publicly" data-i18n-attr="placeholder:public.feedback.contactPlaceholder">
-          </div>
+<!-- Request modal (spec §41) -->
+<div class="modal" id="requestModal" data-close-fn="closeRequestModal">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="requestModalTitle">
+    <header class="modal-head">
+      <h2 id="requestModalTitle" data-i18n="public.feedback.requestTitle">Request an event or announcement</h2>
+      <button type="button" class="modal-x" aria-label="Close" data-i18n-attr="aria-label:public.common.close" data-modal-dismiss>&times;</button>
+    </header>
+    <div class="modal-body">
+      <div class="form">
+        <div class="form-row">
+          <div class="field"><label for="reqType" data-i18n="public.feedback.reqType">Request type</label><select id="reqType"><option value="event_request" data-i18n="public.feedback.reqTypeEvent">Event</option><option value="announcement_request" data-i18n="public.feedback.reqTypeAnnouncement">Announcement</option></select></div>
+          <div class="field"><label for="reqAlliance" data-i18n="public.feedback.reqAlliance">Alliance</label><select id="reqAlliance"><option value="" data-i18n="public.feedback.reqAllianceNone">Kingdom-wide / not sure</option></select></div>
         </div>
+        <div class="field"><label for="reqName" data-i18n="public.feedback.reqName">Proposed name</label><input id="reqName" maxlength="120" placeholder="What should it be called?" data-i18n-attr="placeholder:public.feedback.reqNamePlaceholder"></div>
+        <div class="field"><label for="reqTiming"><span data-i18n="public.feedback.reqTimingLabel">Proposed timing</span> <span class="opt" data-i18n="public.feedback.optional">optional</span></label><input id="reqTiming" placeholder="e.g. every Saturday evening, or one-time next week" data-i18n-attr="placeholder:public.feedback.reqTimingPlaceholder"></div>
+        <div class="field"><label for="reqDetails" data-i18n="public.feedback.reqDetails">Details</label><textarea id="reqDetails" rows="4" maxlength="2000" placeholder="What is it, and why does it matter?" data-i18n-attr="placeholder:public.feedback.reqDetailsPlaceholder"></textarea></div>
+        <div class="field"><label for="reqContact"><span data-i18n="public.feedback.fieldContact">Contact</span> <span class="opt" data-i18n="public.feedback.optional">optional</span></label><input id="reqContact" placeholder="Discord handle or email" data-i18n-attr="placeholder:public.feedback.contactPlaceholder"></div>
+        <p class="hint" data-i18n="public.feedback.contactHint">Contact is for follow-up only. It is never shown publicly.</p>
       </div>
-      <footer class="pf-v6-c-modal-box__footer">
-        <button class="pf-v6-c-button pf-m-primary" id="btnSubmitRequest" data-i18n="public.common.submit">Submit</button>
-        <button class="pf-v6-c-button pf-m-link" data-modal-dismiss data-i18n="public.common.cancel">Cancel</button>
-      </footer>
     </div>
+    <footer class="modal-foot">
+      <button type="button" class="btn-primary" id="btnSubmitRequest" data-i18n="public.common.submit">Submit</button>
+      <button type="button" class="btn-ghost" data-modal-dismiss data-i18n="public.common.cancel">Cancel</button>
+    </footer>
   </div>
 </div>
 
