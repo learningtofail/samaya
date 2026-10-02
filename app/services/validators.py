@@ -135,6 +135,14 @@ def parse_hex_color(v, allow_none: bool = False):
     return v.upper()
 
 
+def parse_clearable_hex_color(v):
+    """PATCH semantics for a nullable color: omitted/null leaves it alone, an
+    empty string resets it to the built-in default, anything else must be hex."""
+    if v is None or (isinstance(v, str) and v.strip() == ""):
+        return v if v is None else ""
+    return parse_hex_color(v)
+
+
 def parse_optional_duration_hours(v, allow_none: bool = True):
     """A duration is optional in the unified model: None means 'no calendar
     entry, a plain message'. A present value must be a positive number."""

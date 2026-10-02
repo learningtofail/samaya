@@ -21,7 +21,9 @@ const ICS_URL = COMBINED_MODE ? '/ics/events.ics' : `/t/${TENANT_SLUG}/ics/event
 const ICS_ABSOLUTE_URL = window.location.origin + ICS_URL;
 const ICS_WEBCAL_URL = ICS_ABSOLUTE_URL.replace(/^https?:\/\//, 'webcal://');
 const DAY = 86400000, HOUR = 3600000;
-const KINGDOM_COLOR = 'oklch(0.82 0.13 85)';
+const DEFAULT_KINGDOM_COLOR = 'oklch(0.82 0.13 85)';
+let KINGDOM_COLOR = DEFAULT_KINGDOM_COLOR;   // replaced by the Kingdom's brand color when one is set
+let KINGDOM_HEX = '';                          // the same color when it is a hex value, else ''
 const DARK_INK = 'oklch(0.14 0.014 260)';
 
 const $ = (id) => document.getElementById(id);
@@ -518,7 +520,7 @@ $('viewCalendarBtn').addEventListener('click', () => setView('calendar'));
 
 function renderAll() {
   const bs = currentBrandSlug();
-  applyBrand(bs ? allianceInfo(bs).color : '');
+  applyBrand(bs ? allianceInfo(bs).color : KINGDOM_HEX);
   renderChips(); renderHero();
   if (VIEW === 'calendar') renderCalendar();
   renderSchedule();
@@ -648,6 +650,7 @@ async function loadLastActivity() {
 }
 fetch('/api/kingdom-branding').then((r) => r.json()).then((b) => {
   if (b.public_site_title) { SITE_TITLE = b.public_site_title; renderHeader(); }
+  if (/^#[0-9a-f]{6}$/i.test(b.color || '')) { KINGDOM_COLOR = KINGDOM_HEX = b.color; renderAll(); }
   if (b.theme_id && /^[\w-]+$/.test(b.theme_id)) document.documentElement.dataset.theme = b.theme_id;
   if (b.banner_url) {
     const img = new Image();

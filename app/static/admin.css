@@ -181,6 +181,7 @@ summary:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--focus
 .check { display: flex; align-items: center; gap: var(--space-2); min-height: var(--tap); }
 .check input { width: 20px; height: 20px; }
 .color-input { height: var(--tap); padding: 2px; }
+.color-input:disabled { opacity: .45; cursor: not-allowed; }
 .inline-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); }
 .inline-form .pf-v6-c-form-control { max-width: 22rem; }
 .cover { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }

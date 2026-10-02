@@ -1398,7 +1398,9 @@ Two backend fixes surfaced while integrating this, both narrowly scoped and cove
 
 ## 63. Public Events Page: Alliance Branding
 
-**Status:** Deferred (2026-10-01). Does not serve the current priority, the unified event model (§66). Kept as a worked design. No code yet. Admin pages are untouched except the Tenant modal's icon validation (§63.1).
+**Status:** Partly built (2026-10-02). Built: hex validation of alliance colors, `services/contrast.py`, a Kingdom brand color (`kingdoms.color`, revision `a1f0c0de0006`, returned by `/api/kingdom-branding`), a color field in the alliance modal, and a Kingdom modal (name, slug, titles, color) that replaced the `prompt()` chain. Frontend: brand variables, theme and banner hooks (inert). Not built: themes and banners (§63.3, §64), which are being redesigned so a superadmin can create and edit them in the admin console, images included.
+
+**Built behavior.** A superadmin sets an alliance color in Setup, Alliances, and the Kingdom color in Setup, Kingdoms. Both must be 6-digit hex; the alliance PATCH checks the color only when it is sent, so a legacy non-hex value (the column was never validated) survives edits to other fields, and the admin form sends the color only after the person touches it. A very light color is accepted with a note (`color_note`, under 3:1 against white) because a faint stripe is a choice, not an error. The page's "All alliances" chip, view toggle, hero accent and Kingdom-wide events use the Kingdom color; a single selected alliance uses its own. `tests/frontend/ink-fixtures.json` is the one table both `pick_ink` (Python) and `brandInk` (JS) are tested against. No Kingdom crest: the public page shows no crests.
 
 **Problem.** `Tenant.color` is an unvalidated string, the page picks readable text color with a heuristic that is not the WCAG formula (it selects an ink below 4.5:1 for roughly one in five colors), the selected alliance does not recolor the page beyond a chip border, and `events-public.js` builds ten inline `style="..."` attributes in template strings, which this repo's own HTML/CSS rule forbids.
 

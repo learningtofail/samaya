@@ -169,6 +169,8 @@ async def get_kingdom_branding(db: AsyncSession = Depends(get_db)):
     return JSONResponse({
         "public_site_title":   (kingdom.public_site_title if kingdom else None) or _DEFAULT_PUBLIC_SITE_TITLE,
         "admin_console_title": (kingdom.admin_console_title if kingdom else None) or "Samaya",
+        # NULL means the page's built-in Kingdom gold.
+        "color": kingdom.color if kingdom else None,
     })
 
 
