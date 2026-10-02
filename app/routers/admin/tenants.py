@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from models import get_db
-from models.db import DiscordServer, EventType, Kingdom, Tenant, TenantSecondaryServer, User, UserTenant
+from models.db import DiscordServer, EventType, Kingdom, Theme, Tenant, TenantSecondaryServer, User, UserTenant
 from services.audit import log_change
 from services.contrast import faint_on_white_note
 from services.db_errors import raise_friendly_integrity_error
@@ -54,6 +54,7 @@ def _kingdom_dict(k: Kingdom) -> dict:
         "default_locale":      kingdom_locale_settings(k)[0],
         "enabled_locales":     [t for t in kingdom_locale_settings(k)[1] if t != PSEUDO_LOCALE],
         "available_locales":   available_locales(),
+        "default_theme_id":    k.default_theme_id,
     }
 
 
@@ -186,13 +187,23 @@ async def update_kingdom(
         kingdom.color = payload.color or None
     if payload.default_locale is not None or payload.enabled_locales is not None:
         _apply_locale_settings(kingdom, payload)
+    if "default_theme_id" in payload.model_fields_set:
+        before["default_theme_id"] = kingdom.default_theme_id
+        if payload.default_theme_id is not None:
+            theme = await db.get(Theme, payload.default_theme_id)
+            if theme is None or theme.kingdom_id != kingdom.id:
+                raise HTTPException(status_code=422, detail="That theme does not belong to this Kingdom")
+            if theme.archived:
+                raise HTTPException(status_code=422, detail="An archived theme cannot be the base theme")
+        kingdom.default_theme_id = payload.default_theme_id
 
     try:
         await log_change(
             db, user_id=user.id, tenant_id=None,
             table_name="kingdoms", row_id=kingdom.id, action="update",
             before=before, after={"name": kingdom.name, "slug": kingdom.slug, "color": kingdom.color,
-                                  "default_locale": kingdom.default_locale, "enabled_locales": kingdom.enabled_locales},
+                                  "default_locale": kingdom.default_locale, "enabled_locales": kingdom.enabled_locales,
+                                  "default_theme_id": kingdom.default_theme_id},
         )
         await db.commit()
         await db.refresh(kingdom)

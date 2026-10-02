@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from . import (
     ui, discord_config, tenants, invites, me, users, audit_log, tickets,
-    unified_events, unified_engine, audiences,
+    unified_events, unified_engine, audiences, themes,
 )
 
 router = APIRouter()
@@ -20,3 +20,4 @@ router.include_router(tickets.router)
 router.include_router(unified_events.router)
 router.include_router(unified_engine.router)
 router.include_router(audiences.router)
+router.include_router(themes.router)

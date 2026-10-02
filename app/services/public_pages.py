@@ -7,6 +7,7 @@ before first paint, with no extra request.
 """
 import html as html_lib
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Request
@@ -20,10 +21,12 @@ from services.i18n import (
     LANG_COOKIE, choose_locale, json_for_script_tag, kingdom_locale_settings, locale_choices,
     match_locale, script_font, strings_for, t, text_direction,
 )
-from services.static_assets import bust_static_cache
+from services.static_assets import STATIC_ASSET_VERSION, bust_static_cache
+from services.themes import active_theme, theme_head_html
 
 _HTML_TAG_RE = re.compile(r"<html\b[^>]*>", re.IGNORECASE)
 _TITLE_RE = re.compile(r"<title>.*?</title>", re.IGNORECASE | re.DOTALL)
+THEME_MARKER = "<!--theme-head-->"
 _ONE_YEAR = 365 * 24 * 3600
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -34,9 +37,14 @@ async def get_public_kingdom(db: AsyncSession):
     return (await db.execute(select(Kingdom).order_by(Kingdom.id).limit(1))).scalar_one_or_none()
 
 
+async def get_public_theme(db: AsyncSession, kingdom):
+    """The theme in force now for the page, or None for the shipped look."""
+    return await active_theme(db, kingdom, datetime.now(timezone.utc))
+
+
 def render_public_page(
     request: Request, filename: str, prefixes: tuple[str, ...], title_key: str | None = None,
-    kingdom=None,
+    kingdom=None, theme=None,
 ) -> HTMLResponse:
     with open(STATIC_DIR / filename, encoding="utf-8") as fh:
         page = bust_static_cache(fh.read())
@@ -49,6 +57,7 @@ def render_public_page(
     )
     direction = text_direction(locale)
 
+    page = page.replace(THEME_MARKER, theme_head_html(theme, STATIC_ASSET_VERSION), 1)
     page = _HTML_TAG_RE.sub(f'<html lang="{locale}" dir="{direction}">', page, count=1)
     if title_key:
         title = html_lib.escape(t(locale, title_key), quote=False)

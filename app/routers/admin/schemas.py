@@ -83,6 +83,8 @@ class KingdomPatch(BaseModel):
     # catalogues in the router, where the current values are known.
     default_locale:  Optional[str] = None
     enabled_locales: Optional[list[str]] = None
+    # Spec §71.5 base theme. Send an explicit null to clear it; omit to keep it.
+    default_theme_id: Optional[int] = None
 
     _validate_color = field_validator("color", mode="before")(parse_clearable_hex_color)
 
