@@ -325,10 +325,10 @@ function renderChips() {
     const crest = '';
     const cc = safeColor(a.color, KINGDOM_COLOR);
     const style = `data-vars="--c:${cc};--ink-on:${inkOn(cc)}"`;
-    if (COMBINED_MODE) {
-      return `<button type="button" class="chip" ${style} data-filter="${escapeHtml(a.slug)}" aria-pressed="${FILTER === a.slug}">${crest}${bdi(a.name)}</button>`;
-    }
     const href = a.slug === 'all' ? '/events' : `/t/${encodeURIComponent(a.slug)}/events`;
+    if (COMBINED_MODE) {
+      return `<a class="chip" ${style} href="${href}" data-filter="${escapeHtml(a.slug)}"${FILTER === a.slug ? ' aria-current="true"' : ''}>${crest}${bdi(a.name)}</a>`;
+    }
     const current = a.slug === TENANT_SLUG;
     return `<a class="chip" ${style} href="${href}"${current ? ' aria-current="page"' : ''}>${crest}${bdi(a.name)}</a>`;
   }).join('');
@@ -336,6 +336,9 @@ function renderChips() {
 $('allianceChips').addEventListener('click', (e) => {
   const b = e.target.closest('[data-filter]');
   if (!b) return;
+  // Modified clicks (new tab, copy link) keep the real alliance URL.
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button > 0) return;
+  e.preventDefault();
   FILTER = b.dataset.filter;
   renderAll();
 });
