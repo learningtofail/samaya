@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from scheduler.unified_jobs import delivery_tick_job, generation_job
-from routers import events, admin, webhooks, ics, auth as auth_router, auth_pages, tickets_public
+from routers import events, admin, webhooks, ics, auth as auth_router, auth_pages, tickets_public, themes_public
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -103,6 +103,7 @@ app.include_router(ics.router)
 app.include_router(auth_router.router)
 app.include_router(auth_pages.router)
 app.include_router(tickets_public.router)
+app.include_router(themes_public.router)
 
 
 @app.get("/health")

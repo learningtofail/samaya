@@ -328,6 +328,8 @@ document.querySelector('.tabs__list')?.addEventListener('click', (e) => {
 function applyRoleVisibility() {
   const auditItem = document.getElementById('auditTabItem');
   if (auditItem) auditItem.classList.toggle('hidden', !isSuperadmin());
+  const appearanceItem = document.getElementById('appearanceTabItem');
+  if (appearanceItem) appearanceItem.classList.toggle('hidden', !isSuperadmin());
 }
 
 // ── Display time zone ────────────────────────────────────────

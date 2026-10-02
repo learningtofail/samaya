@@ -2,6 +2,7 @@
 
 :root {
   --bg: oklch(0.965 0.008 250);
+  --bg-wash: oklch(0.96 0.025 85);
   --surface: oklch(1 0 0);
   --surface-2: oklch(0.985 0.004 260);
   --tint: oklch(0.93 0.03 260);
@@ -19,14 +20,20 @@
   --line-strong: oklch(0.82 0.012 260);
   --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
   --radius: 10px;
-  --font: 'Noto Sans', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --art-h: 300px;
+  --hero-wash-1: oklch(0.975 0.025 88 / .96);
+  --hero-wash-2: oklch(0.995 0.01 88 / .96);
+  --font-heading: var(--font);
+  --font-body: 'Noto Sans';
+  --font: var(--font-body), system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; min-height: 100vh; color: var(--ink); font: 400 16px/1.5 var(--font);
-  background: linear-gradient(oklch(0.96 0.025 85), transparent 240px), var(--bg);
+  background: linear-gradient(var(--bg-wash), transparent var(--art-h)), var(--bg);
+  position: relative;
 }
 a { color: var(--gold-ink); }
 a:hover { color: oklch(0.33 0.12 75); }
@@ -44,7 +51,7 @@ button { cursor: pointer; }
 .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .brand-text { min-width: 0; }
 .kicker { font-weight: 600; font-size: 13.5px; color: var(--gold-ink); }
-h1 { margin: 0; font-weight: 700; font-size: 24px; line-height: 1.15; overflow-wrap: anywhere; }
+h1 { margin: 0; font-family: var(--font-heading); font-weight: 700; font-size: 24px; line-height: 1.15; overflow-wrap: anywhere; }
 .hdr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .menu-wrap { position: relative; }
 
@@ -80,7 +87,7 @@ h1 { margin: 0; font-weight: 700; font-size: 24px; line-height: 1.15; overflow-w
 .hero-row { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); margin-top: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
 .hero {
   --c: var(--line); position: relative; min-width: 0; border-inline-end: 1px solid var(--line);
-  background: linear-gradient(120deg, oklch(0.975 0.025 88 / .96), oklch(0.995 0.01 88 / .96)), var(--banner, none) center / cover; padding: 14px 20px; min-height: 84px;
+  background: linear-gradient(120deg, var(--hero-wash-1), var(--hero-wash-2)), var(--banner, none) center / cover; padding: 14px 20px; min-height: 84px;
   display: flex; gap: 16px; align-items: center; justify-content: space-between;
 }
 .hero.is-live { background: var(--live-bg); }
@@ -248,17 +255,35 @@ h1 { margin: 0; font-weight: 700; font-size: 24px; line-height: 1.15; overflow-w
   .cal-more { font-size: 11px; }
 }
 
-/* Kingdom theme presets: set via <html data-theme="...">. Palette variables only. */
-[data-theme="season_default"] { --gold: oklch(0.82 0.13 85); }
-[data-theme="theme_nine_nights"] { --gold: oklch(0.7 0.2 350); --gold-deep: oklch(0.6 0.2 350); --gold-ink: oklch(0.45 0.18 350); --bg: oklch(0.97 0.015 340); }
-[data-theme="theme_hallowed_ancestors"] { --gold: oklch(0.45 0.16 305); --gold-deep: oklch(0.38 0.16 305); --gold-ink: oklch(0.38 0.16 305); --bg: oklch(0.96 0.012 300); }
-[data-theme="theme_illuminated_keep"] { --gold: oklch(0.78 0.16 65); --gold-deep: oklch(0.68 0.16 60); --gold-ink: oklch(0.48 0.13 55); }
-[data-theme="theme_crimson_festival"] { --gold: oklch(0.55 0.2 27); --gold-deep: oklch(0.47 0.2 27); --gold-ink: oklch(0.45 0.18 27); --bg: oklch(0.97 0.012 30); }
-[data-theme="theme_frost_festival"] { --gold: oklch(0.8 0.08 225); --gold-deep: oklch(0.7 0.09 230); --gold-ink: oklch(0.42 0.1 235); --bg: oklch(0.97 0.012 230); }
 
 /* Language select in the header; hidden until the Kingdom enables a second language. */
 .lang-select { min-width: 0; max-width: 11rem; }
 
 /* Scripts Noto Sans does not cover get a Noto family appended; the server adds the matching Google Fonts link. */
-:root:lang(zh-Hans) { --font: 'Noto Sans', 'Noto Sans SC', system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; }
-:root:lang(ar) { --font: 'Noto Sans', 'Noto Sans Arabic', system-ui, -apple-system, 'Segoe UI', Tahoma, sans-serif; }
+:root:lang(zh-Hans) { --font: var(--font-body), 'Noto Sans SC', system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+:root:lang(ar) { --font: var(--font-body), 'Noto Sans Arabic', system-ui, -apple-system, 'Segoe UI', Tahoma, sans-serif; }
+
+/* Theme header art (spec §71.15). Set by the generated theme stylesheet; absent for the shipped look. */
+body::before {
+  content: ''; position: absolute; top: 0; inset-inline: 0; height: var(--art-h); z-index: 0; pointer-events: none;
+  background: var(--page-art, none) center top / cover no-repeat;
+  -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent);
+  animation: art-in 200ms ease-out;
+}
+@keyframes art-in { from { opacity: 0; } to { opacity: 1; } }
+.hdr, .page { position: relative; z-index: 1; }
+.brand-text { background: var(--plate-bg, transparent); padding: var(--plate-pad, 0); border-radius: 10px; }
+@media (max-width: 640px) {
+  body::before { background-image: var(--page-art-mobile, var(--page-art, none)); height: min(var(--art-h), 240px); }
+}
+@media (prefers-reduced-motion: reduce) { body::before { animation: none; } }
+/* Art carries no information: drop it, and the banner, when the visitor asks for more contrast or forces colors. */
+@media (forced-colors: active), (prefers-contrast: more) {
+  body::before { display: none; }
+  .hero { background: var(--surface); }
+  .brand-text { background: transparent; padding: 0; }
+}
+
+.look { margin: 0; }
+.look__btn { min-height: 36px; padding: 0; border: 0; background: none; color: var(--gold-ink); font: inherit; font-size: 13px; text-decoration: underline; cursor: pointer; }
+@media (max-width: 640px) { .look__btn { min-height: 44px; } }

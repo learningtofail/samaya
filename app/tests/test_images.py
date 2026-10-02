@@ -6,7 +6,7 @@ import pytest
 from PIL import Image
 
 from services.images import (
-    EVENT_COVER, TENANT_ICON, THEME_BANNER, ImageRejected, process_data_uri,
+    EVENT_COVER, TENANT_ICON, THEME_BANNER, THEME_HEADER, THEME_HEADER_MOBILE, ImageProfile, ImageRejected, process_data_uri,
 )
 
 
@@ -44,9 +44,28 @@ class TestProfiles:
         assert img.width == img.height <= 256
         assert img.mode == "RGBA"
 
-    def test_banner_is_webp_within_1600_wide(self):
+    def test_banner_is_cropped_to_its_exact_size(self):
         img = _open(process_data_uri(_uri(Image.new("RGB", (3200, 800), "green"), "PNG"), THEME_BANNER))
-        assert img.format == "WEBP" and img.width <= 1600
+        assert img.format == "WEBP" and img.size == (1200, 360)
+
+    @pytest.mark.parametrize("profile,size", [(THEME_HEADER, (1920, 400)), (THEME_HEADER_MOBILE, (900, 500))])
+    def test_header_art_exact_size_and_weight_budget(self, profile, size):
+        sky = Image.linear_gradient("L").resize((2400, 1200)).convert("RGB")
+        textured = Image.blend(sky, Image.effect_noise((2400, 1200), 80).convert("RGB"), 0.15)
+        out = process_data_uri(_uri(textured, "JPEG"), profile)
+        assert _open(out).size == size
+        assert len(base64.b64decode(out.split(",", 1)[1])) <= profile.max_bytes
+
+    @pytest.mark.parametrize("profile", [THEME_BANNER, THEME_HEADER, THEME_HEADER_MOBILE])
+    def test_art_smaller_than_the_target_is_refused_not_upscaled(self, profile):
+        with pytest.raises(ImageRejected, match="too small"):
+            process_data_uri(_uri(Image.new("RGB", (profile.crop[0] - 1, profile.crop[1]), "red"), "PNG"), profile)
+
+    def test_art_that_cannot_fit_its_budget_is_refused(self):
+        noise = Image.effect_noise((1920, 400), 128).convert("RGB")
+        tight = ImageProfile("tight", 1920, 400, "WEBP", crop=(1920, 400), max_bytes=2000)
+        with pytest.raises(ImageRejected, match="too detailed"):
+            process_data_uri(_uri(noise, "PNG"), tight)
 
     def test_exif_orientation_applied_and_metadata_dropped(self):
         src = Image.new("RGB", (40, 20), "white")

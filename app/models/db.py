@@ -18,7 +18,7 @@ import uuid
 
 from sqlalchemy import (
     JSON, Boolean, CheckConstraint, Column, Date, DateTime,
-    ForeignKey, Index, Integer, Numeric, Text, Time,
+    ForeignKey, Index, Integer, LargeBinary, Numeric, Text, Time,
     UniqueConstraint, func, text
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -58,6 +58,13 @@ class Kingdom(Base):
     # keeps default_locale inside enabled_locales.
     default_locale  = Column(Text, nullable=True)
     enabled_locales = Column(JSON, nullable=True)
+
+    # Spec §71.5: the theme shown when no scheduled window is active. NULL means
+    # the shipped defaults. use_alter breaks the kingdoms <-> themes FK cycle.
+    default_theme_id = Column(
+        Integer, ForeignKey("themes.id", ondelete="RESTRICT", name="fk_kingdom_default_theme", use_alter=True),
+        nullable=True,
+    )
 
     tenants = relationship("Tenant", back_populates="kingdom")
 
@@ -651,3 +658,81 @@ class EventAudience(Base):
     event_id    = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
     audience_id = Column(Integer, ForeignKey("audiences.id", ondelete="RESTRICT"), primary_key=True)
     included    = Column(Boolean, nullable=False)
+
+
+class ThemeAsset(Base):
+    """Spec §71.4: a normalised banner image, stored once per content hash and
+    served at /theme-assets/{sha256}.webp. Rows hold bytes; audit rows never do."""
+    __tablename__ = "theme_assets"
+
+    id         = Column(Integer, primary_key=True)
+    kingdom_id = Column(Integer, ForeignKey("kingdoms.id"), nullable=False)
+    sha256     = Column(Text, nullable=False)
+    content    = Column(LargeBinary, nullable=False)
+    width      = Column(Integer, nullable=False)
+    height     = Column(Integer, nullable=False)
+    # Where the image came from and its license (spec §71.15); required on upload.
+    credit     = Column(Text, nullable=False, default="", server_default="")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("kingdom_id", "sha256", name="uq_theme_asset_hash"),
+    )
+
+
+class Theme(Base):
+    """Spec §71.1: a named set of validated colors, catalogue fonts, an optional
+    banner and optional text overrides. Data, never CSS. Contrast rules are
+    enforced on save (services/theme_rules.py)."""
+    __tablename__ = "themes"
+
+    id              = Column(Integer, primary_key=True)
+    kingdom_id      = Column(Integer, ForeignKey("kingdoms.id"), nullable=False)
+    name            = Column(Text, nullable=False)
+    bg              = Column(Text, nullable=False)
+    accent          = Column(Text, nullable=False)
+    accent_text     = Column(Text, nullable=False)
+    primary         = Column(Text, nullable=False)
+    font_heading    = Column(Text, nullable=True)
+    font_body       = Column(Text, nullable=True)
+    font_numerals   = Column(Text, nullable=True)
+    banner_asset_id = Column(Integer, ForeignKey("theme_assets.id", ondelete="RESTRICT"), nullable=True)
+    banner_overlay  = Column(Numeric(3, 2), nullable=False, default=0.96, server_default=text("0.96"))
+    # Spec §71.15: header art, the wash color over the hero banner (banner_overlay is its
+    # strength), a hover tint, corner radius and art band height. NULL means the shipped value.
+    header_asset_id        = Column(Integer, ForeignKey("theme_assets.id", ondelete="RESTRICT", name="fk_theme_header_asset"), nullable=True)
+    header_mobile_asset_id = Column(Integer, ForeignKey("theme_assets.id", ondelete="RESTRICT", name="fk_theme_header_mobile_asset"), nullable=True)
+    hero_wash       = Column(Text, nullable=False, default="#FFFFFF", server_default="#FFFFFF")
+    tint            = Column(Text, nullable=True)
+    radius          = Column(Integer, nullable=True)
+    art_height      = Column(Integer, nullable=True)
+    copy            = Column(JSON, nullable=True)
+    archived        = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at      = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("kingdom_id", "name", name="uq_theme_name"),
+        CheckConstraint("banner_overlay >= 0.90 AND banner_overlay <= 1.00", name="ck_theme_overlay"),
+        CheckConstraint("radius IS NULL OR (radius >= 4 AND radius <= 14)", name="ck_theme_radius"),
+        CheckConstraint("art_height IS NULL OR (art_height >= 240 AND art_height <= 360)", name="ck_theme_art_height"),
+    )
+
+
+class ScheduledTheme(Base):
+    """Spec §71.5: a theme shown over a UTC window. Highest priority wins,
+    then the latest start."""
+    __tablename__ = "scheduled_themes"
+
+    id             = Column(Integer, primary_key=True)
+    kingdom_id     = Column(Integer, ForeignKey("kingdoms.id"), nullable=False)
+    theme_id       = Column(Integer, ForeignKey("themes.id", ondelete="RESTRICT"), nullable=False)
+    start_utc      = Column(DateTime(timezone=True), nullable=False)
+    end_utc        = Column(DateTime(timezone=True), nullable=False)
+    priority_level = Column(Integer, nullable=False, default=50, server_default=text("50"))
+
+    __table_args__ = (
+        CheckConstraint("start_utc < end_utc", name="ck_scheduled_theme_window"),
+        CheckConstraint("priority_level >= 0 AND priority_level <= 1000", name="ck_scheduled_theme_priority"),
+        Index("ix_scheduled_themes_window", "kingdom_id", "start_utc", "end_utc"),
+    )

@@ -47,7 +47,7 @@ def _keys_referenced() -> tuple[set[str], set[str], set[str]]:
         exact |= {prefix + k for k in re.findall(const + r" \+ '([\w.]+)'", text)}
         literals |= {prefix + k for k in re.findall(r"'([\w.]+)'", text)}
         families |= {f"{prefix}{k}." for k in re.findall(r"\$\{" + const + r"\}([\w.]+)\.\$\{", text)}
-        families |= {f"{prefix}{k}." for k in re.findall(r"metaFor\('(\w+)'", text)}
+        families |= {f"{prefix}{k}." for k in re.findall(r"(?:metaFor|labelFor)\('(\w+)'", text)}
     for py in (APP / "routers").glob("*.py"):
         exact |= set(re.findall(r'"(public\.[\w.]*\w)"', py.read_text(encoding="utf-8")))
     return exact, families, literals

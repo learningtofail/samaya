@@ -7,6 +7,7 @@ before first paint, with no extra request.
 """
 import html as html_lib
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Request
@@ -14,16 +15,20 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.db import Kingdom
+from models.db import Kingdom, Theme, User
+from services.sessions import SESSION_COOKIE_NAME, read_session_token
 
 from services.i18n import (
     LANG_COOKIE, choose_locale, json_for_script_tag, kingdom_locale_settings, locale_choices,
     match_locale, script_font, strings_for, t, text_direction,
 )
-from services.static_assets import bust_static_cache
+from services.static_assets import STATIC_ASSET_VERSION, bust_static_cache
+from services.themes import active_theme, is_renderable, theme_head_html
 
 _HTML_TAG_RE = re.compile(r"<html\b[^>]*>", re.IGNORECASE)
 _TITLE_RE = re.compile(r"<title>.*?</title>", re.IGNORECASE | re.DOTALL)
+THEME_MARKER = "<!--theme-head-->"
+STANDARD_LOOK_COOKIE = "samaya_standard"
 _ONE_YEAR = 365 * 24 * 3600
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -34,9 +39,38 @@ async def get_public_kingdom(db: AsyncSession):
     return (await db.execute(select(Kingdom).order_by(Kingdom.id).limit(1))).scalar_one_or_none()
 
 
+async def get_public_theme(db: AsyncSession, kingdom):
+    """The theme in force now for the page, or None for the shipped look."""
+    return await active_theme(db, kingdom, datetime.now(timezone.utc))
+
+
+async def get_request_theme(request: Request, db: AsyncSession, kingdom):
+    """(theme, is_preview). `?preview_theme={id}` shows that theme to a signed-in
+    superadmin only (spec §71.6); anyone else gets the ordinary resolution."""
+    raw = request.query_params.get("preview_theme")
+    if raw and raw.isdigit() and kingdom is not None:
+        user_id = read_session_token(request.cookies.get(SESSION_COOKIE_NAME, ""))
+        user = await db.get(User, user_id) if user_id else None
+        if user is not None and user.is_superadmin:
+            theme = await db.get(Theme, int(raw))
+            if theme is not None and theme.kingdom_id == kingdom.id and is_renderable(theme):
+                return theme, True
+    theme = await get_public_theme(db, kingdom)
+    request.state.theme_available = theme is not None
+    if request.cookies.get(STANDARD_LOOK_COOKIE) == "1":
+        return None, False  # the visitor opted out of themes (spec §71.15)
+    return theme, False
+
+
+def mark_preview(response: HTMLResponse) -> HTMLResponse:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Robots-Tag"] = "noindex"
+    return response
+
+
 def render_public_page(
     request: Request, filename: str, prefixes: tuple[str, ...], title_key: str | None = None,
-    kingdom=None,
+    kingdom=None, theme=None,
 ) -> HTMLResponse:
     with open(STATIC_DIR / filename, encoding="utf-8") as fh:
         page = bust_static_cache(fh.read())
@@ -49,7 +83,11 @@ def render_public_page(
     )
     direction = text_direction(locale)
 
-    page = _HTML_TAG_RE.sub(f'<html lang="{locale}" dir="{direction}">', page, count=1)
+    page = page.replace(THEME_MARKER, theme_head_html(theme, STATIC_ASSET_VERSION), 1)
+    # data-theme-state tells the footer toggle what to offer: "on" (a theme is showing), "off" (opted out).
+    state = "on" if theme is not None else ("off" if request.cookies.get(STANDARD_LOOK_COOKIE) == "1" and getattr(request.state, "theme_available", False) else "")
+    state_attr = f' data-theme-state="{state}"' if state else ""
+    page = _HTML_TAG_RE.sub(f'<html lang="{locale}" dir="{direction}"{state_attr}>', page, count=1)
     if title_key:
         title = html_lib.escape(t(locale, title_key), quote=False)
         page = _TITLE_RE.sub(lambda _m: f"<title>{title}</title>", page, count=1)

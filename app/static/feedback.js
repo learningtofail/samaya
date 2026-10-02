@@ -45,15 +45,12 @@ async function api(method, path, body) {
 }
 
 // Labels come from the catalogue (public.feedback.kind.<key>, .status.<key>).
-const KIND_COLORS = { feedback: 'pf-m-blue', event_request: 'pf-m-green', announcement_request: 'pf-m-purple', error: 'pf-m-red' };
-const STATUS_COLORS = { open: 'pf-m-gray', planned: 'pf-m-cyan', in_progress: 'pf-m-orange', done: 'pf-m-green', declined: 'pf-m-red', dismissed: 'pf-m-gray' };
-function metaFor(group, colors, key) {
+// Only these values reach a class name (the API value is never trusted in markup).
+const KINDS = ['feedback', 'event_request', 'announcement_request', 'error'];
+const STATUSES = ['open', 'planned', 'in_progress', 'done', 'declined', 'dismissed'];
+function labelFor(group, key) {
   const k = `${FB}${group}.${key}`;
-  return { label: I18N.has(k) ? t(k) : key, color: colors[key] || 'pf-m-gray' };
-}
-
-function pfLabel(text, color) {
-  return `<span class="pf-v6-c-label ${color} pf-m-filled"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${escapeHtml(text)}</span></span></span>`;
+  return I18N.has(k) ? t(k) : key;
 }
 
 function formatRelativeTime(iso) {
@@ -73,7 +70,7 @@ async function loadTickets() {
     TICKETS = await api('GET', '/api/tickets');
     renderTickets();
   } catch (e) {
-    document.getElementById('ticketsWrap').innerHTML = `<div class="empty-state">${escapeHtml(t(FB + 'loadError', { error: e.message }))}</div>`;
+    document.getElementById('ticketsWrap').innerHTML = `<div class="empty">${escapeHtml(t(FB + 'loadError', { error: e.message }))}</div>`;
   }
 }
 
@@ -83,63 +80,78 @@ function formatWhen(iso) {
 
 function responsesHtml(tk) {
   if (!tk.responses || !tk.responses.length) return '';
-  return `<ul class="ticket-responses" aria-label="${escapeHtml(t(FB + 'responsesLabel'))}">${tk.responses.map(r => `
-    <li class="ticket-responses__item">
-      <div class="ticket-responses__head"><strong>${escapeHtml(r.author)}</strong>
-        <span class="samaya-subtle-text">${escapeHtml(formatWhen(r.created_at))}</span></div>
-      <p class="ticket-responses__body" dir="auto">${escapeHtml(r.body)}</p>
-    </li>`).join('')}</ul>`;
+  return `<ul class="responses" aria-label="${escapeHtml(t(FB + 'responsesLabel'))}">${tk.responses.map((r) => `
+    <li><div class="responses-head"><strong><bdi>${escapeHtml(r.author)}</bdi></strong><span>${escapeHtml(formatWhen(r.created_at))}</span></div>
+      <p class="responses-body" dir="auto">${escapeHtml(r.body)}</p></li>`).join('')}</ul>`;
 }
 
-// Each row's upvote button carries data-ticket-id instead of an inline
-// onclick — the ticketsWrap container handles the click via delegation.
-// An archived ticket (done or declined) is read-only: no vote button, but
-// its status and responses stay visible so the reasoning can be looked up.
+// An archived ticket (done or declined) is read-only: no vote button, but its
+// status and responses stay visible so the reasoning can be looked up.
 function ticketHtml(tk, archived) {
-  const kindMeta = metaFor('kind', KIND_COLORS, tk.kind);
-  const statusMeta = metaFor('status', STATUS_COLORS, tk.status);
-  const relatedLine = (tk.kind === 'error' && tk.related_name)
-    ? `<div class="pf-v6-u-font-size-sm samaya-subtle-text">${escapeHtml(t(FB + 'relatedTo', { name: I18N.iso(tk.related_name) }))}</div>` : '';
+  const kind = KINDS.includes(tk.kind) ? tk.kind : 'feedback';
+  const status = STATUSES.includes(tk.status) ? tk.status : 'open';
+  const rel = (tk.kind === 'error' && tk.related_name)
+    ? `<div class="ticket-rel">${escapeHtml(t(FB + 'relatedTo', { name: I18N.iso(tk.related_name) }))}</div>` : '';
+  const where = tk.tenant_name ? I18N.iso(tk.tenant_name) : t(FB + 'generalAlliance');
+  const n = (tk.responses || []).length;
+  const count = I18N.number(tk.upvote_count);
   const vote = archived
-    ? `<span class="vote-btn vote-btn--static" aria-label="${escapeHtml(t(FB + 'upvotesCount', { count: tk.upvote_count }))}"><span>▲</span><span class="vote-count">${I18N.number(tk.upvote_count)}</span></span>`
-    : `<button class="vote-btn${tk.voted_by_me ? ' voted' : ''}" data-ticket-id="${tk.id}" aria-label="${escapeHtml(t(FB + 'upvoteTitle', { title: tk.title }))}"><span>▲</span><span class="vote-count">${I18N.number(tk.upvote_count)}</span></button>`;
-  return `
-    <div class="pf-v6-c-card pf-v6-u-mb-sm">
-      <div class="pf-v6-c-card__body">
-        <div class="ticket-row">
-          ${vote}
-          <div class="ticket-body">
-            <div class="pf-v6-l-flex pf-m-align-items-center pf-m-space-items-sm">
-              ${pfLabel(kindMeta.label, kindMeta.color)}
-              <strong dir="auto">${escapeHtml(tk.title)}</strong>
-            </div>
-            ${relatedLine}
-            <p class="pf-v6-u-font-size-sm pf-v6-u-mt-xs samaya-ticket-description" dir="auto">${escapeHtml(tk.description)}</p>
-            <div class="ticket-meta">
-              ${pfLabel(statusMeta.label, statusMeta.color)}
-              <span class="pf-v6-u-font-size-sm samaya-subtle-text">${escapeHtml(t(FB + 'metaLine', { alliance: tk.tenant_name ? I18N.iso(tk.tenant_name) : t(FB + 'generalAlliance'), when: formatRelativeTime(tk.created_at) }))}</span>
-            </div>
-            ${responsesHtml(tk)}
-          </div>
-        </div>
-      </div>
-    </div>`;
+    ? `<span class="vote vote--static" aria-label="${escapeHtml(t(FB + 'upvotesCount', { count: tk.upvote_count }))}"><i>&#9650;</i><b>${count}</b></span>`
+    : `<button type="button" class="vote${tk.voted_by_me ? ' is-voted' : ''}" data-ticket-id="${tk.id}" aria-pressed="${tk.voted_by_me ? 'true' : 'false'}" aria-label="${escapeHtml(t(FB + 'upvoteTitle', { title: tk.title }))}"><i>&#9650;</i><b>${count}</b></button>`;
+  return `<article class="ticket">
+    ${vote}
+    <div class="ticket-main">
+      <div class="ticket-title"><b dir="auto">${escapeHtml(tk.title)}</b><span class="tag tag--${kind}">${escapeHtml(labelFor('kind', kind))}</span></div>
+      ${rel}
+      <p class="ticket-desc" dir="auto">${escapeHtml(tk.description)}</p>
+      <div class="ticket-meta"><span class="status status--${status}">${escapeHtml(labelFor('status', status))}</span><span>${escapeHtml(t(FB + 'metaLine', { alliance: where, when: formatRelativeTime(tk.created_at) }))}</span>${n ? `<span class="resp-count">${escapeHtml(t(FB + 'teamResponses', { count: n }))}</span>` : ''}</div>
+      ${responsesHtml(tk)}
+    </div>
+  </article>`;
+}
+
+// Filter and sort run in the browser over the list the API already returns.
+let KIND_FILTER = 'all';
+let SORT = 'votes';
+function visible(list) {
+  const out = KIND_FILTER === 'all' ? list.slice() : list.filter((tk) => tk.kind === KIND_FILTER);
+  out.sort((a, b) => (SORT === 'newest'
+    ? new Date(b.created_at) - new Date(a.created_at)
+    : (b.upvote_count - a.upvote_count) || (new Date(b.created_at) - new Date(a.created_at))));
+  return out;
 }
 
 function renderTickets() {
   const wrap = document.getElementById('ticketsWrap');
-  const { active, archived } = TICKETS;
-  const activeHtml = active.length
-    ? active.map(tk => ticketHtml(tk, false)).join('')
-    : `<div class="empty-state">${escapeHtml(t(FB + 'emptyActive'))}</div>`;
+  const active = visible(TICKETS.active), archived = visible(TICKETS.archived);
+  const empty = KIND_FILTER !== 'all' ? 'emptyFiltered' : 'emptyActive';
+  const activeHtml = `<section class="board" aria-labelledby="boardTitle">
+      <div class="board-head"><h2 id="boardTitle">${escapeHtml(t(FB + 'activeTitle'))}</h2><span>${escapeHtml(t(FB + 'itemCount', { count: active.length }))}</span></div>
+      ${active.length ? active.map((tk) => ticketHtml(tk, false)).join('') : `<div class="empty">${escapeHtml(t(FB + empty))}</div>`}
+    </section>`;
   const archiveHtml = archived.length ? `
-    <details class="ticket-archive">
-      <summary>${escapeHtml(t(FB + 'archivedTitle', { count: archived.length }))}</summary>
-      <p class="samaya-subtle-text ticket-archive__note">${escapeHtml(t(FB + 'archivedNote'))}</p>
-      ${archived.map(tk => ticketHtml(tk, true)).join('')}
+    <details class="archive"${ARCHIVE_OPEN ? ' open' : ''}>
+      <summary>${escapeHtml(t(FB + 'archivedTitle'))}<span>${escapeHtml(t(FB + 'archivedCount', { count: archived.length }))}</span></summary>
+      <p class="archive-note">${escapeHtml(t(FB + 'archivedNote'))}</p>
+      ${archived.map((tk) => ticketHtml(tk, true)).join('')}
     </details>` : '';
   wrap.innerHTML = activeHtml + archiveHtml;
 }
+
+// A re-render (a vote, a filter) must not collapse an archive the visitor opened.
+let ARCHIVE_OPEN = false;
+document.getElementById('ticketsWrap').addEventListener('toggle', (e) => {
+  if (e.target.classList && e.target.classList.contains('archive')) ARCHIVE_OPEN = e.target.open;
+}, true);
+
+document.getElementById('kindChips').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-kind]');
+  if (!b) return;
+  KIND_FILTER = b.dataset.kind;
+  document.querySelectorAll('#kindChips [data-kind]').forEach((c) => c.setAttribute('aria-pressed', String(c === b)));
+  renderTickets();
+});
+document.getElementById('sortSelect').addEventListener('change', (e) => { SORT = e.target.value; renderTickets(); });
 
 document.getElementById('ticketsWrap').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-ticket-id]');
@@ -160,20 +172,35 @@ async function toggleVote(id) {
 // ── Modals ──
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  const openModal = document.querySelector('.pf-v6-c-backdrop.open');
+  const openModal = document.querySelector('.modal.open');
   if (!openModal) return;
-  const fnName = openModal.dataset.closeFn;
-  if (fnName && typeof window[fnName] === 'function') window[fnName]();
+  const close = MODAL_CLOSERS[openModal.dataset.closeFn];
+  if (close) close();
 });
+
+// The functions live inside this IIFE, so Escape and the dismiss buttons look them up here.
+const MODAL_CLOSERS = {};
+let RETURN_FOCUS = null;
+function showModal(id) {
+  RETURN_FOCUS = document.activeElement;
+  const modal = document.getElementById(id);
+  modal.classList.add('open');
+  const first = modal.querySelector('select, input, textarea');
+  if (first) first.focus();
+}
+function hideModal(id) {
+  document.getElementById(id).classList.remove('open');
+  if (RETURN_FOCUS && typeof RETURN_FOCUS.focus === 'function') RETURN_FOCUS.focus();
+}
 
 function openFeedbackModal() {
   document.getElementById('fbCategory').value = 'Bug';
   document.getElementById('fbTitle').value = '';
   document.getElementById('fbDescription').value = '';
   document.getElementById('fbContact').value = '';
-  document.getElementById('feedbackModal').classList.add('open');
+  showModal('feedbackModal');
 }
-function closeFeedbackModal() { document.getElementById('feedbackModal').classList.remove('open'); }
+function closeFeedbackModal() { hideModal('feedbackModal'); }
 
 async function submitFeedback() {
   const title = document.getElementById('fbTitle').value.trim();
@@ -214,9 +241,11 @@ async function openRequestModal() {
   document.getElementById('reqTiming').value = '';
   document.getElementById('reqDetails').value = '';
   document.getElementById('reqContact').value = '';
-  document.getElementById('requestModal').classList.add('open');
+  showModal('requestModal');
 }
-function closeRequestModal() { document.getElementById('requestModal').classList.remove('open'); }
+function closeRequestModal() { hideModal('requestModal'); }
+MODAL_CLOSERS.closeFeedbackModal = closeFeedbackModal;
+MODAL_CLOSERS.closeRequestModal = closeRequestModal;
 
 async function submitRequest() {
   const name = document.getElementById('reqName').value.trim();
@@ -246,10 +275,9 @@ document.getElementById('btnSubmitFeedback').addEventListener('click', submitFee
 document.getElementById('btnSubmitRequest').addEventListener('click', submitRequest);
 document.querySelectorAll('[data-modal-dismiss]').forEach((btn) => {
   btn.addEventListener('click', () => {
-    const backdrop = btn.closest('.pf-v6-c-backdrop');
-    const fnName = backdrop && backdrop.dataset.closeFn;
-    if (fnName === 'closeFeedbackModal') closeFeedbackModal();
-    if (fnName === 'closeRequestModal') closeRequestModal();
+    const backdrop = btn.closest('.modal');
+    const close = backdrop && MODAL_CLOSERS[backdrop.dataset.closeFn];
+    if (close) close();
   });
 });
 

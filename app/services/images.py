@@ -21,6 +21,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 MAX_ENCODED_BYTES = 8 * 1024 * 1024
 MAX_PIXELS = 40_000_000
+MIN_QUALITY = 40
 ACCEPTED_FORMATS = {"PNG", "JPEG", "WEBP", "GIF"}
 _DATA_URI_RE = re.compile(r"^data:([a-zA-Z0-9.+/-]+);base64,([A-Za-z0-9+/\s]+=*)$")
 _MIME = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
@@ -42,11 +43,17 @@ class ImageProfile:
     quality: int = 85
     square: bool = False        # center-crop to a square before bounding
     keep_alpha: bool = False    # False: flatten onto white
+    crop: tuple[int, int] | None = None      # fill and center-crop to exactly this size
+    min_size: tuple[int, int] | None = None  # refuse smaller sources (never upscale)
+    max_bytes: int | None = None             # lower the quality until the output fits
 
 
 EVENT_COVER = ImageProfile("event_cover", 1600, 800, "JPEG", quality=85)
 TENANT_ICON = ImageProfile("tenant_icon", 256, 256, "PNG", square=True, keep_alpha=True)
-THEME_BANNER = ImageProfile("theme_banner", 1600, 1600, "WEBP", quality=82, keep_alpha=True)
+# Theme art (spec §71.15): exact sizes, so a theme's layout never depends on an upload's shape.
+THEME_BANNER = ImageProfile("theme_banner", 1200, 360, "WEBP", quality=82, crop=(1200, 360), min_size=(1200, 360), max_bytes=100_000)
+THEME_HEADER = ImageProfile("theme_header", 1920, 400, "WEBP", quality=80, crop=(1920, 400), min_size=(1920, 400), max_bytes=150_000)
+THEME_HEADER_MOBILE = ImageProfile("theme_header_mobile", 900, 500, "WEBP", quality=80, crop=(900, 500), min_size=(900, 500), max_bytes=80_000)
 
 
 def _decode(data_uri: str) -> tuple[Image.Image, bytes]:
@@ -92,7 +99,15 @@ def _encode(image: Image.Image, profile: ImageProfile) -> bytes:
     if profile.output_format == "JPEG":
         image.convert("RGB").save(out, "JPEG", quality=profile.quality, optimize=True)
     elif profile.output_format == "WEBP":
-        image.save(out, "WEBP", quality=profile.quality)
+        quality = profile.quality
+        while True:
+            out = io.BytesIO()
+            image.save(out, "WEBP", quality=quality)
+            if profile.max_bytes is None or out.tell() <= profile.max_bytes:
+                break
+            if quality <= MIN_QUALITY:
+                raise ImageRejected(f"is too detailed to fit {profile.max_bytes // 1000} KB; use a simpler or softer image")
+            quality -= 8
     else:
         image.save(out, "PNG", optimize=True)
     return out.getvalue()
@@ -101,7 +116,9 @@ def _encode(image: Image.Image, profile: ImageProfile) -> bytes:
 def process_data_uri(data_uri: str, profile: ImageProfile) -> str:
     """Return a normalised data URI for `profile`, or raise ImageRejected."""
     image, raw = _decode(data_uri)
-    if _is_already_normal(image, raw, profile):
+    if profile.min_size and (image.width < profile.min_size[0] or image.height < profile.min_size[1]):
+        raise ImageRejected(f"is too small: at least {profile.min_size[0]} by {profile.min_size[1]} pixels")
+    if not profile.crop and _is_already_normal(image, raw, profile):
         return f"data:{_MIME[profile.output_format]};base64,{base64.b64encode(raw).decode()}"
     image.seek(0)
     image = ImageOps.exif_transpose(image)
@@ -113,7 +130,10 @@ def process_data_uri(data_uri: str, profile: ImageProfile) -> str:
         image = flat
     if profile.square:
         image = ImageOps.fit(image, (min(image.width, image.height),) * 2, Image.Resampling.LANCZOS)
-    image.thumbnail((profile.max_width, profile.max_height), Image.Resampling.LANCZOS)
+    if profile.crop:
+        image = ImageOps.fit(image, profile.crop, Image.Resampling.LANCZOS)
+    else:
+        image.thumbnail((profile.max_width, profile.max_height), Image.Resampling.LANCZOS)
     encoded = _encode(image, profile)
     return f"data:{_MIME[profile.output_format]};base64,{base64.b64encode(encoded).decode()}"
 
