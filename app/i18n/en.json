@@ -5,6 +5,7 @@
   "script": "Latn",
   "reviewed": true
  },
+ "public.common.language": "Language",
  "public.common.close": "Close",
  "public.common.cancel": "Cancel",
  "public.common.submit": "Submit",

@@ -32,6 +32,8 @@ const $ = (id) => document.getElementById(id);
 const I18N = SamayaI18n.fromDocument(document);
 const t = I18N.t;
 const EVENTS_KEY = 'public.events.';
+const iso = I18N.iso;
+const bdi = (v) => `<bdi>${escapeHtml(v)}</bdi>`;
 
 // ── Brand + CSSOM variable painting (no inline style attributes) ─
 function paintOne(el) {
@@ -287,7 +289,7 @@ function tickClock() {
 function buildCalMenu() {
   const scope = COMBINED_MODE
     ? t(EVENTS_KEY + 'calScopeAll')
-    : t(EVENTS_KEY + 'calScopeOne', { alliance: TENANT_SLUG.toUpperCase() });
+    : t(EVENTS_KEY + 'calScopeOne', { alliance: iso(TENANT_SLUG.toUpperCase()) });
   const title = COMBINED_MODE ? t(EVENTS_KEY + 'title') : t(EVENTS_KEY + 'docTitleAlliance', { alliance: TENANT_SLUG.toUpperCase(), title: t(EVENTS_KEY + 'title') });
   const google = `https://calendar.google.com/calendar/render?cid=${encodeURIComponent(ICS_ABSOLUTE_URL)}`;
   const outlook = `https://outlook.live.com/calendar/0/addfromweb?url=${encodeURIComponent(ICS_ABSOLUTE_URL)}&name=${encodeURIComponent(title)}`;
@@ -311,10 +313,10 @@ document.addEventListener('click', (e) => { if (!e.target.closest('.menu-wrap'))
 // ── Header, chips, key ──────────────────────────────────────────
 function renderHeader() {
   const cur = COMBINED_MODE ? null : allianceInfo(TENANT_SLUG);
-  $('pageKicker').textContent = COMBINED_MODE ? t(EVENTS_KEY + 'kickerAll') : t(EVENTS_KEY + 'kickerAlliance', { alliance: cur.name });
+  $('pageKicker').textContent = COMBINED_MODE ? t(EVENTS_KEY + 'kickerAll') : t(EVENTS_KEY + 'kickerAlliance', { alliance: iso(cur.name) });
   $('pageTitle').textContent = SITE_TITLE || t(EVENTS_KEY + 'pageTitle');
   const siteTitle = SITE_TITLE || t(EVENTS_KEY + 'title');
-  document.title = COMBINED_MODE ? siteTitle : t(EVENTS_KEY + 'docTitleAlliance', { alliance: cur.name, title: siteTitle });
+  document.title = COMBINED_MODE ? siteTitle : t(EVENTS_KEY + 'docTitleAlliance', { alliance: iso(cur.name), title: siteTitle });
 }
 function renderChips() {
   const all = { slug: 'all', name: t(EVENTS_KEY + 'allAlliances'), icon: '', color: KINGDOM_COLOR };
@@ -324,11 +326,11 @@ function renderChips() {
     const cc = safeColor(a.color, KINGDOM_COLOR);
     const style = `data-vars="--c:${cc};--ink-on:${inkOn(cc)}"`;
     if (COMBINED_MODE) {
-      return `<button type="button" class="chip" ${style} data-filter="${escapeHtml(a.slug)}" aria-pressed="${FILTER === a.slug}">${crest}${escapeHtml(a.name)}</button>`;
+      return `<button type="button" class="chip" ${style} data-filter="${escapeHtml(a.slug)}" aria-pressed="${FILTER === a.slug}">${crest}${bdi(a.name)}</button>`;
     }
     const href = a.slug === 'all' ? '/events' : `/t/${encodeURIComponent(a.slug)}/events`;
     const current = a.slug === TENANT_SLUG;
-    return `<a class="chip" ${style} href="${href}"${current ? ' aria-current="page"' : ''}>${crest}${escapeHtml(a.name)}</a>`;
+    return `<a class="chip" ${style} href="${href}"${current ? ' aria-current="page"' : ''}>${crest}${bdi(a.name)}</a>`;
   }).join('');
 }
 $('allianceChips').addEventListener('click', (e) => {
@@ -367,7 +369,7 @@ function renderHero() {
     html += `<div class="hero${live ? ' is-live' : ''}" data-vars="--c:${safeColor(a.color, KINGDOM_COLOR)}">
       <div class="hero-main">
         <div class="hero-label">${live ? '<span class="dot"></span>' : ''}${escapeHtml(t(EVENTS_KEY + (live ? 'heroLive' : 'heroNext')))}</div>
-        <div class="hero-name">${escapeHtml(h.event_name)}</div>
+        <div class="hero-name">${bdi(h.event_name)}</div>
         <div class="hero-meta">${escapeHtml(heroMeta(h, live, tz))}</div>
       </div>
       <div class="hero-cd"><small>${escapeHtml(t(EVENTS_KEY + (live ? 'endsIn' : 'startsIn')))}</small><b id="heroCd" data-target="${live ? h._end : h._start}">${cd((live ? h._end : h._start) - now)}</b></div>
@@ -378,12 +380,12 @@ function renderHero() {
   }
   const then = list.filter((e) => e !== h && displayStatus(e, now) !== 'live').slice(0, 3);
   html += `<aside class="then"><h2>${escapeHtml(t(EVENTS_KEY + 'then'))}</h2>${then.length ? then.map((e) =>
-    `<div class="then-item"><span class="then-time">${hm(e._start, tz)}</span><span class="then-name">${escapeHtml(e.event_name)}</span><span class="then-when">${escapeHtml(fmtDay(e._start, tz, { weekday: 'short' }))} · ${escapeHtml(rel(e._start - now))}</span></div>`).join('') : `<p class="muted">${escapeHtml(t(EVENTS_KEY + 'thenNone'))}</p>`}</aside>`;
+    `<div class="then-item"><span class="then-time">${hm(e._start, tz)}</span><span class="then-name">${bdi(e.event_name)}</span><span class="then-when">${escapeHtml(fmtDay(e._start, tz, { weekday: 'short' }))} · ${escapeHtml(rel(e._start - now))}</span></div>`).join('') : `<p class="muted">${escapeHtml(t(EVENTS_KEY + 'thenNone'))}</p>`}</aside>`;
   $('hero').innerHTML = html;
 }
 function heroMeta(h, live, tz) {
   const local = `${hm(h._start, tz)} ${tzShort(tz)}`;
-  const parts = [evAlliances(h).map((x) => x.name).join(', '), live ? t(EVENTS_KEY + 'heroStarted', { time: local }) : local, `${hm(h._start, 'UTC')} UTC`];
+  const parts = [evAlliances(h).map((x) => iso(x.name)).join(', '), live ? t(EVENTS_KEY + 'heroStarted', { time: local }) : local, `${hm(h._start, 'UTC')} UTC`];
   if (h.duration_hours) parts.push(formatDuration(h.duration_hours));
   return parts.join(' · ');
 }
@@ -419,8 +421,8 @@ function rowHtml(ev, cont, last, now, tz) {
   return `<article class="row${key === 'live' ? ' is-live' : ''}${key === 'completed' || key === 'cancelled' ? ' is-done' : ''}" data-vars="--c:${color}" data-key="${escapeHtml(ev._k)}">
     <button type="button" class="row-head" data-action="toggle" aria-expanded="${open}" aria-controls="${id}">
       <span class="row-time">${timeBlock}</span>
-      <span class="row-main"><span class="row-name">${escapeHtml(ev.event_name)}</span>
-        <span class="row-meta"><span>${escapeHtml(als.slice(0, 2).map((a) => a.name).join(', '))}${als.length > 2 ? ` +${I18N.number(als.length - 2)}` : ''}</span><span>${escapeHtml(kind)}</span>${dur ? `<span>${dur}</span>` : ''}</span></span>
+      <span class="row-main"><span class="row-name">${bdi(ev.event_name)}</span>
+        <span class="row-meta"><span>${als.slice(0, 2).map((a) => bdi(a.name)).join(', ')}${als.length > 2 ? ` +${I18N.number(als.length - 2)}` : ''}</span><span>${escapeHtml(kind)}</span>${dur ? `<span>${dur}</span>` : ''}</span></span>
       <span class="row-side">
         <span class="row-rel">${escapeHtml(relText)}</span>
         <span class="status" data-vars="--s:${STATUS_COLORS[key]}"><i class="swatch"></i>${escapeHtml(statusText(key))}</span>
@@ -429,11 +431,11 @@ function rowHtml(ev, cont, last, now, tz) {
     </button>
     <div class="row-detail" id="${id}"${open ? '' : ' hidden'}>
       <dl class="facts">
-        <div><dt>${escapeHtml(t(EVENTS_KEY + 'factAlliance'))}</dt><dd>${escapeHtml(als.map((a) => a.name).join(', '))}</dd></div>
-        <div><dt>${escapeHtml(t(EVENTS_KEY + 'factChannel'))}</dt><dd>${escapeHtml(ev.discord_channel || t(EVENTS_KEY + 'notSet'))}</dd></div>
+        <div><dt>${escapeHtml(t(EVENTS_KEY + 'factAlliance'))}</dt><dd>${als.map((a) => bdi(a.name)).join(', ')}</dd></div>
+        <div><dt>${escapeHtml(t(EVENTS_KEY + 'factChannel'))}</dt><dd>${ev.discord_channel ? bdi(ev.discord_channel) : escapeHtml(t(EVENTS_KEY + 'notSet'))}</dd></div>
         <div><dt>${escapeHtml(t(EVENTS_KEY + 'factReminder'))}</dt><dd>${escapeHtml(notifyText(ev))}</dd></div>
       </dl>
-      ${ev.description ? `<p class="desc">${escapeHtml(ev.description)}</p>` : ''}
+      ${ev.description ? `<p class="desc" dir="auto">${escapeHtml(ev.description)}</p>` : ''}
       <div class="row-actions">
         <button type="button" class="btn-plain" data-action="preview">${escapeHtml(t(EVENTS_KEY + 'previewTitle'))}</button>
         <button type="button" class="btn-plain" data-action="report">${escapeHtml(t(EVENTS_KEY + 'report.title'))}</button>
@@ -489,19 +491,22 @@ function renderCalendar() {
   const tz = getDisplayTz(), todayKey = dayKey(Date.now(), tz);
   $('calMonthLabel').textContent = monthName(CAL_YEAR, CAL_MONTH, { month: 'long', year: 'numeric' });
   const pm = new Date(Date.UTC(CAL_YEAR, CAL_MONTH - 1, 1)), nm = new Date(Date.UTC(CAL_YEAR, CAL_MONTH + 1, 1));
-  $('calPrevBtn').textContent = `◀ ${monthName(pm.getUTCFullYear(), pm.getUTCMonth(), { month: 'short' })}`;
-  $('calNextBtn').textContent = `${monthName(nm.getUTCFullYear(), nm.getUTCMonth(), { month: 'short' })} ▶`;
+  const prevName = monthName(pm.getUTCFullYear(), pm.getUTCMonth(), { month: 'short' }), nextName = monthName(nm.getUTCFullYear(), nm.getUTCMonth(), { month: 'short' });
+  // The arrows point the way the page reads: previous is toward the start of the line.
+  $('calPrevBtn').textContent = I18N.dir === 'rtl' ? `▶ ${prevName}` : `◀ ${prevName}`;
+  $('calNextBtn').textContent = I18N.dir === 'rtl' ? `${nextName} ◀` : `${nextName} ▶`;
   const map = buildDayMap(EVENTS.filter(matchesFilter), tz);
-  const lead = (new Date(Date.UTC(CAL_YEAR, CAL_MONTH, 1)).getUTCDay() + 6) % 7;
+  const firstDay = I18N.firstWeekday();
+  const lead = (new Date(Date.UTC(CAL_YEAR, CAL_MONTH, 1)).getUTCDay() + 7 - (firstDay % 7)) % 7;
   const dim = new Date(Date.UTC(CAL_YEAR, CAL_MONTH + 1, 0)).getUTCDate();
   const total = Math.ceil((lead + dim) / 7) * 7;
-  let html = Array.from({ length: 7 }, (_, i) => `<div class="cal-dow">${escapeHtml(new Intl.DateTimeFormat(I18N.intlLocale, { weekday: 'short', timeZone: 'UTC' }).format(Date.UTC(2024, 0, 1 + i)))}</div>`).join('');
+  let html = Array.from({ length: 7 }, (_, i) => `<div class="cal-dow">${escapeHtml(new Intl.DateTimeFormat(I18N.intlLocale, { weekday: 'short', timeZone: 'UTC' }).format(Date.UTC(2024, 0, firstDay + i)))}</div>`).join('');
   for (let i = 0; i < total; i++) {
     const dt = new Date(Date.UTC(CAL_YEAR, CAL_MONTH, 1 - lead + i)), k = dt.toISOString().slice(0, 10);
     const items = map.get(k) || [], inMonth = dt.getUTCMonth() === CAL_MONTH;
     const chips = items.slice(0, 3).map(({ ev, cont }) => {
       const a = evAlliances(ev)[0], c = safeColor(a.color, KINGDOM_COLOR);
-      return `<span class="cal-chip${cont ? ' is-cont' : ''}" data-vars="--c:${c};--ink-on:${inkOn(c)}">${cont ? '◂ ' : hm(ev._start, tz) + ' '}${escapeHtml(ev.event_name)}</span>`;
+      return `<span class="cal-chip${cont ? ' is-cont' : ''}" data-vars="--c:${c};--ink-on:${inkOn(c)}">${cont ? '◂ ' : hm(ev._start, tz) + ' '}${bdi(ev.event_name)}</span>`;
     }).join('');
     const label = `${fmtDay(dt.getTime(), 'UTC', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}${items.length ? `, ${t(EVENTS_KEY + 'calItems', { count: items.length })}` : ''}`;
     html += `<button type="button" class="cal-cell${inMonth ? '' : ' is-adjacent'}${k === todayKey ? ' is-today' : ''}${k === SEL_DAY ? ' is-selected' : ''}" data-day="${k}" aria-label="${escapeHtml(label)}" aria-pressed="${k === SEL_DAY}"><span class="cal-num">${dt.getUTCDate()}</span>${chips}${items.length > 3 ? `<span class="cal-more">${escapeHtml(t(EVENTS_KEY + 'calMore', { count: items.length - 3 }))}</span>` : ''}</button>`;
@@ -585,7 +590,7 @@ function openDiscordPreview(ev) {
   const html = renderDiscordMarkdownPreview(clientRenderPlaceholders(ev.description || '', { allianceName, kingdomName: '', scheduledFor, eventOffsetMinutes }));
   if (isAnn) {
     const multi = ev.targets && ev.targets.length > 1;
-    const note = multi ? `<p class="discord-preview-note">${escapeHtml(t(EVENTS_KEY + 'previewMultiNote', { alliances: I18N.list(ev.targets.map((x) => x.tenant_name)), first: ev.targets[0].tenant_name }))}</p>` : '';
+    const note = multi ? `<p class="discord-preview-note">${escapeHtml(t(EVENTS_KEY + 'previewMultiNote', { alliances: I18N.list(ev.targets.map((x) => iso(x.tenant_name))), first: iso(ev.targets[0].tenant_name) }))}</p>` : '';
     pane.innerHTML = `<div class="discord-preview-msg"><div class="discord-preview-avatar">S</div><div class="discord-preview-body">
       <div class="discord-preview-header"><span class="discord-preview-name">Samaya</span><span class="discord-preview-bot-tag">${escapeHtml(t(EVENTS_KEY + 'previewBot'))}</span><span class="discord-preview-timestamp">${escapeHtml(formatDiscordAbsolutePreview(scheduledFor))}</span></div>
       <div class="discord-preview-text">${html}</div></div></div>${note}`;
@@ -605,7 +610,7 @@ function openDiscordPreview(ev) {
 let REPORT_TARGET = null;
 function openReportIssueModal(ev) {
   REPORT_TARGET = ev;
-  $('reportIssueModalSubject').textContent = t(EVENTS_KEY + 'report.subject', { name: ev.event_name, date: ev.occurrence_date || dayKey(ev._start, 'UTC') });
+  $('reportIssueModalSubject').textContent = t(EVENTS_KEY + 'report.subject', { name: iso(ev.event_name), date: ev.occurrence_date || dayKey(ev._start, 'UTC') });
   $('riErrorType').selectedIndex = 0; $('riDescription').value = ''; $('riContact').value = ''; $('riNote').textContent = '';
   $('riSubmit').disabled = false;
   openModal('reportIssueModal');
@@ -660,7 +665,7 @@ async function loadLastActivity() {
     const a = await (await fetch(COMBINED_MODE ? '/api/last-activity' : `/t/${TENANT_SLUG}/api/last-activity`)).json();
     if (!a) { el.hidden = true; return; }
     const tz = getDisplayTz(), at = parseIso(a.at);
-    el.innerHTML = `${I18N.tHtml(EVENTS_KEY + (a.kind === 'announcement' ? 'activityMessageHtml' : 'activityEventHtml'), { name: a.name })}${COMBINED_MODE && a.tenant_name ? ' · ' + escapeHtml(a.tenant_name) : ''} · ${escapeHtml(fmtDay(at, tz, { day: 'numeric', month: 'short' }))} ${hm(at, tz)}`;
+    el.innerHTML = `${I18N.tHtml(EVENTS_KEY + (a.kind === 'announcement' ? 'activityMessageHtml' : 'activityEventHtml'), { name: iso(a.name) })}${COMBINED_MODE && a.tenant_name ? ' · ' + escapeHtml(a.tenant_name) : ''} · ${escapeHtml(fmtDay(at, tz, { day: 'numeric', month: 'short' }))} ${hm(at, tz)}`;
     el.hidden = false;
   } catch (e) { el.hidden = true; }
 }
@@ -677,6 +682,7 @@ fetch('/api/kingdom-branding').then((r) => r.json()).then((b) => {
 
 // ── Boot ────────────────────────────────────────────────────────
 I18N.apply(document);
+I18N.bindLanguageSelect(document.getElementById('langSelect'), I18N.locales);
 buildCalMenu();
 $('icsLink').href = ICS_URL;
 setKeyLabel(false);

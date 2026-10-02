@@ -11,10 +11,14 @@ from pathlib import Path
 
 from fastapi import Request
 from fastapi.responses import HTMLResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from models.db import Kingdom
 
 from services.i18n import (
-    LANG_COOKIE, choose_locale, enabled_locales, json_for_script_tag, match_locale,
-    strings_for, t, text_direction,
+    LANG_COOKIE, choose_locale, json_for_script_tag, kingdom_locale_settings, locale_choices,
+    match_locale, script_font, strings_for, t, text_direction,
 )
 from services.static_assets import bust_static_cache
 
@@ -24,14 +28,20 @@ _ONE_YEAR = 365 * 24 * 3600
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
+async def get_public_kingdom(db: AsyncSession):
+    """This deployment is one Kingdom, so "the Kingdom" is the first row (as in
+    /api/kingdom-branding); None before one exists."""
+    return (await db.execute(select(Kingdom).order_by(Kingdom.id).limit(1))).scalar_one_or_none()
+
+
 def render_public_page(
     request: Request, filename: str, prefixes: tuple[str, ...], title_key: str | None = None,
-    default_locale: str = "en",
+    kingdom=None,
 ) -> HTMLResponse:
     with open(STATIC_DIR / filename, encoding="utf-8") as fh:
         page = bust_static_cache(fh.read())
 
-    enabled = enabled_locales()
+    default_locale, enabled = kingdom_locale_settings(kingdom)
     lang_param = request.query_params.get("lang")
     locale = choose_locale(
         enabled, default_locale, lang_param,
@@ -43,10 +53,15 @@ def render_public_page(
     if title_key:
         title = html_lib.escape(t(locale, title_key), quote=False)
         page = _TITLE_RE.sub(lambda _m: f"<title>{title}</title>", page, count=1)
+    font = script_font(locale)
+    font_link = (f'<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family='
+                 f'{font.replace(" ", "+")}:wght@400;500;600;700&display=swap">\n') if font else ""
     block = json_for_script_tag(
-        {"locale": locale, "dir": direction, "strings": strings_for(locale, prefixes, default_locale)}
+        {"locale": locale, "dir": direction, "strings": strings_for(locale, prefixes, default_locale),
+         # The language select appears only when there is a choice (spec §72.3).
+         "locales": locale_choices(enabled) if len(enabled) > 1 else []}
     )
-    page = page.replace("</head>", f'<script type="application/json" id="i18n">{block}</script>\n</head>', 1)
+    page = page.replace("</head>", f'{font_link}<script type="application/json" id="i18n">{block}</script>\n</head>', 1)
 
     response = HTMLResponse(page)
     response.headers["Vary"] = "Accept-Language, Cookie"

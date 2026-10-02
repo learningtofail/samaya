@@ -137,8 +137,30 @@ function editKingdom(k) {
   byId('kgColor').value = k.color || KINGDOM_DEFAULT_COLOR;
   byId('kgColorDefault').checked = !k.color;
   byId('kgColor').disabled = !k.color;
+  renderKingdomLocales(k);
   openModalById('kingdomModal');
 }
+
+// Spec §72.2: which shipped languages the public pages offer, and the default.
+function renderKingdomLocales(k) {
+  const enabled = new Set(k.enabled_locales || ['en']);
+  byId('kgLocales').innerHTML = (k.available_locales || []).map((l) =>
+    `<label class="locale-picker__item"><input type="checkbox" data-locale="${escapeHtml(l.tag)}"${enabled.has(l.tag) ? ' checked' : ''}>
+      <span lang="${escapeHtml(l.tag)}">${escapeHtml(l.name)}</span>
+      <span class="locale-picker__tag">${escapeHtml(l.tag)}${l.dir === 'rtl' ? ' · right to left' : ''}</span>
+      ${l.reviewed ? '' : '<span class="locale-picker__badge">Draft</span>'}</label>`).join('');
+  fillDefaultLocale(k.default_locale || 'en');
+}
+function checkedLocales() {
+  return [...byId('kgLocales').querySelectorAll('input[data-locale]:checked')].map((i) => i.dataset.locale);
+}
+function fillDefaultLocale(selected) {
+  const names = {};
+  byId('kgLocales').querySelectorAll('input[data-locale]').forEach((i) => { names[i.dataset.locale] = i.parentElement.querySelector('span').textContent; });
+  const tags = checkedLocales();
+  byId('kgDefaultLocale').innerHTML = tags.map((tag) => `<option value="${escapeHtml(tag)}"${tag === selected ? ' selected' : ''}>${escapeHtml(names[tag])}</option>`).join('');
+}
+byId('kgLocales').addEventListener('change', () => fillDefaultLocale(byId('kgDefaultLocale').value));
 
 function closeKingdomModal() {
   closeModalById('kingdomModal');
@@ -164,6 +186,10 @@ async function saveKingdomModal() {
   } else if (byId('kgColor').value.toUpperCase() !== (k.color || '')) {
     payload.color = byId('kgColor').value;
   }
+  const locales = checkedLocales(), defaultLocale = byId('kgDefaultLocale').value;
+  if (!locales.length) { toast('Enable at least one language', true); return; }
+  if (locales.join() !== (k.enabled_locales || ['en']).join()) payload.enabled_locales = locales;
+  if (defaultLocale !== (k.default_locale || 'en')) payload.default_locale = defaultLocale;
   if (!Object.keys(payload).length) { toast('No changes made'); closeKingdomModal(); return; }
   try {
     const saved = await api('PATCH', `/api/kingdoms/${k.id}`, payload, true);

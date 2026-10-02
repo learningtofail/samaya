@@ -49,7 +49,11 @@ body { background: var(--pf-t--global--background--color--secondary--default); }
 .ticket-archive > summary { cursor: pointer; font-weight: 600; padding: 0.5rem 0; }
 .ticket-archive__note { margin: 0 0 0.75rem; }
 .vote-btn--static { cursor: default; opacity: 0.7; }
-.ticket-responses { list-style: none; margin: 0.75rem 0 0; padding: 0; border-left: 3px solid var(--pf-t--global--border--color--default, #c9c9c9); }
-.ticket-responses__item { padding: 0.25rem 0 0.25rem 0.75rem; }
+.ticket-responses { list-style: none; margin: 0.75rem 0 0; padding: 0; border-inline-start: 3px solid var(--pf-t--global--border--color--default, #c9c9c9); }
+.ticket-responses__item { padding-block: 0.25rem; padding-inline: 0.75rem 0; }
 .ticket-responses__head { display: flex; gap: 0.5rem; align-items: baseline; font-size: 0.875rem; }
 .ticket-responses__body { margin: 0.125rem 0 0; white-space: pre-wrap; }
+
+.lang-select { margin-inline-end: 12px; max-width: 11rem; }
+:root:lang(zh-Hans) body { font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+:root:lang(ar) body { font-family: 'Noto Sans Arabic', 'Segoe UI', Tahoma, sans-serif; }

@@ -52,6 +52,13 @@ class Kingdom(Base):
     # means the built-in Kingdom gold.
     color = Column(Text, nullable=True)
 
+    # Spec §72.2: interface languages for the public pages. NULL default_locale
+    # means English; NULL enabled_locales means English only. Values are tags of
+    # shipped catalogues (app/i18n/<tag>.json); the admin API validates them and
+    # keeps default_locale inside enabled_locales.
+    default_locale  = Column(Text, nullable=True)
+    enabled_locales = Column(JSON, nullable=True)
+
     tenants = relationship("Tenant", back_populates="kingdom")
 
 

@@ -87,7 +87,7 @@ function responsesHtml(tk) {
     <li class="ticket-responses__item">
       <div class="ticket-responses__head"><strong>${escapeHtml(r.author)}</strong>
         <span class="samaya-subtle-text">${escapeHtml(formatWhen(r.created_at))}</span></div>
-      <p class="ticket-responses__body">${escapeHtml(r.body)}</p>
+      <p class="ticket-responses__body" dir="auto">${escapeHtml(r.body)}</p>
     </li>`).join('')}</ul>`;
 }
 
@@ -99,7 +99,7 @@ function ticketHtml(tk, archived) {
   const kindMeta = metaFor('kind', KIND_COLORS, tk.kind);
   const statusMeta = metaFor('status', STATUS_COLORS, tk.status);
   const relatedLine = (tk.kind === 'error' && tk.related_name)
-    ? `<div class="pf-v6-u-font-size-sm samaya-subtle-text">${escapeHtml(t(FB + 'relatedTo', { name: tk.related_name }))}</div>` : '';
+    ? `<div class="pf-v6-u-font-size-sm samaya-subtle-text">${escapeHtml(t(FB + 'relatedTo', { name: I18N.iso(tk.related_name) }))}</div>` : '';
   const vote = archived
     ? `<span class="vote-btn vote-btn--static" aria-label="${escapeHtml(t(FB + 'upvotesCount', { count: tk.upvote_count }))}"><span>▲</span><span class="vote-count">${I18N.number(tk.upvote_count)}</span></span>`
     : `<button class="vote-btn${tk.voted_by_me ? ' voted' : ''}" data-ticket-id="${tk.id}" aria-label="${escapeHtml(t(FB + 'upvoteTitle', { title: tk.title }))}"><span>▲</span><span class="vote-count">${I18N.number(tk.upvote_count)}</span></button>`;
@@ -111,13 +111,13 @@ function ticketHtml(tk, archived) {
           <div class="ticket-body">
             <div class="pf-v6-l-flex pf-m-align-items-center pf-m-space-items-sm">
               ${pfLabel(kindMeta.label, kindMeta.color)}
-              <strong>${escapeHtml(tk.title)}</strong>
+              <strong dir="auto">${escapeHtml(tk.title)}</strong>
             </div>
             ${relatedLine}
-            <p class="pf-v6-u-font-size-sm pf-v6-u-mt-xs samaya-ticket-description">${escapeHtml(tk.description)}</p>
+            <p class="pf-v6-u-font-size-sm pf-v6-u-mt-xs samaya-ticket-description" dir="auto">${escapeHtml(tk.description)}</p>
             <div class="ticket-meta">
               ${pfLabel(statusMeta.label, statusMeta.color)}
-              <span class="pf-v6-u-font-size-sm samaya-subtle-text">${escapeHtml(t(FB + 'metaLine', { alliance: tk.tenant_name || t(FB + 'generalAlliance'), when: formatRelativeTime(tk.created_at) }))}</span>
+              <span class="pf-v6-u-font-size-sm samaya-subtle-text">${escapeHtml(t(FB + 'metaLine', { alliance: tk.tenant_name ? I18N.iso(tk.tenant_name) : t(FB + 'generalAlliance'), when: formatRelativeTime(tk.created_at) }))}</span>
             </div>
             ${responsesHtml(tk)}
           </div>
@@ -254,6 +254,7 @@ document.querySelectorAll('[data-modal-dismiss]').forEach((btn) => {
 });
 
 I18N.apply(document);
+I18N.bindLanguageSelect(document.getElementById('langSelect'), I18N.locales);
 loadTickets();
 
 })();

@@ -13,6 +13,7 @@ function create(data) {
   const locale = (data && data.locale) || 'en';
   const dir = (data && data.dir) || 'ltr';
   const strings = (data && data.strings) || {};
+  const locales = (data && data.locales) || [];
   // Intl needs a tag it knows; the pseudo-locale en-XA falls back to English formats.
   const intlLocale = new Intl.NumberFormat(canonical(locale)).resolvedOptions().locale;
   // Times and counts use Western digits in every language (spec §72.4).
@@ -74,7 +75,35 @@ function create(data) {
     });
   }
 
-  return { locale, dir, intlLocale, latnLocale, t, tHtml, has, escapeHtml, number, unit, relative, list, apply };
+  /** First day of the week, 1 = Monday ... 7 = Sunday. English keeps the page's existing
+      Monday start; other languages follow their region's convention when the browser knows it. */
+  function firstWeekday() {
+    if (intlLocale.split('-')[0] === 'en') return 1;
+    try {
+      const loc = new Intl.Locale(intlLocale).maximize();
+      const info = typeof loc.getWeekInfo === 'function' ? loc.getWeekInfo() : loc.weekInfo;
+      if (info && info.firstDay >= 1 && info.firstDay <= 7) return info.firstDay;
+    } catch (e) { /* fall through to Monday */ }
+    return 1;
+  }
+  /** Wrap a name in Unicode directional isolates so it keeps its own order inside a sentence
+      of the opposite direction (spec §72.6). For text; use <bdi> in markup. */
+  function iso(text) { return `\u2068${text}\u2069`; }
+
+  /** Fill and show the language select when the page offers more than one language.
+      Choosing one reloads the page with ?lang=, which also sets the cookie. */
+  function bindLanguageSelect(select, locales) {
+    if (!select || !locales || locales.length < 2) return;
+    select.innerHTML = locales.map((l) => `<option value="${escapeHtml(l.tag)}" lang="${escapeHtml(l.tag)}"${l.tag === locale ? ' selected' : ''}>${escapeHtml(l.name)}</option>`).join('');
+    select.hidden = false;
+    select.addEventListener('change', () => {
+      const url = new URL(window.location.href);
+      url.searchParams.set('lang', select.value);
+      window.location.assign(url.toString());
+    });
+  }
+
+  return { locale, dir, intlLocale, latnLocale, locales, t, tHtml, has, escapeHtml, number, unit, relative, list, apply, bindLanguageSelect, firstWeekday, iso };
 }
 
 function fromDocument(doc) {

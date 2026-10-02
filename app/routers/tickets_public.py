@@ -26,7 +26,7 @@ from models import get_db
 from models.db import EventOccurrence, Tenant, Ticket, TicketVote
 from services.rate_limit import RateLimiter
 from services.sessions import SECRET_KEY
-from services.public_pages import render_public_page
+from services.public_pages import get_public_kingdom, render_public_page
 from services.ticket_views import ACTIVE_STATUSES, ARCHIVED_STATUSES, occurrence_names, response_dict
 
 router = APIRouter()
@@ -222,10 +222,11 @@ async def vote_ticket(
 
 
 @router.get("/feedback", response_class=HTMLResponse)
-async def feedback_page(request: Request):
+async def feedback_page(request: Request, db: AsyncSession = Depends(get_db)):
     # render_public_page() rewrites /static/... references with
     # ?v=STATIC_ASSET_VERSION (Cloudflare edge-caches /static/*.css/*.js for
     # hours regardless of origin freshness, spec §23) and serves the page in
     # the visitor's language (spec §72).
     return render_public_page(
-        request, "feedback.html", ("public.common.", "public.feedback."), "public.feedback.title")
+        request, "feedback.html", ("public.common.", "public.feedback."), "public.feedback.title",
+        await get_public_kingdom(db))
