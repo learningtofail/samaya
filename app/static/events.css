@@ -92,6 +92,12 @@ h1 { margin: 0; font-family: var(--font-heading); font-weight: 700; font-size: 2
 }
 .hero.is-live { background: var(--live-bg); }
 .hero-main { flex: 1 1 auto; min-width: 0; }
+.hero-stack { min-width: 0; display: flex; flex-direction: column; border-inline-end: 1px solid var(--line); background: var(--live-bg); }
+.hero-stack .hero { border-inline-end: 0; border-bottom: 1px solid color-mix(in oklch, var(--live) 22%, white); min-height: 76px; flex: 1; }
+.hero-stack .hero:not(:first-child) .hero-name { font-size: 17px; }
+.hero-stack .hero:not(:first-child) .hero-cd b { font-size: 22px; }
+.hero-more { padding: 9px 20px; text-align: start; border: 0; background: transparent; font: 600 13.5px var(--font); color: var(--live); cursor: pointer; }
+.hero-more:hover { text-decoration: underline; }
 .hero-label { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: 13px; color: var(--gold-ink); }
 .hero.is-live .hero-label { color: var(--live); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 4px color-mix(in oklch, currentColor 20%, transparent); animation: pulse 1.6s infinite; }
@@ -289,6 +295,7 @@ h1 { margin: 0; font-family: var(--font-heading); font-weight: 700; font-size: 2
   .seg button { min-height: 42px; }
   .hero-row { grid-template-columns: 1fr; }
   .hero { border-inline-end: 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .hero-stack { border-inline-end: 0; border-bottom: 1px solid var(--line); }
   .hero-cd { text-align: start; }
   .then-item { height: 40px; }
   .row-head { grid-template-columns: 62px minmax(0, 1fr) 14px; grid-template-areas: "time main chev" "time side chev"; gap: 2px 12px; padding: 8px 14px 8px 10px; min-height: 56px; }

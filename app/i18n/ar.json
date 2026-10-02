@@ -236,5 +236,15 @@
  "public.events.calPrevWeek": "الأسبوع السابق",
  "public.events.calNextWeek": "الأسبوع التالي",
  "public.events.calPrev3Days": "الأيام الثلاثة السابقة",
- "public.events.calNext3Days": "الأيام الثلاثة التالية"
+ "public.events.calNext3Days": "الأيام الثلاثة التالية",
+ "public.events.heroLiveCount": {
+  "zero": "جارية الآن · {count} فعالية",
+  "one": "جارية الآن · فعالية واحدة",
+  "two": "جارية الآن · فعاليتان",
+  "few": "جارية الآن · {count} فعاليات",
+  "many": "جارية الآن · {count} فعالية",
+  "other": "جارية الآن · {count} فعالية"
+ },
+ "public.events.heroAlsoLive": "جارية أيضًا",
+ "public.events.heroMoreLive": "+{count} أخرى جارية · عرض الكل"
 }

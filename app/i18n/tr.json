@@ -219,5 +219,11 @@
  "public.events.calPrevWeek": "Önceki hafta",
  "public.events.calNextWeek": "Sonraki hafta",
  "public.events.calPrev3Days": "Önceki 3 gün",
- "public.events.calNext3Days": "Sonraki 3 gün"
+ "public.events.calNext3Days": "Sonraki 3 gün",
+ "public.events.heroLiveCount": {
+  "one": "Şu an canlı · {count} etkinlik",
+  "other": "Şu an canlı · {count} etkinlik"
+ },
+ "public.events.heroAlsoLive": "Ayrıca canlı",
+ "public.events.heroMoreLive": "+{count} canlı daha · tümünü gör"
 }

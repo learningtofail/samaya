@@ -2263,6 +2263,17 @@ Rules: the feed is the page URL plus `.ics`; an unknown slug is a 404 on every p
 
 Consequences for operators: anything outside the repository that names the old paths must change (Cloudflare WAF, cache or Access rules written for `/t/*`, bookmarks, Discord messages, calendar subscriptions). ICS event UIDs are unchanged, but a calendar app that subscribed to the old feed URL gets a 404 and must re-subscribe.
 
+## 75. Several live events in the hero
+
+Built 2026-10-02 from the "multi-live hero" design handoff.
+
+- No live event, or one: unchanged (a single "Live now" or "Next up" card).
+- Two or more live events: the hero becomes a stacked block. The first card is labelled "Live now · N events", the second "Also live"; each has its own countdown and progress bar. The first two are the ones that started earliest. Announcements never count as live.
+- More than two: a "+N more live · see all" link switches to the List view and scrolls to the schedule. The design handoff also cleared an alliance filter there; the page no longer has one (§73.1), so the link only changes the view.
+- "Then" lists upcoming events only, as before.
+- Countdowns and bars are found by class (`js-cd`, `js-bar`) instead of by id, so every card ticks.
+- Strings: `heroLiveCount` (plural, per language), `heroAlsoLive`, `heroMoreLive`, in all eight languages. The "more live" strings avoid verb agreement so they read correctly for any count.
+
 # Archive
 
 Fully superseded designs, moved here unchanged except for position. Each begins with its own "Superseded" note. They stay for historical reasoning only and do not describe the current system.
