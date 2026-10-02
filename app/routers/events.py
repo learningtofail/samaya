@@ -11,9 +11,17 @@ from models.db import Delivery, Event, EventOccurrence, Kingdom, Tenant
 from services.discord_api import get_guild_channels
 from services.event_engine import effective_end, effective_start, platform_bot_token
 from services.public_events import PublicRow, public_rows
-from services.public_pages import get_public_kingdom, get_public_theme, render_public_page
+from services.public_pages import get_public_kingdom, get_request_theme, mark_preview, render_public_page
 
 router = APIRouter()
+
+
+async def _render_events(request: Request, db: AsyncSession):
+    kingdom = await get_public_kingdom(db)
+    theme, preview = await get_request_theme(request, db, kingdom)
+    response = render_public_page(
+        request, "events.html", EVENTS_PAGE_PREFIXES, "public.events.title", kingdom, theme)
+    return mark_preview(response) if preview else response
 
 EVENTS_PAGE_PREFIXES = ("public.common.", "public.events.")
 
@@ -129,10 +137,7 @@ async def list_events(tenant_slug: str, db: AsyncSession = Depends(get_db)):
 @router.get("/t/{tenant_slug}/events", response_class=HTMLResponse)
 async def events_page(request: Request, tenant_slug: str, db: AsyncSession = Depends(get_db)):
     await _get_tenant_by_slug(tenant_slug, db)  # 404s early for an unknown slug
-    kingdom = await get_public_kingdom(db)
-    return render_public_page(
-        request, "events.html", EVENTS_PAGE_PREFIXES, "public.events.title", kingdom,
-        await get_public_theme(db, kingdom))
+    return await _render_events(request, db)
 
 
 @router.get("/api/alliances")
@@ -233,7 +238,4 @@ async def last_activity_all(db: AsyncSession = Depends(get_db)):
 
 @router.get("/events", response_class=HTMLResponse)
 async def events_page_all(request: Request, db: AsyncSession = Depends(get_db)):
-    kingdom = await get_public_kingdom(db)
-    return render_public_page(
-        request, "events.html", EVENTS_PAGE_PREFIXES, "public.events.title", kingdom,
-        await get_public_theme(db, kingdom))
+    return await _render_events(request, db)

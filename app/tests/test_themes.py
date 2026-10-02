@@ -263,3 +263,31 @@ class TestPublic:
             "start_utc": (now - timedelta(hours=1)).isoformat(), "end_utc": (now + timedelta(hours=1)).isoformat()})
         html = (await client_no_session.get("/events")).text
         assert f'/theme/{fest["id"]}.css' in html and f'/theme/{base["id"]}.css' not in html
+
+
+class TestPreview:
+
+    async def test_rules_endpoint(self, client):
+        r = (await client.get("/admin/api/theme-rules")).json()
+        assert r["ink"] == rules.INK and r["overlay_min"] == 0.9
+
+    async def test_superadmin_sees_unscheduled_theme_and_headers(self, client, tenant):
+        t = await make_theme(client, tenant["kingdom_id"], name="Draft")
+        r = await client.get(f"/events?preview_theme={t['id']}")
+        assert f'/theme/{t["id"]}.css' in r.text
+        assert r.headers["cache-control"] == "no-store" and r.headers["x-robots-tag"] == "noindex"
+
+    async def test_anonymous_and_other_roles_ignore_the_parameter(self, client, client_no_session, tenant, make_user_and_client):
+        t = await make_theme(client, tenant["kingdom_id"], name="Draft")
+        anon = await client_no_session.get(f"/events?preview_theme={t['id']}")
+        assert "/theme/" not in anon.text and "no-store" not in anon.headers.get("cache-control", "")
+        owner, _ = await make_user_and_client(tenant_grants=[(tenant["id"], "owner")], kingdom_grants=[], discord_id="d-own")
+        assert "/theme/" not in (await owner.get(f"/events?preview_theme={t['id']}")).text
+
+    async def test_bad_preview_values_fall_back(self, client, tenant):
+        for raw in ("9999", "abc", "-1"):
+            assert "/theme/" not in (await client.get(f"/events?preview_theme={raw}")).text
+
+    async def test_admin_page_has_the_tab(self, client):
+        html = (await client.get("/admin/")).text if False else open("static/admin.html", encoding="utf-8").read()
+        assert 'data-view="appearance"' in html and 'id="v-appearance"' in html and "appearance.js" in html

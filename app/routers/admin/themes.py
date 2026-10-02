@@ -17,6 +17,7 @@ from models.db import Kingdom, ScheduledTheme, Theme, User
 from services.audit import log_change
 from services.db_errors import raise_friendly_integrity_error
 from services.fonts import catalogue_json
+from services import theme_rules as rules
 from services.theme_rules import OVERLAY_DEFAULT, validate_theme_values
 from services.theme_templates import TEMPLATES
 from services.time_utils import ensure_utc
@@ -156,6 +157,16 @@ def _validated(values: dict) -> dict:
 @router.get("/fonts")
 async def list_fonts(_: User = Depends(require_superadmin)):
     return catalogue_json()
+
+
+@router.get("/theme-rules")
+async def theme_rules(_: User = Depends(require_superadmin)):
+    """The numbers the editor needs to show live contrast; the server still enforces."""
+    return {
+        "ink": rules.INK, "muted": rules.MUTED, "ink_min": rules.INK_MIN, "muted_min": rules.MUTED_MIN,
+        "text_min": rules.TEXT_MIN, "overlay_min": float(rules.OVERLAY_MIN), "overlay_max": float(rules.OVERLAY_MAX),
+        "overlay_default": float(rules.OVERLAY_DEFAULT),
+    }
 
 
 @router.get("/theme-templates")

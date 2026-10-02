@@ -27,6 +27,7 @@
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="types">Event types</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="feedback">Feedback</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="setup">Setup</button></li>
+      <li class="tabs__item hidden" id="appearanceTabItem"><button type="button" class="tabs__link" data-view="appearance">Appearance</button></li>
       <li class="tabs__item hidden" id="auditTabItem"><button type="button" class="tabs__link" data-view="audit">Audit log</button></li>
   </ul>
   </nav>
@@ -364,6 +365,41 @@
         <li>If Discord cannot be reached, the pickers turn into plain boxes where you can type the numeric ID.</li>
         <li>A role or channel ID is the long number Discord shows when developer mode is on.</li>
       </ul>
+    </div>
+  </details>
+</section>
+<section id="v-appearance" class="view" aria-labelledby="h-appearance">
+  <div class="view__head">
+    <h2 class="view__title" id="h-appearance">Appearance</h2>
+    <button type="button" class="pf-v6-c-button pf-m-primary" id="btnNewTheme">New theme</button>
+  </div>
+  <div class="table-wrap">
+    <table class="pf-v6-c-table pf-m-grid-md responsive-table">
+      <caption class="sr-only">Themes for the public events page</caption>
+      <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Theme</th><th class="pf-v6-c-table__th" scope="col">Colors</th><th class="pf-v6-c-table__th" scope="col">Fonts</th><th class="pf-v6-c-table__th" scope="col">In use</th><th class="pf-v6-c-table__th" scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody id="themesBody"></tbody>
+    </table>
+  </div>
+  <h3 class="view__subtitle" id="h-theme-schedule">Schedule</h3>
+  <div class="filters">
+    <div class="filters__item">
+      <label class="filters__label" for="baseTheme">Base theme</label>
+      <select class="pf-v6-c-form-control" id="baseTheme"></select>
+    </div>
+    <button type="button" class="pf-v6-c-button pf-m-secondary" id="btnNewWindow">Schedule a theme</button>
+  </div>
+  <p class="samaya-muted">The base theme shows whenever no scheduled window is active. Where windows overlap, the higher priority wins, then the later start.</p>
+  <div class="table-wrap">
+    <table class="pf-v6-c-table pf-m-grid-md responsive-table">
+      <caption class="sr-only">Scheduled themes</caption>
+      <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Theme</th><th class="pf-v6-c-table__th" scope="col">Starts (UTC)</th><th class="pf-v6-c-table__th" scope="col">Ends (UTC)</th><th class="pf-v6-c-table__th" scope="col">Priority</th><th class="pf-v6-c-table__th" scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody id="windowsBody"></tbody>
+    </table>
+  </div>
+  <details class="about-page">
+    <summary>About this tab</summary>
+    <div class="about-page__body">
+      <p>Themes change the colors and fonts of the public events page. Every theme must keep its text readable: the editor shows the contrast ratios and will not save a theme that fails. Save a theme, then use Preview to see the real page. A theme that is the base theme or is scheduled cannot be deleted or archived. Priority 50 suits a week-long celebration and 100 a global day.</p>
     </div>
   </details>
 </section>
@@ -854,6 +890,81 @@
   </div>
 </div>
 
+<div class="pf-v6-c-backdrop" id="themeModal" data-close-fn="closeThemeModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-xl" role="dialog" aria-modal="true" aria-labelledby="themeModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="themeModalTitle">New theme</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <input type="hidden" id="thId">
+        <div class="theme-editor">
+          <form class="pf-v6-c-form theme-editor__form" id="themeForm" novalidate>
+            <div class="pf-v6-c-form__group">
+              <label class="pf-v6-c-form__label" for="thTemplate"><span class="pf-v6-c-form__label-text">Start from a template</span></label>
+              <select class="pf-v6-c-form-control" id="thTemplate"></select>
+            </div>
+            <div class="pf-v6-c-form__group">
+              <label class="pf-v6-c-form__label" for="thName"><span class="pf-v6-c-form__label-text">Name</span></label>
+              <input class="pf-v6-c-form-control" type="text" id="thName" maxlength="60">
+            </div>
+            <div class="theme-editor__colors">
+              <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thBg"><span class="pf-v6-c-form__label-text">Page background</span></label><input class="pf-v6-c-form-control color-input" type="color" id="thBg"></div>
+              <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thAccent"><span class="pf-v6-c-form__label-text">Accent</span></label><input class="pf-v6-c-form-control color-input" type="color" id="thAccent"></div>
+              <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thAccentText"><span class="pf-v6-c-form__label-text">Accent text</span></label><input class="pf-v6-c-form-control color-input" type="color" id="thAccentText"></div>
+              <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thPrimary"><span class="pf-v6-c-form__label-text">Primary buttons</span></label><input class="pf-v6-c-form-control color-input" type="color" id="thPrimary"></div>
+            </div>
+            <ul class="contrast-list" id="thContrast" aria-live="polite"></ul>
+            <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thFontHeading"><span class="pf-v6-c-form__label-text">Heading font</span></label><select class="pf-v6-c-form-control" id="thFontHeading"></select></div>
+            <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thFontBody"><span class="pf-v6-c-form__label-text">Body font</span></label><select class="pf-v6-c-form-control" id="thFontBody"></select></div>
+            <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thFontNumerals"><span class="pf-v6-c-form__label-text">Numbers font</span></label><select class="pf-v6-c-form-control" id="thFontNumerals"></select><p class="pf-v6-c-form__helper-text">Monospace only, so times stay aligned.</p></div>
+            <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thOverlay"><span class="pf-v6-c-form__label-text">Banner overlay <output id="thOverlayOut"></output></span></label><input type="range" id="thOverlay" min="0.90" max="1.00" step="0.01"><p class="pf-v6-c-form__helper-text">Banner images arrive in a later update; the overlay is stored now.</p></div>
+          </form>
+          <div class="theme-editor__preview">
+            <div class="theme-sample" id="thSample" aria-hidden="true">
+              <div class="theme-sample__kicker">Kingshot · All alliances</div>
+              <div class="theme-sample__title">Event Schedule</div>
+              <div class="theme-sample__muted">Secondary text shows like this</div>
+              <div class="theme-sample__row"><span class="theme-sample__chip">All alliances</span><span class="theme-sample__btn">View</span><span class="theme-sample__time">18:30</span></div>
+            </div>
+            <p class="samaya-muted" id="thPreviewHelp">Save the theme to preview the real page.</p>
+            <iframe class="theme-editor__frame hidden" id="thFrame" title="Preview of the public events page"></iframe>
+          </div>
+        </div>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSaveTheme">Save</button>
+        <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<div class="pf-v6-c-backdrop" id="windowModal" data-close-fn="closeWindowModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="windowModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="windowModalTitle">Schedule a theme</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <input type="hidden" id="wnId">
+        <form class="pf-v6-c-form" novalidate>
+          <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="wnTheme"><span class="pf-v6-c-form__label-text">Theme</span></label><select class="pf-v6-c-form-control" id="wnTheme"></select></div>
+          <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="wnStart"><span class="pf-v6-c-form__label-text">Starts (UTC)</span></label><input class="pf-v6-c-form-control" type="datetime-local" id="wnStart"></div>
+          <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="wnEnd"><span class="pf-v6-c-form__label-text">Ends (UTC)</span></label><input class="pf-v6-c-form-control" type="datetime-local" id="wnEnd"></div>
+          <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="wnPriority"><span class="pf-v6-c-form__label-text">Priority (0 to 1000)</span></label><input class="pf-v6-c-form-control" type="number" id="wnPriority" min="0" max="1000" value="50"></div>
+        </form>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSaveWindow">Save</button>
+        <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
 <div class="pf-v6-c-backdrop" id="kingdomModal" data-close-fn="closeKingdomModal">
   <div class="pf-v6-l-bullseye">
     <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="kingdomModalTitle">
@@ -938,6 +1049,7 @@
 <script src="/static/js/access.js"></script>
 <script src="/static/js/platform.js"></script>
 <script src="/static/js/setup.js"></script>
+<script src="/static/js/appearance.js"></script>
 <script src="/static/js/audit.js"></script>
 <script src="/static/js/init.js"></script>
 </body>

@@ -15,14 +15,15 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.db import Kingdom
+from models.db import Kingdom, Theme, User
+from services.sessions import SESSION_COOKIE_NAME, read_session_token
 
 from services.i18n import (
     LANG_COOKIE, choose_locale, json_for_script_tag, kingdom_locale_settings, locale_choices,
     match_locale, script_font, strings_for, t, text_direction,
 )
 from services.static_assets import STATIC_ASSET_VERSION, bust_static_cache
-from services.themes import active_theme, theme_head_html
+from services.themes import active_theme, is_renderable, theme_head_html
 
 _HTML_TAG_RE = re.compile(r"<html\b[^>]*>", re.IGNORECASE)
 _TITLE_RE = re.compile(r"<title>.*?</title>", re.IGNORECASE | re.DOTALL)
@@ -40,6 +41,26 @@ async def get_public_kingdom(db: AsyncSession):
 async def get_public_theme(db: AsyncSession, kingdom):
     """The theme in force now for the page, or None for the shipped look."""
     return await active_theme(db, kingdom, datetime.now(timezone.utc))
+
+
+async def get_request_theme(request: Request, db: AsyncSession, kingdom):
+    """(theme, is_preview). `?preview_theme={id}` shows that theme to a signed-in
+    superadmin only (spec §71.6); anyone else gets the ordinary resolution."""
+    raw = request.query_params.get("preview_theme")
+    if raw and raw.isdigit() and kingdom is not None:
+        user_id = read_session_token(request.cookies.get(SESSION_COOKIE_NAME, ""))
+        user = await db.get(User, user_id) if user_id else None
+        if user is not None and user.is_superadmin:
+            theme = await db.get(Theme, int(raw))
+            if theme is not None and theme.kingdom_id == kingdom.id and is_renderable(theme):
+                return theme, True
+    return await get_public_theme(db, kingdom), False
+
+
+def mark_preview(response: HTMLResponse) -> HTMLResponse:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Robots-Tag"] = "noindex"
+    return response
 
 
 def render_public_page(
