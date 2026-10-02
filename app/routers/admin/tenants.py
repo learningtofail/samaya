@@ -19,6 +19,7 @@ from models.db import DiscordServer, EventType, Kingdom, Tenant, TenantSecondary
 from services.audit import log_change
 from services.contrast import faint_on_white_note
 from services.db_errors import raise_friendly_integrity_error
+from services.images import TENANT_ICON, process_data_uri_async
 from services.discord_api import verify_token
 
 from .deps import get_current_user, require_superadmin
@@ -193,6 +194,9 @@ async def create_tenant(
     payload: TenantIn, user: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)
 ):
     secondary_ids = await _check_servers(db, payload.kingdom_id, payload.server_id, payload.secondary_server_ids)
+    icon_image_data = (
+        await process_data_uri_async(payload.icon_image_data, TENANT_ICON, "Icon")
+        if payload.icon_image_data else None)
 
     tenant = Tenant(
         kingdom_id = payload.kingdom_id,
@@ -200,7 +204,7 @@ async def create_tenant(
         slug       = payload.slug,
         server_id  = payload.server_id,
         color      = payload.color,
-        icon_image_data = payload.icon_image_data or None,
+        icon_image_data = icon_image_data,
     )
     db.add(tenant)
     try:
@@ -246,7 +250,9 @@ async def update_tenant(
     if payload.server_id is not None: tenant.server_id = payload.server_id
     if payload.color is not None:     tenant.color     = payload.color
     if payload.icon_image_data is not None:
-        tenant.icon_image_data = payload.icon_image_data or None
+        tenant.icon_image_data = (
+            await process_data_uri_async(payload.icon_image_data, TENANT_ICON, "Icon")
+            if payload.icon_image_data else None)
 
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id,
