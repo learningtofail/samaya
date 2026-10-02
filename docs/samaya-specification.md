@@ -2102,7 +2102,22 @@ Not translated: event names, descriptions and messages, message templates, allia
 
 ### 72.2 Locales
 
-A locale is a BCP 47 tag (`en`, `tr`, `ko`, `es`, `pt-BR`, `de`, `fr`, `ru`, `ar`, `zh-Hans`). A shipped locale is a file in `app/i18n/<locale>.json`. Each file has a `_meta` object: `name` (the language in its own script), `dir` (`ltr` or `rtl`), `script`, and `reviewed` (a native speaker has confirmed the text). Matching is exact, then language only (`pt-BR` falls back to `pt`), then the Kingdom default. The Kingdom has `default_locale` (default `en`) and `enabled_locales` (a list). Only enabled locales are offered or matched.
+A locale is a BCP 47 tag (`en`, `tr`, `ko`, `es`, `pt-BR`, `de`, `fr`, `ru`, `ar`, `zh-Hans`). A shipped locale is a file in `app/i18n/<locale>.json`. Each file has a `_meta` object: `name` (the language in its own script), `dir` (`ltr` or `rtl`), `script`, and `reviewed` (a native speaker has confirmed the text). Matching is exact, then language only (`fr-CA` falls back to `fr`, `ar-EG` to `ar`), then the Kingdom default. The Kingdom has `default_locale` (default `en`) and `enabled_locales` (a list). Only enabled locales are offered or matched. Chinese is script-aware: `zh`, `zh-CN`, `zh-SG` and `zh-Hans` match `zh-Hans`, while `zh-TW`, `zh-HK` and `zh-Hant` do not match it (a Traditional-script reader should not silently get Simplified) and fall to the Kingdom default until a `zh-Hant` locale exists.
+
+**Launch languages (decided 2026-10-02).** English, Simplified Chinese, Modern Standard Arabic, French, Spanish, Turkish, Russian and German:
+
+| Tag | Native name | `dir` | Script | CLDR plural categories | Fallback font for the script |
+|---|---|---|---|---|---|
+| `en` | English | ltr | Latin | one, other | none (Noto Sans) |
+| `zh-Hans` | 简体中文 | ltr | Han | other | Noto Sans SC |
+| `ar` | العربية (Modern Standard Arabic) | rtl | Arabic | zero, one, two, few, many, other | Noto Sans Arabic |
+| `fr` | Français | ltr | Latin | one, many, other | none |
+| `es` | Español | ltr | Latin | one, many, other | none |
+| `tr` | Türkçe | ltr | Latin | one, other | none |
+| `ru` | Русский | ltr | Cyrillic | one, few, many, other | none (Noto Sans covers Cyrillic) |
+| `de` | Deutsch | ltr | Latin | one, other | none |
+
+`ar` text is written in Modern Standard Arabic, not a regional dialect, so one file serves every Arabic-speaking region. Of these, Arabic (right to left, six plural forms, a different script) and Chinese (a large glyph set, no plurals, no spaces between words) are the two that change code, not only text.
 
 ### 72.3 Choosing the visitor's language
 
@@ -2126,9 +2141,11 @@ Every user-visible literal in `events.html`, `events-public.js`, `feedback.html`
 
 ### 72.6 Layout, scripts and fonts
 
-- **Right-to-left.** `dir` comes from the locale. `events.css` and `feedback.css` move from physical properties (`margin-left`, `left`, `text-align: left`) to logical ones (`margin-inline-start`, `inset-inline-start`, `text-align: start`), and the calendar grid and chevrons are checked with a mirrored pseudo-locale. A locale with `dir: rtl` cannot be enabled until that CSS has shipped.
+- **Right-to-left (required at launch, because `ar` is a launch language).** `dir` comes from the locale. `events.css` and `feedback.css` move from physical properties (`margin-left`, `left`, `text-align: left`) to logical ones (`margin-inline-start`, `inset-inline-start`, `text-align: start`), and the calendar grid, the hero's progress bar, chevrons and menus are checked in a mirrored layout (`ar` and the `en-XA` mirror variant). Icons and arrows that carry direction (back link, chevrons) mirror; clocks and the progress bar do not need to, but the bar fills from the inline start.
+- **Mixed-direction text.** Alliance names, event names and Kingdom names are written by leaders in any language and sit inside sentences. In HTML every interpolated name goes in a `<bdi>` element, and free text uses `dir="auto"`, so an English event name in an Arabic sentence (or the reverse) keeps its own punctuation and order. In Discord replies the same names are wrapped in Unicode isolates (U+2068 and U+2069) when the reply locale is right to left.
+- **Calendar week.** The first weekday follows the locale (`Intl.Locale.prototype.getWeekInfo` where the browser has it, otherwise Monday), because Arabic regions and the US start the week on different days than Europe. To check against the calendar code when the step is built.
 - **Length.** Labels must not clip at the longest languages (German and Russian run 30 to 40 percent longer than English). The `en-XA` smoke test at 360 px is the check.
-- **Fonts.** A theme's fonts must cover the visitor's script. Catalogue entries list their scripts (§71.2). For a locale whose script a chosen font lacks, the generated stylesheet appends the catalogue's fallback family for that script (a Noto Sans family) to that page's stack, loaded in script chunks so only those visitors download it. Enabling a locale whose script the base theme's fonts do not cover shows a warning in the admin.
+- **Fonts.** A theme's fonts must cover the visitor's script. Catalogue entries list their scripts (§71.2). For a locale whose script a chosen font lacks, the generated stylesheet appends the catalogue's fallback family for that script to that page's stack: `Noto Sans SC` for `zh-Hans` and `Noto Sans Arabic` for `ar`, loaded in script chunks (Google splits the Chinese set into many small slices), so only those visitors download them. A Latin-only heading face such as Cinzel renders Russian, Chinese and Arabic headings in the fallback font; the Languages panel warns about that for the base theme. Enabling a locale whose script the base theme's fonts do not cover shows a warning in the admin.
 
 ### 72.7 Page text per language
 
@@ -2136,7 +2153,8 @@ Every user-visible literal in `events.html`, `events-public.js`, `feedback.html`
 
 ### 72.8 Discord
 
-- **Replies.** The interaction payload carries the asker's `locale`. A reply uses it if it matches an enabled locale, then the payload's `guild_locale`, then the Kingdom default. Each asker therefore gets their own language. Event times are already localised by Discord's `<t:...>` tokens.
+- **Replies.** The interaction payload carries the asker's `locale`, which uses Discord's own tags. A reply uses it if it maps to an enabled locale, then the payload's `guild_locale`, then the Kingdom default. Each asker therefore gets their own language. Event times are already localised by Discord's `<t:...>` tokens. Mapping: `en-US` and `en-GB` to `en`; `zh-CN` to `zh-Hans` (`zh-TW` has no match, as in §72.2); `es-ES` and `es-419` to `es`; `fr`, `de`, `tr` and `ru` to themselves.
+- **Arabic caveat.** To the author's knowledge Discord's client has no Arabic interface language, so the payload `locale` of an Arabic speaker is never `ar` (usually `en-US`), and Discord accepts `name_localizations` only for its own list of locales. Arabic would therefore not appear in command names or in replies chosen by the asker's locale. Two possible remedies, neither designed: a reply language set per Discord server (`discord_servers.locale`, used when the asker's locale does not map to an enabled locale), and an `ar` option on the commands. To verify against Discord's current locale list when the Discord step starts.
 - **Command names.** `app/register_discord_commands.py` sends `name_localizations` and `description_localizations` from the catalogue (`discord.cmd.*`) for each enabled locale. Discord restricts command names (lowercase, 1 to 32 characters, limited character classes), so a locale whose translated name fails the check keeps the English name; the registration dry run lists those.
 - **Feedback modal.** Title, field labels and the confirmation come from the catalogue.
 
@@ -2163,21 +2181,21 @@ Additive: `kingdoms.default_locale` (text, not null, default `en`), `kingdoms.en
 ### 72.14 Build order
 
 1. **Foundation, English only.** The catalogue and `t()`, extraction of the public pages, locale selection and `<html lang dir>`, the `i18n` JSON block, `Intl` formatting, `en-XA`, tests. Nothing changes for visitors except the small wording shifts of §72.4.
-2. **Languages and page text.** Revision 0007, the page-text editor with a tab per language, the Languages panel, the language select, the first translations, the logical-CSS migration, Discord localisation.
+2. **Languages and page text.** Revision 0007, the page-text editor with a tab per language, the Languages panel, the language select, the logical-CSS and bidi work (needed for `ar`), the launch translations (seven languages besides English, about 150 strings each, an estimate), Discord localisation. Languages are enabled one at a time as each is reviewed, so the step can ship with English and the first reviewed languages and add the rest without a deploy.
 3. Then §71's theme, font, schedule and banner steps (§71.12).
 4. **Admin console** translation, after demand.
 
 ### 72.15 Decisions
 
-Decided 2026-10-02: plan for multilingual UI soon; per-language page text from the start (not one language and a later migration).
+Decided 2026-10-02: plan for multilingual UI soon; per-language page text from the start (not one language and a later migration); the launch languages are English, Simplified Chinese, Modern Standard Arabic, French, Spanish, Turkish, Russian and German (§72.2).
 
 Open, with the recommended default:
 1. **Scope order:** public pages, then Discord, then admin (as §72.1).
-2. **Launch languages:** the Kingdom's choice. Not decided; the foundation does not need it.
-3. **Who translates:** Claude drafts, community natives review (§72.12), with `reviewed` shown in the admin only.
-4. **Digits:** Western digits for times everywhere (§72.4).
-5. **Language in the URL:** `?lang=` plus cookie (§72.3), not a path prefix (`/tr/events`). A path prefix is friendlier to search engines but needs a second copy of every route.
-6. **Server plural rules:** `Babel` or count-free Discord strings (§72.4).
+2. **Who translates:** Claude drafts, community natives review (§72.12), with `reviewed` shown in the admin only. Arabic and Chinese in particular should have a native read before they are enabled.
+3. **Digits:** Western digits for times and counts in every language, including Arabic (§72.4).
+4. **Language in the URL:** `?lang=` plus cookie (§72.3), not a path prefix (`/tr/events`). A path prefix is friendlier to search engines but needs a second copy of every route.
+5. **Server plural rules:** the `Babel` library. With Russian and Arabic in the launch set, count-free Discord strings are impractical, and Babel supplies CLDR rules for any language added later.
+6. **Arabic in Discord:** per-server reply language (§72.8), or accept English there for now.
 
 # Archive
 
