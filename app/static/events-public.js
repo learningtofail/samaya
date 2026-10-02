@@ -138,9 +138,9 @@ function crestHtml(name, icon, color, size) {
   return `<span class="crest${size ? ' crest-' + size : ''}" style="--c:${c};--ink-on:${inkOn(c)}" title="${escapeHtml(name)}">${inner}</span>`;
 }
 function evAlliances(ev) {
-  if (ev.scope === 'kingdom-wide') return [{ name: 'Kingdom-wide', icon: '', color: KINGDOM_COLOR, slug: '' }];
+  if (ev.scope === 'kingdom-wide') return [{ name: 'Kingdom', icon: '', color: KINGDOM_COLOR, slug: '' }];
   const t = ev.targets && ev.targets.length ? ev.targets : (ev.tenant_slug ? [{ tenant_slug: ev.tenant_slug, tenant_name: ev.tenant_name }] : []);
-  if (!t.length) return [{ name: 'Kingdom-wide', icon: '', color: KINGDOM_COLOR, slug: '' }];
+  if (!t.length) return [{ name: 'Kingdom', icon: '', color: KINGDOM_COLOR, slug: '' }];
   return t.map((x) => allianceInfo(x.tenant_slug, x.tenant_name));
 }
 function matchesFilter(ev) {

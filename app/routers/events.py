@@ -92,7 +92,9 @@ def _row_dict(row: PublicRow) -> dict:
         "notification_channel_name": None,
         "cover_image_data":     event.cover_image_data,
     }
-    if row.with_tenant_fields:
+    # A kingdom-wide event belongs to the Kingdom, not to its anchor alliance
+    # (the owning_tenant_id is technical), so players never see the anchor.
+    if row.with_tenant_fields and event.scope != "kingdom-wide":
         data["tenant_name"] = row.tenant.name
         data["tenant_slug"] = row.tenant.slug
         data["tenant_color"] = row.tenant.color
