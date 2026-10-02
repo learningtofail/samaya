@@ -56,17 +56,24 @@ class RateLimiter:
         self.window_seconds = window_seconds
         self._hits: dict[str, deque] = defaultdict(deque)
 
-    def __call__(self, request: Request) -> None:
+    def allow(self, key: str) -> bool:
+        """Records one hit for `key` and returns False when it is over the
+        limit. Also used with a Discord user ID, where the per-IP key cannot
+        work (every interaction comes from Discord's own addresses)."""
         if DISABLED:
-            return
-        ip = _client_ip(request)
-        hits = self._hits[ip]
+            return True
+        hits = self._hits[key]
         now = time.monotonic()
         while hits and hits[0] <= now - self.window_seconds:
             hits.popleft()
         if len(hits) >= self.max_requests:
+            return False
+        hits.append(now)
+        return True
+
+    def __call__(self, request: Request) -> None:
+        if not self.allow(_client_ip(request)):
             raise HTTPException(
                 status_code=429,
                 detail="Too many requests — please slow down and try again in a few minutes.",
             )
-        hits.append(now)

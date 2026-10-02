@@ -210,7 +210,7 @@ Every timestamp is UTC. `services/time_utils.ensure_utc()` normalizes `tzinfo` b
 
 ### 5.3 Inbound Discord
 
-- `POST /webhooks/discord` — Discord interaction webhook, signature-verified against `PLATFORM_PUBLIC_KEY`. **Known gap:** a tenant with its own custom bot and its own Discord "Interactions Endpoint URL" is not supported by this endpoint.
+- `POST /webhooks/discord` — Discord interaction webhook, signature-verified against `PLATFORM_PUBLIC_KEY`. Answers PING and the `/schedule`, `/next` and `/feedback` slash commands (§70). **Known gap:** a tenant with its own custom bot and its own Discord "Interactions Endpoint URL" is not supported by this endpoint.
 
 ### 5.4 Admin (`/admin`, session-authenticated via `get_current_user`/`get_current_tenant`)
 
@@ -1899,6 +1899,26 @@ The Setup tab no longer has an "Alliances and audiences" panel. Which alliances 
 - **A 14-day Discord event lead** instead of 7: not needed, because the public pages and ICS feeds read occurrences over a 28-day window whether or not the Discord event exists.
 - **Live character counter** against 1000 in the composer, for events that create a Discord event.
 - **Automatic alliance tag** on the Discord event name (`M0D | Rally Night`), added by the engine so the stored name stays clean. Until then the manual convention is `TAG | Activity`, using the alliance's short name, `K138 | ...` for Kingdom-wide events and `M0D + NSR | ...` for joint ones, and a stable name once posted (the engine matches Discord events by name and time, and ICS UIDs include the name).
+
+## 70. Discord slash commands
+
+**Problem.** Players ask "when is the next event?" in Discord and have to open the public page. A feedback note means leaving Discord too.
+
+**Design.** The existing `POST /webhooks/discord` endpoint (HTTP interactions, signature verified against `PLATFORM_PUBLIC_KEY`) now also handles application commands, autocomplete and modal submits. No gateway connection, no new process, no new table. Handlers live in `services/discord_commands.py`; `routers/webhooks.py` verifies the signature and dispatches. Commands are global and registered by `app/register_discord_commands.py` (dry run by default, `--apply` to send).
+
+**Commands.**
+- `/schedule [alliance] [days]`: upcoming events, 7 days by default, 1 to 14. `/next [alliance]`: the next one, with its location.
+- `/feedback category`: opens a modal (summary, details) and files a `feedback` ticket on the public board, with `error_type` set to the chosen category (Bug, Suggestion, Other).
+
+**Scope.** Everything `/schedule` and `/next` return comes from `services/public_events.public_rows`, so leadership-only and inactive events never appear. Only events with a duration are listed (not plain messages), cancelled and finished occurrences are skipped, and a Kingdom-wide event is labelled "Kingdom". Without the `alliance` option the answer covers the alliances declared on the server where the command ran (an alliance's primary or secondary server; sharing is never inferred, as in §67). A server with no declared alliance, or a direct message, gets every alliance's events. With `alliance` set, that alliance's own view is used.
+
+**Output.** Ephemeral (only the asker sees it). Times use Discord's `<t:UNIX:f>` and `<t:UNIX:R>`, so each reader sees their own time zone. `allowed_mentions` is empty, so an event name can never ping anyone. A reply is cut to fit Discord's 2000 characters.
+
+**Feedback details.** The ticket's alliance is set only when the server maps to exactly one alliance. `submitter_contact` stores the Discord display name and ID so moderators can follow up. The public board never returns it, and the confirmation says moderators can see it. The existing per-IP limiter cannot work here (every request comes from Discord), so a per-user limit of 3 tickets per 10 minutes applies.
+
+**Not built.** Coordinator commands (create, cancel), personal reminders, buttons on posts. They need the Discord ID to Samaya user mapping and a permission pass, and come after read-only has proven stable.
+
+**Setup (owner).** Set the application's Interactions Endpoint URL to `https://ks138.taraka.dev/webhooks/discord`, invite the bot with the `applications.commands` scope, then run the registration script.
 
 # Archive
 

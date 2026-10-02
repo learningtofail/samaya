@@ -1,8 +1,12 @@
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from models import get_db
+from services.discord_commands import handle_interaction
 
 
 logger = logging.getLogger(__name__)
@@ -30,7 +34,7 @@ def verify_signature(public_key: str, signature: str, timestamp: str, body: byte
 
 
 @router.post("/discord")
-async def discord_webhook(request: Request):
+async def discord_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     body      = await request.body()
     signature = request.headers.get("X-Signature-Ed25519", "")
     timestamp = request.headers.get("X-Signature-Timestamp", "")
@@ -61,6 +65,6 @@ async def discord_webhook(request: Request):
         return JSONResponse({"type": 1})
 
     # Discord's Interactions Endpoint only ever delivers Interaction objects
-    # (PING, commands, components, modals). Guild scheduled event updates are
-    # Gateway events and never arrive here, so nothing else is handled.
-    return JSONResponse({"status": "ok"})
+    # (PING, commands, autocomplete, modals). Guild scheduled event updates are
+    # Gateway events and never arrive here. Spec §70 handles the rest.
+    return JSONResponse(await handle_interaction(db, data))
