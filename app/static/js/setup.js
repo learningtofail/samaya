@@ -1,6 +1,6 @@
 // Setup tab (#v-setup, spec §66.7 and §68): your public display name, the
-// Kingdom's Audiences (named lists of Discord server and channel destinations),
-// which Audiences each alliance uses, and, for a superadmin, the platform
+// Kingdom's Audiences (named lists of Discord server and channel destinations,
+// with the alliances that use each one) and, for a superadmin, the platform
 // sections that access.js and platform.js render. Depends on common.js and
 // pickers.js.
 
@@ -31,13 +31,8 @@ function manageableKingdomIds() {
   return Array.from(new Set(TENANTS.map((t) => t.kingdom_id))).filter(isKingdomCoordinator);
 }
 
-function canEditLinks(t) {
-  return isOwnerOfTenant(t) || isKingdomCoordinator(t.kingdom_id);
-}
-
 async function loadSetupAudiences() {
   if (!TENANTS.length) {
-    byId('setupAlliances').innerHTML = '<p class="samaya-empty">You have no alliances yet.</p>';
     byId('audiencesBody').innerHTML = emptyRow(4, 'No audiences yet.');
     return;
   }
@@ -48,7 +43,6 @@ async function loadSetupAudiences() {
     SETUP_AUDIENCES = [];
   }
   renderAudiencesPanel();
-  renderSetupAlliances();
 }
 
 // ── Kingdom audiences ────────────────────────────────────────
@@ -253,75 +247,13 @@ bindActions(byId('audiencesBody'), {
   },
 });
 
-// ── Alliances: which audiences each one uses ─────────────────
+// ── Alliances' primary and secondary servers (also used by platform.js) ──
 
 function serversLineHtml(t) {
   const secondary = (t.secondary_servers || []).map((s) => escapeHtml(s.name));
   return `<div><span class="samaya-muted">Primary server:</span> ${escapeHtml(t.server_name)}</div>
     ${secondary.length ? `<div><span class="samaya-muted">Also present on:</span> ${secondary.join(', ')}</div>` : ''}`;
 }
-
-function allianceAudienceRow(a, t, can) {
-  const link = a.links.find((l) => l.tenant_id === t.id);
-  const slug = t.slug;
-  return `<tr class="pf-v6-c-table__tr">
-    <td class="pf-v6-c-table__td" data-label="Audience"><strong>${escapeHtml(a.label)}</strong> ${audienceFlagsHtml(a)}
-      <div class="samaya-muted">${a.destinations.map((d) => destinationHtml(d, slug)).join(' ')}</div></td>
-    <td class="pf-v6-c-table__td" data-label="Uses">
-      <label class="check"><input type="checkbox" data-use="${a.id}" aria-label="${escapeHtml(t.name)} uses ${escapeHtml(a.label)}"${link ? ' checked' : ''}${can ? '' : ' disabled'}> Uses</label></td>
-    <td class="pf-v6-c-table__td" data-label="Post by default">
-      <label class="check"><input type="checkbox" data-default="${a.id}" aria-label="${escapeHtml(t.name)} posts to ${escapeHtml(a.label)} by default"${link && link.post_by_default ? ' checked' : ''}${can && link ? '' : ' disabled'}> Default</label></td>
-  </tr>`;
-}
-
-function renderSetupAlliances() {
-  const host = byId('setupAlliances');
-  host.innerHTML = TENANTS.map((t) => {
-    const can = canEditLinks(t);
-    const rows = SETUP_AUDIENCES.filter((a) => a.kingdom_id === t.kingdom_id);
-    return `<section class="alliance" aria-labelledby="alliance${t.id}Name" data-tenant="${t.id}">
-      <h4 class="alliance__name" id="alliance${t.id}Name">${escapeHtml(t.name)}</h4>
-      ${serversLineHtml(t)}
-      <div class="table-wrap">
-        <table class="pf-v6-c-table pf-m-grid-md responsive-table">
-          <caption class="sr-only">Audiences for ${escapeHtml(t.name)}</caption>
-          <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Audience</th><th class="pf-v6-c-table__th" scope="col">Uses</th><th class="pf-v6-c-table__th" scope="col">Post by default</th></tr></thead>
-          <tbody>${rows.length ? rows.map((a) => allianceAudienceRow(a, t, can)).join('') : emptyRow(3, 'No audiences in this Kingdom yet.')}</tbody>
-        </table>
-      </div>
-      ${can
-    ? `<button type="button" class="pf-v6-c-button pf-m-primary pf-m-small" data-action="save-links" data-id="${t.id}">Save audiences for ${escapeHtml(t.name)}</button>`
-    : `<p class="samaya-muted">Only an owner of ${escapeHtml(t.name)}, a Kingdom coordinator or a superadmin can change these.</p>`}
-    </section>`;
-  }).join('');
-  resolveDestinationNames(host);
-}
-
-byId('setupAlliances').addEventListener('change', (e) => {
-  const box = e.target.closest('input[data-use]');
-  if (!box) return;
-  const def = box.closest('tr').querySelector('input[data-default]');
-  def.disabled = !box.checked;
-  def.checked = box.checked;
-});
-
-bindActions(byId('setupAlliances'), {
-  async 'save-links'(btn) {
-    const t = tenantById(parseInt(btn.dataset.id, 10));
-    if (!t) return;
-    const section = btn.closest('section');
-    const links = Array.from(section.querySelectorAll('input[data-use]:checked')).map((box) => ({
-      audience_id: parseInt(box.dataset.use, 10),
-      post_by_default: section.querySelector(`input[data-default="${box.dataset.use}"]`).checked,
-    }));
-    btn.disabled = true;
-    try {
-      await api('PUT', '/api/alliance-audiences', { links }, false, t.slug);
-      toast(`Audiences saved for ${t.name}.`);
-      loadSetupAudiences();
-    } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
-  },
-});
 
 byId('btnSaveDisplayName').addEventListener('click', async () => {
   const value = byId('setupDisplayName').value.trim();

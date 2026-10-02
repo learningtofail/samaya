@@ -243,9 +243,6 @@ summary:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--focus
 .response-form textarea { width: 100%; }
 
 /* ── Setup ─────────────────────────────────────────────── */
-.alliance { border-top: 1px solid var(--line); padding: var(--space-3) 0; display: grid; gap: var(--space-3); justify-items: start; }
-.alliance__name { font-size: var(--fs-base); }
-.alliance__pickers { display: grid; gap: var(--space-3); grid-template-columns: 1fr; width: 100%; max-width: 40rem; }
 
 /* ── About explainer ───────────────────────────────────── */
 .about-page { margin-top: var(--space-5); border-top: 1px solid var(--line); padding-top: var(--space-3); }
@@ -272,7 +269,7 @@ summary:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--focus
 @media (min-width: 640px) {
   .main { padding: var(--space-5); }
   .form-grid { grid-template-columns: 1fr 1fr; }
-  .audience__pickers, .alliance__pickers { grid-template-columns: 1fr 1fr; }
+  .audience__pickers { grid-template-columns: 1fr 1fr; }
   .toast { left: auto; right: var(--space-5); bottom: var(--space-5); }
 }
 
