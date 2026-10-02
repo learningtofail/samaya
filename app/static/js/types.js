@@ -55,7 +55,7 @@ function buildTypeRow(t) {
   const actions = canWriteAnywhere()
     ? `<div class="row-actions">
         <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="edit" data-id="${t.id}">Edit</button>
-        <button type="button" class="pf-v6-c-button pf-m-danger pf-m-small" data-action="delete" data-id="${t.id}">Delete</button>
+        <details class="menu"><summary class="menu__btn" aria-label="More actions for ${escapeHtml(t.name)}">&#8943;</summary><div class="menu__panel"><button type="button" class="menu__item menu__item--danger" data-action="delete" data-id="${t.id}">Delete&hellip;</button></div></details>
       </div>`
     : '<span class="samaya-muted">Read only</span>';
   return `<tr class="pf-v6-c-table__tr">

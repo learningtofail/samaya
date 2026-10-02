@@ -5,27 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex">
 <title>Samaya Admin</title>
-<link rel="stylesheet" href="/static/vendor/patternfly/patternfly.min.css">
-<link rel="stylesheet" href="/static/vendor/patternfly/patternfly-addons.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="/static/admin.css">
 </head>
 <body class="app">
 <a class="skip-link" href="#appMain">Skip to content</a>
 
-<header class="masthead">
-  <div class="masthead__brand">
-    <h1 class="masthead__title" id="headerTitle">Samaya</h1>
-    <span class="masthead__sub">Event scheduler</span>
+<div class="shell">
+<aside class="side">
+  <div class="side__brand">
+    <h1 class="side__title" id="headerTitle">Samaya</h1>
+    <span class="side__sub">Scheduler</span>
   </div>
-  <div class="masthead__tools">
-    <button type="button" class="masthead__clock" id="headerClock" title="Current UTC time and your local time. Click to change your time zone.">Loading...</button>
-    <form class="masthead__logout" method="post" action="/auth/logout">
-      <button type="submit" class="masthead__logout-button">Log out</button>
-    </form>
-  </div>
-</header>
-
-<nav class="tabs" aria-label="Admin sections">
+  <nav class="tabs" aria-label="Admin sections">
   <ul class="tabs__list">
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="events">Events</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="schedule">Schedule</button></li>
@@ -35,7 +29,15 @@
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="setup">Setup</button></li>
       <li class="tabs__item hidden" id="auditTabItem"><button type="button" class="tabs__link" data-view="audit">Audit log</button></li>
   </ul>
-</nav>
+  </nav>
+  <div class="side__tools">
+    <button type="button" class="side__clock" id="headerClock" title="Current UTC time and your local time. Click to change your time zone.">Loading...</button>
+    <form class="side__logout" method="post" action="/auth/logout">
+      <button type="submit" class="side__logout-button">Log out</button>
+    </form>
+  </div>
+</aside>
+<div class="content">
 
 <div class="noaccess hidden" id="noAccess">
   <h2>No alliance access yet</h2>
@@ -45,37 +47,33 @@
 <main class="main" id="appMain" tabindex="-1">
 <section id="v-events" class="view active" aria-labelledby="h-events">
   <div class="view__head">
-    <h2 class="view__title" id="h-events">Events</h2>
-    <button type="button" class="pf-v6-c-button pf-m-primary" id="btnNewEvent">New event</button>
+    <div>
+      <h2 class="view__title" id="h-events">Events</h2>
+      <p class="count" id="eventsCount" role="status"></p>
+    </div>
+    <button type="button" class="pf-v6-c-button pf-m-primary" id="btnNewEvent">+ New event</button>
   </div>
   <p class="samaya-muted view__note hidden" id="eventsViewerNote">You have read-only access. You can see everything but not change it.</p>
-  <div class="filters" role="group" aria-label="Filter events">
-    <div class="filters__item">
-        <label class="filters__label" for="eventsAlliance">Alliance</label>
-        <select class="pf-v6-c-form-control" id="eventsAlliance"></select>
-      </div>
-    <div class="filters__item">
-        <label class="filters__label" for="eventsType">Type</label>
-        <select class="pf-v6-c-form-control" id="eventsType"></select>
-      </div>
+  <div class="filters filters--bar" role="group" aria-label="Filter events">
+    <div class="filters__item filters__item--grow">
+      <label class="filters__label" for="eventsSearch">Search</label>
+      <input class="pf-v6-c-form-control" type="search" id="eventsSearch" placeholder="Search name or message">
+    </div>
+    <div class="filters__item"><label class="filters__label" for="eventsAlliance">Alliance</label><select class="pf-v6-c-form-control" id="eventsAlliance"></select></div>
+    <div class="filters__item"><label class="filters__label" for="eventsType">Type</label><select class="pf-v6-c-form-control" id="eventsType"></select></div>
     <div class="filters__item">
       <label class="filters__label" for="eventsScope">Scope</label>
-      <select class="pf-v6-c-form-control" id="eventsScope">
-        <option value="">Any scope</option><option value="alliance">Alliance</option><option value="kingdom-wide">Kingdom-wide</option>
-      </select>
+      <select class="pf-v6-c-form-control" id="eventsScope"><option value="">Any scope</option><option value="alliance">Alliance</option><option value="kingdom-wide">Kingdom-wide</option></select>
     </div>
     <div class="filters__item">
       <label class="filters__label" for="eventsStatus">Status</label>
-      <select class="pf-v6-c-form-control" id="eventsStatus">
-        <option value="">Any status</option><option value="active">Active</option><option value="inactive">Inactive</option>
-      </select>
+      <select class="pf-v6-c-form-control" id="eventsStatus"><option value="">Any status</option><option value="active">Active</option><option value="inactive">Inactive</option></select>
     </div>
-    <div class="filters__item filters__item--grow">
-      <label class="filters__label" for="eventsSearch">Search</label>
-      <input class="pf-v6-c-form-control" type="search" id="eventsSearch" placeholder="Name or message">
+    <div class="seg" role="group" aria-label="Row density">
+      <button type="button" id="densityCompact" aria-pressed="true">Compact</button>
+      <button type="button" id="densityComfy" aria-pressed="false">Comfortable</button>
     </div>
   </div>
-  <p class="count" id="eventsCount" role="status"></p>
     <div class="table-wrap">
       <table class="pf-v6-c-table pf-m-grid-md responsive-table">
         <caption class="sr-only">Events and messages</caption>
@@ -97,8 +95,8 @@
   </details>
 </section>
 <section id="v-schedule" class="view" aria-labelledby="h-schedule">
-  <div class="view__head"><h2 class="view__title" id="h-schedule">Schedule</h2></div>
-  <div class="filters" role="group" aria-label="Schedule options">
+  <div class="view__head"><div><h2 class="view__title" id="h-schedule">Schedule</h2><p class="count" id="scheduleSummary" role="status"></p></div></div>
+  <div class="filters filters--bar" role="group" aria-label="Schedule options">
     <div class="filters__item">
         <label class="filters__label" for="scheduleAlliance">Alliance</label>
         <select class="pf-v6-c-form-control" id="scheduleAlliance"></select>
@@ -109,13 +107,12 @@
     </div>
     <div class="filters__item">
       <span class="filters__label" id="scheduleLayoutLabel">View</span>
-      <div class="toggle-group" role="group" aria-labelledby="scheduleLayoutLabel">
-        <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="scheduleLayoutTable" aria-pressed="true">Table</button>
-        <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="scheduleLayoutTimeline" aria-pressed="false">Timeline</button>
+      <div class="seg" role="group" aria-labelledby="scheduleLayoutLabel">
+        <button type="button" id="scheduleLayoutTable" aria-pressed="true">Table</button>
+        <button type="button" id="scheduleLayoutTimeline" aria-pressed="false">Timeline</button>
       </div>
     </div>
   </div>
-  <p class="count" id="scheduleSummary" role="status"></p>
   <div id="scheduleTableWrap">
     <div class="table-wrap">
       <table class="pf-v6-c-table pf-m-grid-md responsive-table">
@@ -143,7 +140,7 @@
 <section id="v-delivery" class="view" aria-labelledby="h-delivery">
   <div class="view__head"><h2 class="view__title" id="h-delivery">Delivery log</h2></div>
   <div class="health" id="deliveryHealth"></div>
-  <div class="filters" role="group" aria-label="Filter deliveries">
+  <div class="filters filters--panel" role="group" aria-label="Filter deliveries">
     <div class="filters__item">
         <label class="filters__label" for="deliveryAlliance">Alliance</label>
         <select class="pf-v6-c-form-control" id="deliveryAlliance"></select>
@@ -230,7 +227,7 @@
 <section id="v-feedback" class="view" aria-labelledby="h-feedback">
   <div class="view__head"><h2 class="view__title" id="h-feedback">Feedback</h2></div>
   <p class="banner banner--info" id="ticketAuthor"></p>
-  <div class="filters" role="group" aria-label="Filter feedback">
+  <div class="filters filters--panel" role="group" aria-label="Filter feedback">
     <div class="filters__item">
       <label class="filters__label" for="ticketFilter">Show</label>
       <select class="pf-v6-c-form-control" id="ticketFilter"></select>
@@ -393,6 +390,8 @@
   </details>
 </section>
 </main>
+</div>
+</div>
 
 <!-- MODALS -->
 <div class="pf-v6-c-backdrop" id="scopeModal" data-close-fn="closeScopeModal">
@@ -434,7 +433,7 @@
 
 <div class="pf-v6-c-backdrop" id="eventModal" data-close-fn="closeEventModal">
   <div class="pf-v6-l-bullseye">
-    <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="eventModalTitle">
+    <div class="pf-v6-c-modal-box pf-m-xl" role="dialog" aria-modal="true" aria-labelledby="eventModalTitle">
       <header class="pf-v6-c-modal-box__header">
         <h2 class="pf-v6-c-modal-box__title" id="eventModalTitle">New event</h2>
         <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
@@ -442,70 +441,84 @@
       <div class="pf-v6-c-modal-box__body">
         <p class="banner banner--info hidden" id="evBanner"></p>
         <div class="form-errors hidden" id="evErrors" role="alert"></div>
-        <form class="pf-v6-c-form" id="eventForm" novalidate>
-          <div class="form-grid">
-            <div class="pf-v6-c-form__group">
+        <form class="pf-v6-c-form form--sections" id="eventForm" novalidate>
+          <section class="fsec">
+            <div><div class="fsec__title">Basics</div><div class="fsec__hint">The type pre-fills duration, repeat, message and reminders. Anything you change yourself is kept.</div></div>
+            <div class="form-grid">
+              <div class="pf-v6-c-form__group">
               <label class="pf-v6-c-form__label" for="evType"><span class="pf-v6-c-form__label-text">Type</span></label>
               <select class="pf-v6-c-form-control" id="evType"></select>
-              <p class="pf-v6-c-form__helper-text">Pre-fills duration, repeat, message and reminders. Anything you change yourself is kept.</p>
             </div>
-            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group">
               <label class="pf-v6-c-form__label" for="evName"><span class="pf-v6-c-form__label-text">Name</span></label>
               <input class="pf-v6-c-form-control" type="text" id="evName" maxlength="120" required>
             </div>
-            <div class="pf-v6-c-form__group form-grid__full">
+              <div class="pf-v6-c-form__group form-grid__full">
               <label class="pf-v6-c-form__label" for="evLocation"><span class="pf-v6-c-form__label-text">Location (optional)</span></label>
               <input class="pf-v6-c-form-control" type="text" id="evLocation" maxlength="100">
             </div>
-            <div class="form-grid__full" id="evMessageHost"></div>
-            <div class="pf-v6-c-form__group">
+            </div>
+          </section>
+          <section class="fsec">
+            <div><div class="fsec__title">When</div><div class="fsec__hint">All times are UTC, 24-hour. Repeats count from the first date.</div></div>
+            <div class="form-grid">
+              <div class="pf-v6-c-form__group">
               <label class="pf-v6-c-form__label" for="evAnchor"><span class="pf-v6-c-form__label-text">Date (UTC)</span></label>
               <input class="pf-v6-c-form-control" type="date" id="evAnchor" required>
               <p class="pf-v6-c-form__helper-text" id="evAnchorHelp"></p>
             </div>
-            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group">
               <label class="pf-v6-c-form__label" for="evStart"><span class="pf-v6-c-form__label-text">Start time (UTC, 24-hour)</span></label>
               <input class="pf-v6-c-form-control" type="text" id="evStart" placeholder="19:00" inputmode="numeric" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" required>
             </div>
-            <div class="pf-v6-c-form__group form-grid__full">
-              <div class="check">
-                <input type="checkbox" id="evHasCalendar">
-                <label for="evHasCalendar">Has a calendar entry</label>
-              </div>
-              <p class="pf-v6-c-form__helper-text">On: a Discord Scheduled Event is created on each alliance's primary server only, and the event appears on the public calendar. Off: it is a message only.</p>
-            </div>
-            <div class="pf-v6-c-form__group hidden" id="evDurationGroup">
-              <label class="pf-v6-c-form__label" for="evDuration"><span class="pf-v6-c-form__label-text">Duration (hours)</span></label>
-              <input class="pf-v6-c-form-control" type="number" id="evDuration" min="0.25" step="0.25">
-            </div>
-            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group">
               <label class="pf-v6-c-form__label" for="evRecurrence"><span class="pf-v6-c-form__label-text">Repeats</span></label>
               <select class="pf-v6-c-form-control" id="evRecurrence">
                 <option value="none">One-off</option>
                 <option value="interval_days">Every N days</option>
               </select>
             </div>
-            <div class="pf-v6-c-form__group hidden" id="evIntervalGroup">
+              <div class="pf-v6-c-form__group hidden" id="evIntervalGroup">
               <label class="pf-v6-c-form__label" for="evInterval"><span class="pf-v6-c-form__label-text">Every how many days</span></label>
               <input class="pf-v6-c-form-control" type="number" id="evInterval" min="1" step="1">
             </div>
-            <div class="pf-v6-c-form__group hidden" id="evUntilGroup">
+              <div class="pf-v6-c-form__group hidden" id="evUntilGroup">
               <label class="pf-v6-c-form__label" for="evUntil"><span class="pf-v6-c-form__label-text">Repeat until (optional)</span></label>
               <input class="pf-v6-c-form-control" type="date" id="evUntil">
             </div>
-            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group hidden" id="evDurationGroup">
+              <label class="pf-v6-c-form__label" for="evDuration"><span class="pf-v6-c-form__label-text">Duration (hours)</span></label>
+              <input class="pf-v6-c-form-control" type="number" id="evDuration" min="0.25" step="0.25">
+            </div>
+              <div class="pf-v6-c-form__group form-grid__full">
+              <div class="check">
+                <input type="checkbox" id="evHasCalendar">
+                <label for="evHasCalendar">Has a calendar entry</label>
+              </div>
+              <p class="pf-v6-c-form__helper-text">On: a Discord Scheduled Event is created on each alliance's primary server only, and the event appears on the public calendar. Off: it is a message only.</p>
+            </div>
+            </div>
+          </section>
+          <section class="fsec">
+            <div><div class="fsec__title">Message</div><div class="fsec__hint">Posted at each reminder.</div></div>
+            <div class="form-grid"><div class="form-grid__full" id="evMessageHost"></div></div>
+          </section>
+          <section class="fsec">
+            <div><div class="fsec__title">Delivery</div><div class="fsec__hint">Who is posted to, and when.</div></div>
+            <div class="form-grid">
+              <div class="pf-v6-c-form__group">
               <label class="pf-v6-c-form__label" for="evScope"><span class="pf-v6-c-form__label-text">Scope</span></label>
               <select class="pf-v6-c-form-control" id="evScope">
                 <option value="alliance">Alliance</option>
                 <option value="kingdom-wide">Kingdom-wide</option>
               </select>
             </div>
-            <div class="pf-v6-c-form__group">
+              <div class="pf-v6-c-form__group">
               <label class="pf-v6-c-form__label" for="evOwner"><span class="pf-v6-c-form__label-text" id="evOwnerLabel">Owning alliance</span></label>
               <select class="pf-v6-c-form-control" id="evOwner"></select>
             </div>
-            <p class="form-grid__full samaya-muted hidden" id="evKingdomNote">A kingdom-wide event belongs to the Kingdom: any Kingdom coordinator can edit it, and the alliance chosen above is only its anchor, which supplies the default message wording and the Discord Scheduled Event server. Creating one needs kingdom coordinator access.</p>
-            <fieldset class="form-grid__full audience">
+              <p class="form-grid__full samaya-muted hidden" id="evKingdomNote">A kingdom-wide event belongs to the Kingdom: any Kingdom coordinator can edit it, and the alliance chosen above is only its anchor, which supplies the default message wording and the Discord Scheduled Event server. Creating one needs kingdom coordinator access.</p>
+              <fieldset class="form-grid__full audience">
               <legend class="audience__legend" id="evAudienceLegend">Audience</legend>
               <p class="pf-v6-c-form__helper-text" id="evAudienceIntro"></p>
               <ul class="audience__list" id="evAudienceList"></ul>
@@ -518,24 +531,29 @@
               <p class="dest-summary" id="evDestSummary" role="status"></p>
               <div class="hidden" id="evDestProblems"></div>
             </fieldset>
-            <fieldset class="form-grid__full">
+            
+              <fieldset class="form-grid__full">
               <legend class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Reminders</span></legend>
               <div id="evReminderHost"></div>
             </fieldset>
-            <div class="pf-v6-c-form__group form-grid__full">
+              <div class="pf-v6-c-form__group form-grid__full">
               <div class="check">
                 <input type="checkbox" id="evMentionRole">
                 <label for="evMentionRole">Mention the alliance's role in reminders</label>
               </div>
             </div>
-            <div class="pf-v6-c-form__group form-grid__full">
+              <div class="pf-v6-c-form__group form-grid__full">
               <div class="check">
                 <input type="checkbox" id="evLeadershipOnly">
                 <label for="evLeadershipOnly">Leadership only</label>
               </div>
               <p class="pf-v6-c-form__helper-text" id="evLeadershipNote">Never creates a Discord Scheduled Event and is hidden from the public pages. Reminders post only to leadership-only audiences, and those audiences receive only leadership events.</p>
             </div>
-            <div class="pf-v6-c-form__group form-grid__full">
+            </div>
+          </section>
+          <section class="fsec">
+            <div><div class="fsec__title">Cover image</div><div class="fsec__hint">Optional.</div></div>
+            <div class="form-grid"><div class="pf-v6-c-form__group form-grid__full">
               <label class="pf-v6-c-form__label" for="evCoverFile"><span class="pf-v6-c-form__label-text">Cover image (optional)</span></label>
               <div class="cover">
                 <img class="cover__preview hidden" id="evCoverPreview" alt="Cover image preview">
@@ -544,7 +562,8 @@
               </div>
               <p class="pf-v6-c-form__helper-text">PNG, JPEG or GIF up to 8 MB. Used as the Discord Scheduled Event's cover.</p>
             </div>
-          </div>
+          </div></div>
+          </section>
         </form>
       </div>
       <footer class="pf-v6-c-modal-box__footer">
