@@ -2192,12 +2192,9 @@ Decided 2026-10-02: plan for multilingual UI soon; per-language page text from t
 
 Decided 2026-10-02: scope order is public pages, then admin pages, then Discord (§72.1). The Arabic-in-Discord question (below) waits for the Discord phase.
 
-Open, with the recommended default:
-1. **Who translates:** Claude drafts, community natives review (§72.12), with `reviewed` shown in the admin only. Arabic and Chinese in particular should have a native read before they are enabled.
-2. **Digits:** Western digits for times and counts in every language, including Arabic (§72.4).
-3. **Language in the URL:** `?lang=` plus cookie (§72.3), not a path prefix (`/tr/events`). A path prefix is friendlier to search engines but needs a second copy of every route.
-4. **Server plural rules:** the `Babel` library. With Russian and Arabic in the launch set, count-free Discord strings are impractical, and Babel supplies CLDR rules for any language added later.
-5. **Arabic in Discord:** deferred to the Discord phase.
+Decided 2026-10-02, accepting the recommended defaults: (1) Claude drafts translations and community natives review them, with `reviewed` shown in the admin only, and Arabic and Chinese get a native read before they are enabled; (2) Western digits for times and counts in every language (§72.4); (3) `?lang=` plus cookie, no path prefix (§72.3); (4) the `Babel` library for server plural rules (§72.5).
+
+No open decisions remain. Build starts with §71.12 step 1 (images).
 
 # Archive
 
