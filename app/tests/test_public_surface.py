@@ -195,6 +195,11 @@ class TestCombinedView:
         rows = [r for r in (await client.get("/api/events")).json() if r["event_name"] == "Everyone"]
         assert len(rows) == 1 and rows[0]["scope"] == "kingdom-wide"
 
+    async def test_kingdom_wide_row_hides_the_anchor_alliance(self, client, sf, tenant, second_tenant):
+        await _published(sf, tenant, "Everyone", scope="kingdom-wide")
+        row = next(r for r in (await client.get("/api/events")).json() if r["event_name"] == "Everyone")
+        assert not {"tenant_name", "tenant_slug", "tenant_color"} & row.keys()
+
     async def test_rows_are_ordered_by_start(self, client, sf, tenant):
         await _published(sf, tenant, "Late", start="21:00")
         await _published(sf, tenant, "Early", start="08:00")

@@ -165,7 +165,7 @@ describe("formatDuration", () => {
 describe("evAlliances", () => {
   test("kingdom-wide scope always returns the single Kingdom-wide pseudo-alliance", () => {
     const result = fns.evAlliances({ scope: "kingdom-wide", targets: [{ tenant_slug: "mod", tenant_name: "MOD" }] });
-    expect(result).toEqual([{ name: "Kingdom-wide", icon: "", color: expect.any(String), slug: "" }]);
+    expect(result).toEqual([{ name: "Kingdom", icon: "", color: expect.any(String), slug: "" }]);
   });
 
   test("an explicit targets array is mapped to alliance info per target", () => {
