@@ -14,7 +14,7 @@ existing event/announcement schedule.
 """
 import hashlib
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
@@ -26,7 +26,7 @@ from models import get_db
 from models.db import EventOccurrence, Tenant, Ticket, TicketVote
 from services.rate_limit import RateLimiter
 from services.sessions import SECRET_KEY
-from services.static_assets import bust_static_cache
+from services.public_pages import render_public_page
 from services.ticket_views import ACTIVE_STATUSES, ARCHIVED_STATUSES, occurrence_names, response_dict
 
 router = APIRouter()
@@ -222,14 +222,10 @@ async def vote_ticket(
 
 
 @router.get("/feedback", response_class=HTMLResponse)
-async def feedback_page():
-    # bust_static_cache() rewrites /static/... references with
-    # ?v=STATIC_ASSET_VERSION — needed now that this page loads its own
-    # external feedback.css/feedback.js (Phase 3 audit remediation; before
-    # that, everything here was inline, so this page never needed it, same
-    # reasoning as events.py's own two HTML-serving endpoints before spec
-    # §62). Cloudflare edge-caches /static/*.css/*.js for hours regardless
-    # of origin freshness (spec §23), so without this a redeploy could
-    # silently keep serving a stale feedback.css/feedback.js.
-    with open("/app/static/feedback.html") as f:
-        return HTMLResponse(bust_static_cache(f.read()))
+async def feedback_page(request: Request):
+    # render_public_page() rewrites /static/... references with
+    # ?v=STATIC_ASSET_VERSION (Cloudflare edge-caches /static/*.css/*.js for
+    # hours regardless of origin freshness, spec §23) and serves the page in
+    # the visitor's language (spec §72).
+    return render_public_page(
+        request, "feedback.html", ("public.common.", "public.feedback."), "public.feedback.title")
