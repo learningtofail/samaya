@@ -26,6 +26,35 @@ const DARK_INK = 'oklch(0.14 0.014 260)';
 
 const $ = (id) => document.getElementById(id);
 
+// ── Brand + CSSOM variable painting (no inline style attributes) ─
+function paintOne(el) {
+  el.dataset.vars.split(';').forEach((p) => {
+    const i = p.indexOf(':');
+    if (i > 0) el.style.setProperty(p.slice(0, i).trim(), p.slice(i + 1).trim());
+  });
+  el.removeAttribute('data-vars');
+}
+function lum(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  return 0.2126 * f(n >> 16) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255);
+}
+function brandInk(hex) {
+  const L = lum(hex);
+  return 1.05 / (L + 0.05) >= (L + 0.05) / 0.05 ? '#ffffff' : '#000000';
+}
+function applyBrand(color) {
+  const page = document.querySelector('.page');
+  if (/^#[0-9a-f]{6}$/i.test(color || '')) {
+    page.style.setProperty('--brand', color);
+    page.style.setProperty('--brand-ink', brandInk(color));
+  } else {
+    page.style.removeProperty('--brand');
+    page.style.removeProperty('--brand-ink');
+  }
+}
+function currentBrandSlug() { return COMBINED_MODE ? (FILTER === 'all' ? '' : FILTER) : TENANT_SLUG; }
+
 // ── State ───────────────────────────────────────────────────────
 let ALLIANCES = [];
 let EVENTS = [];          // grouped rows, each with _start/_end/_k
@@ -44,12 +73,7 @@ function escapeHtml(v) {
 function safeColor(c, fallback) {
   return /^#[0-9a-f]{3,8}$/i.test(c || '') || /^(oklch|hsl|rgb)a?\([\d.,%\s\/a-z-]+\)$/i.test(c || '') ? c : fallback;
 }
-function inkOn(color) {
-  const m = /^#([0-9a-f]{6})$/i.exec(color || '');
-  if (!m) return DARK_INK;
-  const n = parseInt(m[1], 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
-  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.55 ? DARK_INK : '#fff';
-}
+function inkOn(color) { return /^#[0-9a-f]{6}$/i.test(color || '') ? brandInk(color) : DARK_INK; }
 function pad2(n) { return String(n).padStart(2, '0'); }
 function parseIso(iso) { return Date.parse(/Z$|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z'); }
 
@@ -135,7 +159,7 @@ function initials(name) { return String(name || '').replace(/[^\p{L}\p{N}]/gu, '
 function crestHtml(name, icon, color, size) {
   const c = safeColor(color, KINGDOM_COLOR);
   const inner = icon ? `<img src="${escapeHtml(icon)}" alt="">` : escapeHtml(initials(name));
-  return `<span class="crest${size ? ' crest-' + size : ''}" style="--c:${c};--ink-on:${inkOn(c)}" title="${escapeHtml(name)}">${inner}</span>`;
+  return `<span class="crest${size ? ' crest-' + size : ''}" data-vars="--c:${c};--ink-on:${inkOn(c)}" title="${escapeHtml(name)}">${inner}</span>`;
 }
 function evAlliances(ev) {
   if (ev.scope === 'kingdom-wide') return [{ name: 'Kingdom', icon: '', color: KINGDOM_COLOR, slug: '' }];
@@ -197,12 +221,19 @@ function buildDayMap(list, tz) {
 // against a document that isn't the real events.html.
 if (SAMAYA_TEST) {
   globalThis.__SAMAYA_TEST_EXPORTS__ = {
-    escapeHtml, safeColor, inkOn, pad2, parseIso, hm, dayKey, fmtDay, tzShort, cd, rel, formatDuration,
+    escapeHtml, safeColor, inkOn, brandInk, pad2, parseIso, hm, dayKey, fmtDay, tzShort, cd, rel, formatDuration,
     displayStatus, fallbackColor, allianceInfo, initials, crestHtml, evAlliances, matchesFilter,
     groupCombinedFanoutRows, daySpan, buildDayMap,
   };
   return;
 }
+
+// ── Brand variables: markup carries data-vars, painted through the CSSOM ──
+new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) => {
+  if (n.nodeType !== 1) return;
+  if (n.dataset.vars) paintOne(n);
+  n.querySelectorAll('[data-vars]').forEach(paintOne);
+}))).observe(document.body, { childList: true, subtree: true });
 
 // ── Modals ──────────────────────────────────────────────────────
 let lastFocus = null;
@@ -277,15 +308,14 @@ function renderHeader() {
   $('pageKicker').textContent = COMBINED_MODE ? 'Kingshot · All alliances' : `Kingshot · ${cur.name}`;
   $('pageTitle').textContent = SITE_TITLE || 'Event Schedule';
   document.title = `${COMBINED_MODE ? '' : cur.name + ' · '}${SITE_TITLE || 'Kingshot Event Schedule'}`;
-  const c = COMBINED_MODE ? { name: 'Kingdom', icon: '', color: KINGDOM_COLOR } : cur;
-  $('brandCrest').innerHTML = crestHtml(c.name, c.icon, c.color, 'lg');
 }
 function renderChips() {
   const all = { slug: 'all', name: 'All alliances', icon: '', color: KINGDOM_COLOR };
   const items = [all].concat(ALLIANCES.map((a) => allianceInfo(a.slug, a.name)));
   $('allianceChips').innerHTML = items.map((a) => {
-    const crest = a.slug === 'all' ? '' : crestHtml(a.name, a.icon, a.color);
-    const style = `style="--c:${safeColor(a.color, KINGDOM_COLOR)}"`;
+    const crest = '';
+    const cc = safeColor(a.color, KINGDOM_COLOR);
+    const style = `data-vars="--c:${cc};--ink-on:${inkOn(cc)}"`;
     if (COMBINED_MODE) {
       return `<button type="button" class="chip" ${style} data-filter="${escapeHtml(a.slug)}" aria-pressed="${FILTER === a.slug}">${crest}${escapeHtml(a.name)}</button>`;
     }
@@ -301,9 +331,8 @@ $('allianceChips').addEventListener('click', (e) => {
   renderAll();
 });
 function renderKey() {
-  $('keyLine').innerHTML = ['live', 'announced', 'scheduled', 'failed'].map((k) => `<span><i class="swatch" style="--s:${STATUS[k].color}"></i>${STATUS[k].text}</span>`).join('');
   $('legendPanel').innerHTML = KINDS.concat(Object.values(STATUS)).map((i) =>
-    `<div class="legend-item"><span class="tag" style="--s:${i.color}">${i.text}</span><span>${i.desc}</span></div>`).join('');
+    `<div class="legend-item"><span class="legend-name" data-vars="--s:${i.color}"><i class="swatch"></i>${i.text}</span><span>${i.desc}</span></div>`).join('');
 }
 $('keyBtn').addEventListener('click', () => {
   const open = $('legendPanel').hidden;
@@ -325,25 +354,29 @@ function renderHero() {
   if (h) {
     const live = displayStatus(h, now) === 'live';
     const a = evAlliances(h)[0];
-    html += `<div class="hero${live ? ' is-live' : ''}" style="--c:${safeColor(a.color, KINGDOM_COLOR)}">
+    html += `<div class="hero${live ? ' is-live' : ''}" data-vars="--c:${safeColor(a.color, KINGDOM_COLOR)}">
       <div class="hero-main">
         <div class="hero-label">${live ? '<span class="dot"></span>Live now' : 'Next up'}</div>
         <div class="hero-name">${escapeHtml(h.event_name)}</div>
-        <div class="hero-meta">${escapeHtml(evAlliances(h).map((x) => x.name).join(', '))} · ${hm(h._start, tz)} ${escapeHtml(tzShort(tz))} · ${hm(h._start, 'UTC')} UTC${h.duration_hours ? ' · ' + formatDuration(h.duration_hours) : ''}</div>
+        <div class="hero-meta">${escapeHtml(evAlliances(h).map((x) => x.name).join(', '))} · ${live ? 'started ' : ''}${hm(h._start, tz)} ${escapeHtml(tzShort(tz))} · ${hm(h._start, 'UTC')} UTC${h.duration_hours ? ' · ' + formatDuration(h.duration_hours) : ''}</div>
       </div>
       <div class="hero-cd"><small>${live ? 'Ends in' : 'Starts in'}</small><b id="heroCd" data-target="${live ? h._end : h._start}">${cd((live ? h._end : h._start) - now)}</b></div>
+      ${live ? `<span class="hero-bar" id="heroBar" data-start="${h._start}" data-end="${h._end}" data-vars="--p:${progressPct(h._start, h._end, now)}%"></span>` : ''}
     </div>`;
   } else {
     html += `<div class="hero"><div class="hero-main"><div class="hero-label">No events</div><div class="hero-name">Nothing scheduled</div></div></div>`;
   }
   const then = list.filter((e) => e !== h && displayStatus(e, now) !== 'live').slice(0, 3);
   html += `<aside class="then"><h2>Then</h2>${then.length ? then.map((e) =>
-    `<div class="then-item"><span class="then-time">${hm(e._start, tz)}</span><span>${escapeHtml(e.event_name)} <small>${escapeHtml(fmtDay(e._start, tz, { weekday: 'short' }))} · ${rel(e._start - now)}</small></span></div>`).join('') : '<p class="muted">Nothing else coming up.</p>'}</aside>`;
+    `<div class="then-item"><span class="then-time">${hm(e._start, tz)}</span><span class="then-name">${escapeHtml(e.event_name)}</span><span class="then-when">${escapeHtml(fmtDay(e._start, tz, { weekday: 'short' }))} · ${rel(e._start - now)}</span></div>`).join('') : '<p class="muted">Nothing else coming up.</p>'}</aside>`;
   $('hero').innerHTML = html;
 }
+function progressPct(start, end, now) { return Math.max(0, Math.min(100, Math.round(((now - start) / (end - start)) * 100))); }
 function tickCountdown() {
   const el = $('heroCd');
   if (el) el.textContent = cd(Number(el.dataset.target) - Date.now());
+  const bar = $('heroBar');
+  if (bar) bar.style.setProperty('--p', progressPct(Number(bar.dataset.start), Number(bar.dataset.end), Date.now()) + '%');
 }
 
 // ── Rows and days ───────────────────────────────────────────────
@@ -363,19 +396,19 @@ function rowHtml(ev, cont, last, now, tz) {
     : `<b>${hm(ev._start, tz)}</b>${tz === 'UTC' ? '' : `<small>${hm(ev._start, 'UTC')} UTC</small>`}`;
   const dur = isAnn ? '' : (multi ? `${formatDuration(ev.duration_hours)} · ends ${escapeHtml(endDay)} ${hm(ev._end, tz)}` : formatDuration(ev.duration_hours));
   const relText = cont ? 'continues' : (key === 'live' ? `ends ${rel(ev._end - now)}` : (ev._start > now ? `${isAnn ? 'sends' : 'starts'} ${rel(ev._start - now)}` : ''));
-  const kind = (ev.type && ev.type.name ? ev.type.name : (isAnn ? 'Message' : 'Event')) + (ev.scope === 'kingdom-wide' ? ' · Kingdom-wide' : '');
+  const kind = (ev.type && ev.type.name ? ev.type.name : (isAnn ? 'Message' : 'Event'));
   const id = `d-${ev._k.replace(/\W/g, '_')}${cont ? '-c' : ''}`;
   const color = safeColor(ev.type && ev.type.color ? ev.type.color : als[0].color, KINGDOM_COLOR);
-  return `<article class="row${key === 'live' ? ' is-live' : ''}${key === 'completed' || key === 'cancelled' ? ' is-done' : ''}" style="--c:${color}" data-key="${escapeHtml(ev._k)}">
+  return `<article class="row${key === 'live' ? ' is-live' : ''}${key === 'completed' || key === 'cancelled' ? ' is-done' : ''}" data-vars="--c:${color}" data-key="${escapeHtml(ev._k)}">
     <button type="button" class="row-head" data-action="toggle" aria-expanded="${open}" aria-controls="${id}">
       <span class="row-time">${timeBlock}</span>
       <span class="row-main"><span class="row-name">${escapeHtml(ev.event_name)}</span>
-        <span class="row-meta"><span>${kind}</span>${dur ? `<span>${dur}</span>` : ''}${relText ? `<span class="row-rel">${relText}</span>` : ''}</span></span>
+        <span class="row-meta"><span>${escapeHtml(als.slice(0, 2).map((a) => a.name).join(', '))}${als.length > 2 ? ` +${als.length - 2}` : ''}</span><span>${kind}</span>${dur ? `<span>${dur}</span>` : ''}</span></span>
       <span class="row-side">
-        <span class="status" style="--s:${st.color}"><i class="swatch" style="--s:${st.color}"></i>${st.text}</span>
-        <span class="crests">${als.slice(0, 3).map((a) => crestHtml(a.name, a.icon, a.color)).join('')}</span>
-        <span class="chev" aria-hidden="true">${open ? '▲' : '▼'}</span>
+        <span class="row-rel">${relText}</span>
+        <span class="status" data-vars="--s:${st.color}"><i class="swatch"></i>${st.text}</span>
       </span>
+      <span class="chev" aria-hidden="true">${open ? '▲' : '▼'}</span>
     </button>
     <div class="row-detail" id="${id}"${open ? '' : ' hidden'}>
       <dl class="facts">
@@ -451,7 +484,7 @@ function renderCalendar() {
     const items = map.get(k) || [], inMonth = dt.getUTCMonth() === CAL_MONTH;
     const chips = items.slice(0, 3).map(({ ev, cont }) => {
       const a = evAlliances(ev)[0], c = safeColor(a.color, KINGDOM_COLOR);
-      return `<span class="cal-chip${cont ? ' is-cont' : ''}" style="--c:${c};--ink-on:${inkOn(c)}">${cont ? '◂ ' : hm(ev._start, tz) + ' '}${escapeHtml(ev.event_name)}</span>`;
+      return `<span class="cal-chip${cont ? ' is-cont' : ''}" data-vars="--c:${c};--ink-on:${inkOn(c)}">${cont ? '◂ ' : hm(ev._start, tz) + ' '}${escapeHtml(ev.event_name)}</span>`;
     }).join('');
     const label = `${fmtDay(dt.getTime(), 'UTC', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}${items.length ? `, ${items.length} item${items.length === 1 ? '' : 's'}` : ''}`;
     html += `<button type="button" class="cal-cell${inMonth ? '' : ' is-adjacent'}${k === todayKey ? ' is-today' : ''}${k === SEL_DAY ? ' is-selected' : ''}" data-day="${k}" aria-label="${escapeHtml(label)}" aria-pressed="${k === SEL_DAY}"><span class="cal-num">${dt.getUTCDate()}</span>${chips}${items.length > 3 ? `<span class="cal-more">+${items.length - 3} more</span>` : ''}</button>`;
@@ -484,6 +517,8 @@ $('viewListBtn').addEventListener('click', () => setView('list'));
 $('viewCalendarBtn').addEventListener('click', () => setView('calendar'));
 
 function renderAll() {
+  const bs = currentBrandSlug();
+  applyBrand(bs ? allianceInfo(bs).color : '');
   renderChips(); renderHero();
   if (VIEW === 'calendar') renderCalendar();
   renderSchedule();
@@ -520,7 +555,7 @@ function renderDiscordMarkdownPreview(text) {
   html = html.replace(/&lt;@&amp;(\d+)&gt;/g, '<span class="preview-mention">@role mention</span>').replace(/&lt;#(\d+)&gt;/g, '<span class="preview-mention">#channel mention</span>');
   html = html.replace(/^- (.*)$/gm, '&nbsp;&nbsp;• $1').replace(/\n/g, '<br>');
   html = html.replace(/\u0000CODEBLOCK(\d+)\u0000/g, (m, i) => stash[Number(i)]);
-  return html || '<span style="color:#949ba4">(nothing to preview yet)</span>';
+  return html || '<span class="discord-preview-muted">(nothing to preview yet)</span>';
 }
 function openDiscordPreview(ev) {
   const pane = $('discordPreviewModalBody');
@@ -540,7 +575,7 @@ function openDiscordPreview(ev) {
     const start = new Date(scheduledFor.getTime() + eventOffsetMinutes * 60000);
     pane.innerHTML = `<div class="discord-preview-event">${ev.cover_image_data ? `<img class="discord-preview-event-cover" src="${escapeHtml(ev.cover_image_data)}" alt="">` : ''}
       <div class="discord-preview-event-body"><div class="discord-preview-event-title">${escapeHtml(ev.event_name)}</div>
-      <div class="discord-preview-event-time">${escapeHtml(formatDiscordAbsolutePreview(start))} <span style="color:#949ba4">(${escapeHtml(formatDiscordRelativePreview(start))})</span></div>
+      <div class="discord-preview-event-time">${escapeHtml(formatDiscordAbsolutePreview(start))} <span class="discord-preview-muted">(${escapeHtml(formatDiscordRelativePreview(start))})</span></div>
       <div class="discord-preview-event-meta">${ev.duration_hours ? formatDuration(ev.duration_hours) : ''}${ev.discord_channel ? (ev.duration_hours ? ' · ' : '') + escapeHtml(ev.discord_channel) : ''}</div>
       <div class="discord-preview-text discord-preview-event-desc">${html}</div>
       <button type="button" class="discord-preview-event-interested" disabled>✓ Interested</button></div></div>`;
@@ -611,7 +646,15 @@ async function loadLastActivity() {
     el.hidden = false;
   } catch (e) { el.hidden = true; }
 }
-fetch('/api/kingdom-branding').then((r) => r.json()).then((b) => { if (b.public_site_title) { SITE_TITLE = b.public_site_title; renderHeader(); } }).catch(() => {});
+fetch('/api/kingdom-branding').then((r) => r.json()).then((b) => {
+  if (b.public_site_title) { SITE_TITLE = b.public_site_title; renderHeader(); }
+  if (b.theme_id && /^[\w-]+$/.test(b.theme_id)) document.documentElement.dataset.theme = b.theme_id;
+  if (b.banner_url) {
+    const img = new Image();
+    img.onload = () => document.documentElement.style.setProperty('--banner', 'url("' + encodeURI(b.banner_url) + '")');
+    img.src = b.banner_url;
+  }
+}).catch(() => {});
 
 // ── Boot ────────────────────────────────────────────────────────
 buildCalMenu();

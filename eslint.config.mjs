@@ -2,6 +2,8 @@ import js from "@eslint/js";
 import html from "eslint-plugin-html";
 
 const globals = {
+  MutationObserver: "readonly",
+  Image:         "readonly",
   document:      "readonly",
   window:        "readonly",
   fetch:         "readonly",
