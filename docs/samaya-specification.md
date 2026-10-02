@@ -2,7 +2,7 @@
 
 **Repository:** github.com/learningtofail/samaya
 **Version:** 2.0.0 (unified event model) · **Deployment:** `ks138.taraka.dev` (LXC `lxc-taraka`, `/opt/taraka`)
-**Last reconciled with the code:** 2026-10-01, branch `unified-event-model`, ready to merge. Production still runs the previous version until the cutover in `docs/cutover-runbook.md`. Part I below is the authoritative current state. Part II keeps the original section-by-section record; where Part II and Part I differ, Part I wins, and sections replaced by §66 carry a note saying so.
+**Last reconciled with the code:** 2026-10-02, `master`, deployed to production (the unified event model, §67, §68 and the §69 refinements). Part I below is the authoritative current state. Part II keeps the original section-by-section record; where Part II and Part I differ, Part I wins, and sections replaced by §66 carry a note saying so.
 
 # Part I: Current State
 
@@ -70,8 +70,9 @@ A Discord Scheduled Event is due 7 days before start and is skipped for leadersh
 
 ## CS.7 Frontend
 
-- **Admin console** (`admin.html`, `admin.css`, `js/*.js`): PatternFly, one script per view. Tabs: Events, Schedule (table or timeline), Delivery log, Event types, Feedback, Setup, Audit log (§66.7). The message composer (toolbar, live preview, emoji picker) is `js/composer.js`. Each view has its own alliance filter kept in `localStorage`. No inline styles or inline event handlers in the markup (§65). The `js/*.js` files are not covered by ESLint.
+- **Admin console** (`admin.html`, `admin.css`, `js/*.js`): PatternFly, one script per view. Tabs: Events, Schedule (table or timeline), Delivery log (Upcoming and Past tables, §69.3), Event types, Feedback, Setup, Audit log (§66.7). The message composer (toolbar, live preview, emoji picker) is `js/composer.js`. Each view has its own alliance filter kept in `localStorage`. No inline styles or inline event handlers in the markup (§65). The `js/*.js` files are not covered by ESLint.
 - **Public events page** (`events.html`, `events.css`, `events-public.js`): standalone light theme with a gold accent, no PatternFly. One IIFE with no globals. Alliance filter chips, a live-now hero with countdown, schedule grouped by day, list and calendar views, 24-hour time, and a time zone choice kept under `samaya_display_tz` (§62). Pure functions are unit tested through the `__SAMAYA_TEST__` hook.
+- On the public pages a Kingdom-wide event shows a neutral "Kingdom" badge, never its anchor alliance (§69.2).
 - **Feedback board** (`feedback.html`, `.css`, `.js`): active tickets, a collapsed Archived section, public team responses (§66.10).
 - Cloudflare caches `/static/*` by extension, so every static change bumps `STATIC_ASSET_VERSION` in `services/static_assets.py`.
 
@@ -1867,6 +1868,37 @@ Revision `a1f0c0de0005` converts what §67 created:
 ### 68.5 Tests
 
 One Audience with two channels on two servers: two sends. An Audience linked to MOD and NSR: one message, role once, `{alliance_name}` "MOD, NSR". Two Audiences sharing a channel: one message. Link default versus optional. Explicit add rejected when no audience alliance is linked. Coordinator versus owner permissions and 409 on delete. A migration test from a §67-shaped database with identical destinations and a group. Setup and Events form checked in a browser at desktop and 390px.
+
+## 69. Refinements after the first production deploy
+
+Small changes made once the unified model was live (2026-10-02). Part I already reflects them.
+
+### 69.1 Anchor alliance
+
+`events.owning_tenant_id` stays NOT NULL, so every event has an alliance. For a Kingdom-wide event the Events form calls it the **Anchor alliance**: it supplies the default message wording and the server for the Discord Scheduled Event, and nothing else. Any Kingdom coordinator can edit a Kingdom-wide event; the anchor's owner alone cannot. A nullable owner (a truly Kingdom-owned event) was considered and deferred: it needs a `kingdom_id` on events and a rule for which server hosts the Discord Scheduled Event.
+
+### 69.2 Kingdom badge on public pages
+
+A Kingdom-wide row from `public_rows` no longer carries `tenant_name`, `tenant_slug` or `tenant_color` in the public JSON, so players never see the anchor. The page draws a neutral "Kingdom" badge (`evAlliances` in `events-public.js`). In an alliance's own view the row still carries that alliance. ICS UIDs are built from the alliance, event name and date and are unchanged, so existing subscribers see no duplicates.
+
+### 69.3 Delivery log sections
+
+`GET /api/deliveries` takes `section`. `upcoming` returns `pending` and `sending`, soonest first, with no look-back bound (an overdue pending row stays in this section). `past` returns every other status, newest first, within `days`. Without `section` it behaves as before. The tab shows two tables, and a status filter loads only the table that status belongs to.
+
+### 69.4 Setup: no per-alliance audience panel
+
+The Setup tab no longer has an "Alliances and audiences" panel. Which alliances use an Audience, and "Post by default", are edited in the Audience editor, and the Audiences table shows "Used by". `PUT /api/alliance-audiences` stays for API use with its owner permission. Consequence: an alliance owner who is not a Kingdom coordinator cannot change links from the console.
+
+### 69.5 Discord limits and 400 detail
+
+`services/discord_api.py` cuts a Scheduled Event description to 1000 characters and a location to 100, ending with an ellipsis when cut, because Discord answers a longer value with 400 "Invalid Form Body". A 400 now returns the rejected fields (for example `description: Must be 1000 or fewer in length.`) in the delivery log's Detail. Channel messages are unaffected (2000 characters).
+
+### 69.6 Considered and not built
+
+- **Native Discord recurrence** (`recurrence_rule`): fits only every 1, 7 or 14 days, cannot set an end date, and the docs do not show how to cancel or move a single occurrence, which the per-occurrence edits need. A spike on a dev bot would settle it.
+- **A 14-day Discord event lead** instead of 7: not needed, because the public pages and ICS feeds read occurrences over a 28-day window whether or not the Discord event exists.
+- **Live character counter** against 1000 in the composer, for events that create a Discord event.
+- **Automatic alliance tag** on the Discord event name (`M0D | Rally Night`), added by the engine so the stored name stays clean. Until then the manual convention is `TAG | Activity`, using the alliance's short name, `K138 | ...` for Kingdom-wide events and `M0D + NSR | ...` for joint ones, and a stable name once posted (the engine matches Discord events by name and time, and ICS UIDs include the name).
 
 # Archive
 
