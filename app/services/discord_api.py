@@ -34,6 +34,44 @@ def _retry_wait(response: httpx.Response, attempt: int) -> float:
     return min(max(wait, 0.0), MAX_RETRY_WAIT)
 
 
+#: Discord's limits for a Scheduled Event (a longer value is a 400).
+EVENT_DESCRIPTION_MAX = 1000
+EVENT_LOCATION_MAX = 100
+
+
+def _clamp(text: str, limit: int) -> str:
+    """Cuts text to Discord's limit, ending with an ellipsis when it was cut."""
+    text = text or ""
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _bad_request_detail(response: httpx.Response) -> str:
+    """Discord's 400 body is {"message": "Invalid Form Body", "errors": {...}}.
+    The message alone never says which field was wrong, so the field errors
+    are flattened into "description: Must be 1000 or fewer in length."."""
+    try:
+        body = response.json()
+    except ValueError:
+        return "Bad request"
+    if not isinstance(body, dict):
+        return "Bad request"
+    problems: list[str] = []
+
+    def walk(node, path: str) -> None:
+        if not isinstance(node, dict):
+            return
+        for message in node.get("_errors", []):
+            if isinstance(message, dict):
+                problems.append(f"{path or 'request'}: {message.get('message', message.get('code', 'invalid'))}")
+        for key, child in node.items():
+            if key != "_errors":
+                walk(child, f"{path}.{key}" if path else str(key))
+
+    walk(body.get("errors"), "")
+    base = body.get("message", "Bad request")
+    return f"{base} ({'; '.join(problems)})" if problems else base
+
+
 def _auth_headers(token: str) -> dict:
     return {"Authorization": f"Bot {token}", "Content-Type": "application/json"}
 
@@ -64,9 +102,9 @@ async def create_discord_event(
         "name": name,
         "scheduled_start_time": start.astimezone(timezone.utc).isoformat(),
         "scheduled_end_time": end.astimezone(timezone.utc).isoformat(),
-        "description": description or "",
+        "description": _clamp(description, EVENT_DESCRIPTION_MAX),
         "entity_type": 3,  # EXTERNAL
-        "entity_metadata": {"location": location or "Community Server"},
+        "entity_metadata": {"location": _clamp(location or "Community Server", EVENT_LOCATION_MAX)},
         "privacy_level": 2,  # GUILD_ONLY
     }
     if image:
@@ -100,7 +138,7 @@ async def create_discord_event(
                 return "", "403 Forbidden — bot missing MANAGE_EVENTS permission"
 
             if response.status_code == 400:
-                detail = response.json().get("message", "Bad request")
+                detail = _bad_request_detail(response)
                 logger.warning(f"create_discord_event: 400 in guild {guild_id} — {detail}")
                 return "", f"400 {detail}"
 
@@ -155,8 +193,8 @@ async def update_discord_event(
     """
     payload = {
         "name":            name,
-        "description":     description or "",
-        "entity_metadata": {"location": location or "Community Server"},
+        "description":     _clamp(description, EVENT_DESCRIPTION_MAX),
+        "entity_metadata": {"location": _clamp(location or "Community Server", EVENT_LOCATION_MAX)},
     }
     if image:
         payload["image"] = image
@@ -194,7 +232,7 @@ async def update_discord_event(
                 return False, "404 Event not found — may already be cancelled"
 
             if response.status_code == 400:
-                detail = response.json().get("message", "Bad request")
+                detail = _bad_request_detail(response)
                 logger.warning(f"update_discord_event: 400 for {discord_event_id} in guild {guild_id} — {detail}")
                 return False, f"400 {detail}"
 
