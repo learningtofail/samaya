@@ -1918,7 +1918,7 @@ The Setup tab no longer has an "Alliances and audiences" panel. Which alliances 
 
 **Not built.** Coordinator commands (create, cancel), personal reminders, buttons on posts. They need the Discord ID to Samaya user mapping and a permission pass, and come after read-only has proven stable.
 
-**Setup (owner).** Set the application's Interactions Endpoint URL to `https://ks138.taraka.dev/webhooks/discord`, invite the bot with the `applications.commands` scope, then run the registration script.
+**Setup (owner).** Slash commands belong to the application the bot token belongs to, which may differ from the OAuth login application. Use that application's Public Key for `PLATFORM_PUBLIC_KEY`, set its Interactions Endpoint URL to `https://ks138.taraka.dev/webhooks/discord`, invite the bot with the `applications.commands` scope, then run the registration script.
 
 # Archive
 
