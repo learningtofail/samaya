@@ -12,10 +12,10 @@
 
 <header class="pf-v6-c-masthead samaya-header-bar">
   <div class="pf-v6-c-masthead__main">
-    <span class="samaya-header-brand">💬 Feedback &amp; Requests</span>
+    <span class="samaya-header-brand"><span aria-hidden="true">💬</span> <span data-i18n="public.feedback.heading">Feedback &amp; Requests</span></span>
   </div>
   <div class="pf-v6-c-masthead__content samaya-header-content-end">
-    <a class="header-link" href="/events">← Back to Events</a>
+    <a class="header-link" href="/events" data-i18n="public.feedback.back">← Back to Events</a>
   </div>
 </header>
 
@@ -23,13 +23,13 @@
 
   <div class="pf-v6-c-card pf-v6-u-mb-lg">
     <div class="pf-v6-c-card__body">
-      <p class="samaya-intro-text">
+      <p class="samaya-intro-text" data-i18n="public.feedback.intro">
         See something confusing, want a new event or announcement, or just have an idea?
         Submit it below — everyone can see and upvote what's here, and leadership triages it from this same list.
       </p>
       <div class="samaya-intro-actions">
-        <button class="pf-v6-c-button pf-m-primary" id="btnOpenFeedbackModal">+ Submit Feedback</button>
-        <button class="pf-v6-c-button pf-m-secondary" id="btnOpenRequestModal">+ Request an Event or Announcement</button>
+        <button class="pf-v6-c-button pf-m-primary" id="btnOpenFeedbackModal" data-i18n="public.feedback.submitFeedback">+ Submit Feedback</button>
+        <button class="pf-v6-c-button pf-m-secondary" id="btnOpenRequestModal" data-i18n="public.feedback.requestButton">+ Request an Event or Announcement</button>
       </div>
     </div>
   </div>
@@ -37,8 +37,8 @@
   <div id="ticketsWrap"></div>
 
   <details class="about-page pf-v6-u-mt-lg">
-    <summary>About this page</summary>
-    <div>
+    <summary data-i18n="public.feedback.aboutTitle">About this page</summary>
+    <div data-i18n="public.feedback.aboutBody">
       Upvoting here is per-browser, not per-person: the first time you visit, this page stores a random
       anonymous id in your browser (nothing that identifies you). Clearing your browser's storage, or
       voting from a different browser or device, resets your vote weight — that's an accepted tradeoff
@@ -53,36 +53,36 @@
   <div class="pf-v6-l-bullseye">
     <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="feedbackModalTitle">
       <header class="pf-v6-c-modal-box__header">
-        <h2 class="pf-v6-c-modal-box__title" id="feedbackModalTitle"><span class="pf-v6-c-modal-box__title-text">Submit Feedback</span></h2>
-        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+        <h2 class="pf-v6-c-modal-box__title" id="feedbackModalTitle"><span class="pf-v6-c-modal-box__title-text" data-i18n="public.feedback.modalFeedbackTitle">Submit Feedback</span></h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-i18n-attr="aria-label:public.common.close" data-modal-dismiss>&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
         <div class="pf-v6-c-form">
           <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="fbCategory">Category</label>
+            <label class="pf-v6-c-form__label" for="fbCategory" data-i18n="public.feedback.category">Category</label>
             <select class="pf-v6-c-form-control" id="fbCategory">
-              <option value="Bug">Bug</option>
-              <option value="Suggestion">Suggestion</option>
-              <option value="Other">Other</option>
+              <option value="Bug" data-i18n="public.feedback.catBug">Bug</option>
+              <option value="Suggestion" data-i18n="public.feedback.catSuggestion">Suggestion</option>
+              <option value="Other" data-i18n="public.feedback.catOther">Other</option>
             </select>
           </div>
           <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="fbTitle">Title</label>
-            <input class="pf-v6-c-form-control" id="fbTitle" maxlength="120" placeholder="Short summary">
+            <label class="pf-v6-c-form__label" for="fbTitle" data-i18n="public.feedback.fieldTitle">Title</label>
+            <input class="pf-v6-c-form-control" id="fbTitle" maxlength="120" placeholder="Short summary" data-i18n-attr="placeholder:public.feedback.titlePlaceholder">
           </div>
           <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="fbDescription">Description</label>
-            <textarea class="pf-v6-c-form-control" id="fbDescription" rows="4" maxlength="2000" placeholder="What's the feedback?"></textarea>
+            <label class="pf-v6-c-form__label" for="fbDescription" data-i18n="public.feedback.fieldDescription">Description</label>
+            <textarea class="pf-v6-c-form-control" id="fbDescription" rows="4" maxlength="2000" placeholder="What's the feedback?" data-i18n-attr="placeholder:public.feedback.descriptionPlaceholder"></textarea>
           </div>
           <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="fbContact">Contact (optional)</label>
-            <input class="pf-v6-c-form-control" id="fbContact" placeholder="Discord handle or email — for follow-up only, never shown publicly">
+            <label class="pf-v6-c-form__label" for="fbContact" data-i18n="public.feedback.fieldContact">Contact (optional)</label>
+            <input class="pf-v6-c-form-control" id="fbContact" placeholder="Discord handle or email — for follow-up only, never shown publicly" data-i18n-attr="placeholder:public.feedback.contactPlaceholder">
           </div>
         </div>
       </div>
       <footer class="pf-v6-c-modal-box__footer">
-        <button class="pf-v6-c-button pf-m-primary" id="btnSubmitFeedback">Submit</button>
-        <button class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
+        <button class="pf-v6-c-button pf-m-primary" id="btnSubmitFeedback" data-i18n="public.common.submit">Submit</button>
+        <button class="pf-v6-c-button pf-m-link" data-modal-dismiss data-i18n="public.common.cancel">Cancel</button>
       </footer>
     </div>
   </div>
@@ -93,50 +93,51 @@
   <div class="pf-v6-l-bullseye">
     <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="requestModalTitle">
       <header class="pf-v6-c-modal-box__header">
-        <h2 class="pf-v6-c-modal-box__title" id="requestModalTitle"><span class="pf-v6-c-modal-box__title-text">Request an Event or Announcement</span></h2>
-        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+        <h2 class="pf-v6-c-modal-box__title" id="requestModalTitle"><span class="pf-v6-c-modal-box__title-text" data-i18n="public.feedback.requestTitle">Request an Event or Announcement</span></h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-i18n-attr="aria-label:public.common.close" data-modal-dismiss>&times;</button>
       </header>
       <div class="pf-v6-c-modal-box__body">
         <div class="pf-v6-c-form">
           <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="reqType">Request type</label>
+            <label class="pf-v6-c-form__label" for="reqType" data-i18n="public.feedback.reqType">Request type</label>
             <select class="pf-v6-c-form-control" id="reqType">
-              <option value="event_request">Event</option>
-              <option value="announcement_request">Announcement</option>
+              <option value="event_request" data-i18n="public.feedback.reqTypeEvent">Event</option>
+              <option value="announcement_request" data-i18n="public.feedback.reqTypeAnnouncement">Announcement</option>
             </select>
           </div>
           <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="reqAlliance">Alliance</label>
+            <label class="pf-v6-c-form__label" for="reqAlliance" data-i18n="public.feedback.reqAlliance">Alliance</label>
             <select class="pf-v6-c-form-control" id="reqAlliance">
-              <option value="">Kingdom-wide / not sure</option>
+              <option value="" data-i18n="public.feedback.reqAllianceNone">Kingdom-wide / not sure</option>
             </select>
           </div>
           <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="reqName">Proposed name</label>
-            <input class="pf-v6-c-form-control" id="reqName" maxlength="120" placeholder="What should it be called?">
+            <label class="pf-v6-c-form__label" for="reqName" data-i18n="public.feedback.reqName">Proposed name</label>
+            <input class="pf-v6-c-form-control" id="reqName" maxlength="120" placeholder="What should it be called?" data-i18n-attr="placeholder:public.feedback.reqNamePlaceholder">
           </div>
           <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="reqTiming">Proposed timing (optional)</label>
-            <input class="pf-v6-c-form-control" id="reqTiming" placeholder="e.g. every Saturday evening, or one-time next week">
+            <label class="pf-v6-c-form__label" for="reqTiming" data-i18n="public.feedback.reqTiming">Proposed timing (optional)</label>
+            <input class="pf-v6-c-form-control" id="reqTiming" placeholder="e.g. every Saturday evening, or one-time next week" data-i18n-attr="placeholder:public.feedback.reqTimingPlaceholder">
           </div>
           <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="reqDetails">Details</label>
-            <textarea class="pf-v6-c-form-control" id="reqDetails" rows="4" maxlength="2000" placeholder="What is it, and why does it matter?"></textarea>
+            <label class="pf-v6-c-form__label" for="reqDetails" data-i18n="public.feedback.reqDetails">Details</label>
+            <textarea class="pf-v6-c-form-control" id="reqDetails" rows="4" maxlength="2000" placeholder="What is it, and why does it matter?" data-i18n-attr="placeholder:public.feedback.reqDetailsPlaceholder"></textarea>
           </div>
           <div class="pf-v6-c-form__group">
-            <label class="pf-v6-c-form__label" for="reqContact">Contact (optional)</label>
-            <input class="pf-v6-c-form-control" id="reqContact" placeholder="Discord handle or email — for follow-up only, never shown publicly">
+            <label class="pf-v6-c-form__label" for="reqContact" data-i18n="public.feedback.fieldContact">Contact (optional)</label>
+            <input class="pf-v6-c-form-control" id="reqContact" placeholder="Discord handle or email — for follow-up only, never shown publicly" data-i18n-attr="placeholder:public.feedback.contactPlaceholder">
           </div>
         </div>
       </div>
       <footer class="pf-v6-c-modal-box__footer">
-        <button class="pf-v6-c-button pf-m-primary" id="btnSubmitRequest">Submit</button>
-        <button class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
+        <button class="pf-v6-c-button pf-m-primary" id="btnSubmitRequest" data-i18n="public.common.submit">Submit</button>
+        <button class="pf-v6-c-button pf-m-link" data-modal-dismiss data-i18n="public.common.cancel">Cancel</button>
       </footer>
     </div>
   </div>
 </div>
 
+<script src="/static/i18n.js"></script>
 <script src="/static/feedback.js"></script>
 </body>
 </html>

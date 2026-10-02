@@ -26,12 +26,17 @@ beforeAll(async () => {
   // here rather than adding `environment: 'jsdom'` project-wide, since
   // nothing else in this suite needs a DOM.
   const { JSDOM } = await import("jsdom");
-  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://ks138.taraka.dev/events" });
+  // The page embeds its strings as an i18n block (spec §72.4); use the real catalogue.
+  const en = JSON.parse(readFileSync(new URL("../../app/i18n/en.json", import.meta.url), "utf8"));
+  delete en._meta;
+  const block = JSON.stringify({ locale: "en", dir: "ltr", strings: en });
+  const dom = new JSDOM(`<!doctype html><html><body><script type="application/json" id="i18n">${block}</script></body></html>`, { url: "https://ks138.taraka.dev/events" });
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
   globalThis.localStorage = dom.window.localStorage;
   globalThis.Intl = Intl;
 
+  new Function(readFileSync(new URL("../../app/static/i18n.js", import.meta.url), "utf8"))();
   const source = readFileSync(new URL("../../app/static/events-public.js", import.meta.url), "utf8");
   // eslint-disable-next-line no-new-func -- executing the real production
   // script verbatim is the point: these tests exercise events-public.js
@@ -146,7 +151,7 @@ describe("formatDuration", () => {
   });
 
   test("exactly 24 hours is called out as all day", () => {
-    expect(fns.formatDuration(24)).toBe("24h (all day)");
+    expect(fns.formatDuration(24)).toBe("24 hr (all day)");
   });
 
   test("sub-hour durations render in minutes", () => {
@@ -158,7 +163,32 @@ describe("formatDuration", () => {
   });
 
   test("ordinary durations render in hours", () => {
-    expect(fns.formatDuration(3)).toBe("3h");
+    expect(fns.formatDuration(3)).toBe("3 hr");
+  });
+});
+
+describe("rel", () => {
+  const MIN = 60000;
+  test("under an hour is in minutes", () => {
+    expect(fns.rel(5 * MIN)).toBe("in 5 minutes");
+  });
+  test("under a day is in hours", () => {
+    expect(fns.rel(3 * 60 * MIN)).toBe("in 3 hours");
+  });
+  test("a day or more is in days", () => {
+    expect(fns.rel(3 * 24 * 60 * MIN)).toBe("in 3 days");
+  });
+});
+
+describe("cd", () => {
+  test("under 48 hours counts down as hh:mm:ss with Western digits", () => {
+    expect(fns.cd(((3 * 60 + 5) * 60 + 9) * 1000)).toBe("03:05:09");
+  });
+  test("48 hours or more shows days and hours", () => {
+    expect(fns.cd((2 * 24 + 5) * 3600 * 1000)).toBe("2d 05h");
+  });
+  test("a negative remainder clamps to zero", () => {
+    expect(fns.cd(-5000)).toBe("00:00:00");
   });
 });
 

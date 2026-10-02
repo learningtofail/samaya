@@ -28,6 +28,11 @@ const DARK_INK = 'oklch(0.14 0.014 260)';
 
 const $ = (id) => document.getElementById(id);
 
+// Interface strings and locale-aware formatting (spec §72), read from the page's i18n block.
+const I18N = SamayaI18n.fromDocument(document);
+const t = I18N.t;
+const EVENTS_KEY = 'public.events.';
+
 // ── Brand + CSSOM variable painting (no inline style attributes) ─
 function paintOne(el) {
   el.dataset.vars.split(';').forEach((p) => {
@@ -89,48 +94,44 @@ function allTimeZones() {
 function getDisplayTz() { return localStorage.getItem(TZ_KEY) || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
 function setDisplayTz(tz) { localStorage.setItem(TZ_KEY, tz); }
 function hm(ms, tz) {
-  try { return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: tz }).format(ms); }
-  catch (e) { return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' }).format(ms); }
+  try { return new Intl.DateTimeFormat(I18N.latnLocale, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: tz }).format(ms); }
+  catch (e) { return new Intl.DateTimeFormat(I18N.latnLocale, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' }).format(ms); }
 }
 function dayKey(ms, tz) {
   const p = {};
   new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz }).formatToParts(ms).forEach((x) => { p[x.type] = x.value; });
   return `${p.year}-${p.month}-${p.day}`;
 }
-function fmtDay(ms, tz, opts) { return new Intl.DateTimeFormat(undefined, Object.assign({ timeZone: tz }, opts)).format(ms); }
+function fmtDay(ms, tz, opts) { return new Intl.DateTimeFormat(I18N.intlLocale, Object.assign({ timeZone: tz }, opts)).format(ms); }
 function tzShort(tz) { return tz.split('/').pop().replace(/_/g, ' '); }
 function cd(ms) {
   ms = Math.max(0, ms);
-  const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
-  return h >= 48 ? `${Math.floor(h / 24)}d ${pad2(h % 24)}h` : `${pad2(h)}:${pad2(m)}:${pad2(ss)}`;
+  const sec = Math.floor(ms / 1000), h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), ss = sec % 60;
+  if (h >= 48) return `${I18N.unit(Math.floor(h / 24), 'day', 'narrow')} ${I18N.unit(h % 24, 'hour', 'narrow', { minimumIntegerDigits: 2 })}`;
+  return `${pad2(h)}:${pad2(m)}:${pad2(ss)}`;
 }
 function rel(ms) {
   const m = Math.round(ms / 60000);
-  if (m < 60) return `in ${m} min`;
-  const h = Math.floor(m / 60);
-  return h < 24 ? `in ${h}h${m % 60 ? ' ' + (m % 60) + 'm' : ''}` : `in ${Math.floor(h / 24)}d`;
+  if (m < 60) return I18N.relative(m, 'minute');
+  const h = Math.round(m / 60);
+  return h < 24 ? I18N.relative(h, 'hour') : I18N.relative(Math.round(h / 24), 'day');
 }
 function formatDuration(hours) {
   if (!hours) return '';
-  if (hours === 24) return '24h (all day)';
-  if (hours < 1) return `${Math.round(hours * 60)} min`;
-  return hours % 24 === 0 && hours > 24 ? `${hours / 24} days` : `${hours}h`;
+  if (hours === 24) return t(EVENTS_KEY + 'durationAllDay', { duration: I18N.unit(24, 'hour') });
+  if (hours < 1) return I18N.unit(Math.round(hours * 60), 'minute');
+  return hours % 24 === 0 && hours > 24 ? I18N.unit(hours / 24, 'day') : I18N.unit(hours, 'hour');
 }
 
 // ── Status vocabulary (same meanings as the admin console) ─────
-const STATUS = {
-  scheduled: { text: 'Scheduled', color: 'oklch(0.45 0.02 260)', desc: 'Set to go out, but has not been sent to Discord yet.' },
-  announced: { text: 'Announced', color: 'oklch(0.48 0.13 235)', desc: 'Posted to Discord. Normal state until it starts.' },
-  live:      { text: 'Live now', color: 'oklch(0.45 0.14 150)', desc: 'The event is happening right now.' },
-  completed: { text: 'Completed', color: 'oklch(0.5 0.02 260)', desc: 'The event has ended.' },
-  failed:    { text: 'Failed', color: 'oklch(0.5 0.19 25)', desc: 'Something went wrong sending this to Discord.' },
-  cancelled: { text: 'Cancelled', color: 'oklch(0.5 0.19 25)', desc: 'Called off. It will not be posted, or was pulled after posting.' },
+// Names and descriptions come from the catalogue (public.events.status.<key>, .kind.<key>).
+const STATUS_COLORS = {
+  scheduled: 'oklch(0.45 0.02 260)', announced: 'oklch(0.48 0.13 235)', live: 'oklch(0.45 0.14 150)',
+  completed: 'oklch(0.5 0.02 260)', failed: 'oklch(0.5 0.19 25)', cancelled: 'oklch(0.5 0.19 25)',
 };
-const KINDS = [
-  { text: 'Event', color: 'oklch(0.5 0.12 75)', desc: 'A scheduled game event with a start time and duration.' },
-  { text: 'Message', color: 'oklch(0.5 0.14 300)', desc: 'A Discord message with no duration. Not in the calendar feed.' },
-  { text: 'Kingdom-wide', color: 'oklch(0.5 0.12 75)', desc: 'Every alliance in the Kingdom takes part together.' },
-];
+const KIND_COLORS = { event: 'oklch(0.5 0.12 75)', message: 'oklch(0.5 0.14 300)', kingdomWide: 'oklch(0.5 0.12 75)' };
+function statusText(key) { return t(`${EVENTS_KEY}status.${key}`); }
+function kindText(key) { return t(`${EVENTS_KEY}kind.${key}`); }
 function displayStatus(ev, now) {
   let key;
   if (ev.kind === 'announcement') {
@@ -164,14 +165,15 @@ function crestHtml(name, icon, color, size) {
   return `<span class="crest${size ? ' crest-' + size : ''}" data-vars="--c:${c};--ink-on:${inkOn(c)}" title="${escapeHtml(name)}">${inner}</span>`;
 }
 function evAlliances(ev) {
-  if (ev.scope === 'kingdom-wide') return [{ name: 'Kingdom', icon: '', color: KINGDOM_COLOR, slug: '' }];
-  const t = ev.targets && ev.targets.length ? ev.targets : (ev.tenant_slug ? [{ tenant_slug: ev.tenant_slug, tenant_name: ev.tenant_name }] : []);
-  if (!t.length) return [{ name: 'Kingdom', icon: '', color: KINGDOM_COLOR, slug: '' }];
-  return t.map((x) => allianceInfo(x.tenant_slug, x.tenant_name));
+  const kingdom = () => [{ name: t(EVENTS_KEY + 'kingdomName'), icon: '', color: KINGDOM_COLOR, slug: '' }];
+  if (ev.scope === 'kingdom-wide') return kingdom();
+  const targets = ev.targets && ev.targets.length ? ev.targets : (ev.tenant_slug ? [{ tenant_slug: ev.tenant_slug, tenant_name: ev.tenant_name }] : []);
+  if (!targets.length) return kingdom();
+  return targets.map((x) => allianceInfo(x.tenant_slug, x.tenant_name));
 }
 function matchesFilter(ev) {
   if (FILTER === 'all' || ev.scope === 'kingdom-wide') return true;
-  const slugs = ev.targets && ev.targets.length ? ev.targets.map((t) => t.tenant_slug) : [ev.tenant_slug];
+  const slugs = ev.targets && ev.targets.length ? ev.targets.map((x) => x.tenant_slug) : [ev.tenant_slug];
   return slugs.includes(FILTER);
 }
 
@@ -196,8 +198,8 @@ function daySpan(ev, tz) {
   const first = dayKey(ev._start, tz);
   const last = ev._end > ev._start ? dayKey(ev._end - 1, tz) : first;
   const keys = [first];
-  for (let t = ev._start + DAY; keys.length < 21; t += DAY) {
-    const k = dayKey(t, tz);
+  for (let at = ev._start + DAY; keys.length < 21; at += DAY) {
+    const k = dayKey(at, tz);
     if (k > last) break;
     if (k !== keys[keys.length - 1]) keys.push(k);
   }
@@ -266,8 +268,8 @@ document.addEventListener('keydown', (e) => {
 function openTimezoneModal(firstVisit) {
   const current = getDisplayTz();
   $('timezoneModalIntro').textContent = firstVisit
-    ? `Event times are shown in UTC and your local time so nothing is missed across time zones. We detected ${current} from your browser. Pick a different one below if that is wrong, or close this if it looks right.`
-    : 'Sets the local half of every time shown next to UTC on this page.';
+    ? t(EVENTS_KEY + 'tzIntroFirst', { zone: current })
+    : t(EVENTS_KEY + 'tzIntro');
   const zones = allTimeZones();
   const list = zones.includes(current) ? zones : [current, ...zones];
   $('timezoneSelect').innerHTML = list.map((z) => `<option value="${escapeHtml(z)}"${z === current ? ' selected' : ''}>${escapeHtml(z)}</option>`).join('');
@@ -284,16 +286,18 @@ function tickClock() {
 // ── Add to calendar menu ────────────────────────────────────────
 function buildCalMenu() {
   const scope = COMBINED_MODE
-    ? 'Subscribing adds every alliance’s events, combined into one calendar.'
-    : `Subscribing adds only ${escapeHtml(TENANT_SLUG.toUpperCase())}’s events. Switch alliances for a different feed.`;
-  const title = COMBINED_MODE ? 'Kingshot Event Schedule' : `${TENANT_SLUG.toUpperCase()} — Kingshot Event Schedule`;
+    ? t(EVENTS_KEY + 'calScopeAll')
+    : t(EVENTS_KEY + 'calScopeOne', { alliance: TENANT_SLUG.toUpperCase() });
+  const title = COMBINED_MODE ? t(EVENTS_KEY + 'title') : t(EVENTS_KEY + 'docTitleAlliance', { alliance: TENANT_SLUG.toUpperCase(), title: t(EVENTS_KEY + 'title') });
   const google = `https://calendar.google.com/calendar/render?cid=${encodeURIComponent(ICS_ABSOLUTE_URL)}`;
   const outlook = `https://outlook.live.com/calendar/0/addfromweb?url=${encodeURIComponent(ICS_ABSOLUTE_URL)}&name=${encodeURIComponent(title)}`;
-  $('calMenu').innerHTML = `<div class="menu-note">${scope}</div>
-    <a role="menuitem" href="${google}" target="_blank" rel="noopener">Google Calendar<small>Opens Google Calendar and subscribes</small></a>
-    <a role="menuitem" href="${ICS_WEBCAL_URL}">Apple Calendar / Outlook desktop<small>Uses your device’s default calendar app</small></a>
-    <a role="menuitem" href="${outlook}" target="_blank" rel="noopener">Outlook.com<small>Opens Outlook on the web and subscribes</small></a>
-    <a role="menuitem" href="${ICS_ABSOLUTE_URL}">Download .ics file<small>For manual import into any other app</small></a>`;
+  const item = (href, name, hint, external) =>
+    `<a role="menuitem" href="${href}"${external ? ' target="_blank" rel="noopener"' : ''}>${escapeHtml(t(EVENTS_KEY + name))}<small>${escapeHtml(t(EVENTS_KEY + hint))}</small></a>`;
+  $('calMenu').innerHTML = `<div class="menu-note">${escapeHtml(scope)}</div>
+    ${item(google, 'calGoogle', 'calGoogleHint', true)}
+    ${item(ICS_WEBCAL_URL, 'calApple', 'calAppleHint', false)}
+    ${item(outlook, 'calOutlook', 'calOutlookHint', true)}
+    ${item(ICS_ABSOLUTE_URL, 'calDownload', 'calDownloadHint', false)}`;
 }
 function closeCalMenu() { $('calMenu').hidden = true; $('calMenuBtn').setAttribute('aria-expanded', 'false'); }
 $('calMenuBtn').addEventListener('click', (e) => {
@@ -307,12 +311,13 @@ document.addEventListener('click', (e) => { if (!e.target.closest('.menu-wrap'))
 // ── Header, chips, key ──────────────────────────────────────────
 function renderHeader() {
   const cur = COMBINED_MODE ? null : allianceInfo(TENANT_SLUG);
-  $('pageKicker').textContent = COMBINED_MODE ? 'Kingshot · All alliances' : `Kingshot · ${cur.name}`;
-  $('pageTitle').textContent = SITE_TITLE || 'Event Schedule';
-  document.title = `${COMBINED_MODE ? '' : cur.name + ' · '}${SITE_TITLE || 'Kingshot Event Schedule'}`;
+  $('pageKicker').textContent = COMBINED_MODE ? t(EVENTS_KEY + 'kickerAll') : t(EVENTS_KEY + 'kickerAlliance', { alliance: cur.name });
+  $('pageTitle').textContent = SITE_TITLE || t(EVENTS_KEY + 'pageTitle');
+  const siteTitle = SITE_TITLE || t(EVENTS_KEY + 'title');
+  document.title = COMBINED_MODE ? siteTitle : t(EVENTS_KEY + 'docTitleAlliance', { alliance: cur.name, title: siteTitle });
 }
 function renderChips() {
-  const all = { slug: 'all', name: 'All alliances', icon: '', color: KINGDOM_COLOR };
+  const all = { slug: 'all', name: t(EVENTS_KEY + 'allAlliances'), icon: '', color: KINGDOM_COLOR };
   const items = [all].concat(ALLIANCES.map((a) => allianceInfo(a.slug, a.name)));
   $('allianceChips').innerHTML = items.map((a) => {
     const crest = '';
@@ -333,14 +338,17 @@ $('allianceChips').addEventListener('click', (e) => {
   renderAll();
 });
 function renderKey() {
-  $('legendPanel').innerHTML = KINDS.concat(Object.values(STATUS)).map((i) =>
-    `<div class="legend-item"><span class="legend-name" data-vars="--s:${i.color}"><i class="swatch"></i>${i.text}</span><span>${i.desc}</span></div>`).join('');
+  const items = Object.keys(KIND_COLORS).map((k) => ({ color: KIND_COLORS[k], text: kindText(k), desc: t(`${EVENTS_KEY}kind.${k}Desc`) }))
+    .concat(Object.keys(STATUS_COLORS).map((k) => ({ color: STATUS_COLORS[k], text: statusText(k), desc: t(`${EVENTS_KEY}status.${k}Desc`) })));
+  $('legendPanel').innerHTML = items.map((i) =>
+    `<div class="legend-item"><span class="legend-name" data-vars="--s:${i.color}"><i class="swatch"></i>${escapeHtml(i.text)}</span><span>${escapeHtml(i.desc)}</span></div>`).join('');
 }
+function setKeyLabel(open) { $('keyBtn').textContent = `${t(EVENTS_KEY + 'key')} ${open ? '▴' : '▾'}`; }
 $('keyBtn').addEventListener('click', () => {
   const open = $('legendPanel').hidden;
   $('legendPanel').hidden = !open;
   $('keyBtn').setAttribute('aria-expanded', String(open));
-  $('keyBtn').textContent = open ? 'Key ▴' : 'Key ▾';
+  setKeyLabel(open);
 });
 
 // ── Hero ────────────────────────────────────────────────────────
@@ -358,20 +366,26 @@ function renderHero() {
     const a = evAlliances(h)[0];
     html += `<div class="hero${live ? ' is-live' : ''}" data-vars="--c:${safeColor(a.color, KINGDOM_COLOR)}">
       <div class="hero-main">
-        <div class="hero-label">${live ? '<span class="dot"></span>Live now' : 'Next up'}</div>
+        <div class="hero-label">${live ? '<span class="dot"></span>' : ''}${escapeHtml(t(EVENTS_KEY + (live ? 'heroLive' : 'heroNext')))}</div>
         <div class="hero-name">${escapeHtml(h.event_name)}</div>
-        <div class="hero-meta">${escapeHtml(evAlliances(h).map((x) => x.name).join(', '))} · ${live ? 'started ' : ''}${hm(h._start, tz)} ${escapeHtml(tzShort(tz))} · ${hm(h._start, 'UTC')} UTC${h.duration_hours ? ' · ' + formatDuration(h.duration_hours) : ''}</div>
+        <div class="hero-meta">${escapeHtml(heroMeta(h, live, tz))}</div>
       </div>
-      <div class="hero-cd"><small>${live ? 'Ends in' : 'Starts in'}</small><b id="heroCd" data-target="${live ? h._end : h._start}">${cd((live ? h._end : h._start) - now)}</b></div>
+      <div class="hero-cd"><small>${escapeHtml(t(EVENTS_KEY + (live ? 'endsIn' : 'startsIn')))}</small><b id="heroCd" data-target="${live ? h._end : h._start}">${cd((live ? h._end : h._start) - now)}</b></div>
       ${live ? `<span class="hero-bar" id="heroBar" data-start="${h._start}" data-end="${h._end}" data-vars="--p:${progressPct(h._start, h._end, now)}%"></span>` : ''}
     </div>`;
   } else {
-    html += `<div class="hero"><div class="hero-main"><div class="hero-label">No events</div><div class="hero-name">Nothing scheduled</div></div></div>`;
+    html += `<div class="hero"><div class="hero-main"><div class="hero-label">${escapeHtml(t(EVENTS_KEY + 'heroNone'))}</div><div class="hero-name">${escapeHtml(t(EVENTS_KEY + 'heroNothing'))}</div></div></div>`;
   }
   const then = list.filter((e) => e !== h && displayStatus(e, now) !== 'live').slice(0, 3);
-  html += `<aside class="then"><h2>Then</h2>${then.length ? then.map((e) =>
-    `<div class="then-item"><span class="then-time">${hm(e._start, tz)}</span><span class="then-name">${escapeHtml(e.event_name)}</span><span class="then-when">${escapeHtml(fmtDay(e._start, tz, { weekday: 'short' }))} · ${rel(e._start - now)}</span></div>`).join('') : '<p class="muted">Nothing else coming up.</p>'}</aside>`;
+  html += `<aside class="then"><h2>${escapeHtml(t(EVENTS_KEY + 'then'))}</h2>${then.length ? then.map((e) =>
+    `<div class="then-item"><span class="then-time">${hm(e._start, tz)}</span><span class="then-name">${escapeHtml(e.event_name)}</span><span class="then-when">${escapeHtml(fmtDay(e._start, tz, { weekday: 'short' }))} · ${escapeHtml(rel(e._start - now))}</span></div>`).join('') : `<p class="muted">${escapeHtml(t(EVENTS_KEY + 'thenNone'))}</p>`}</aside>`;
   $('hero').innerHTML = html;
+}
+function heroMeta(h, live, tz) {
+  const local = `${hm(h._start, tz)} ${tzShort(tz)}`;
+  const parts = [evAlliances(h).map((x) => x.name).join(', '), live ? t(EVENTS_KEY + 'heroStarted', { time: local }) : local, `${hm(h._start, 'UTC')} UTC`];
+  if (h.duration_hours) parts.push(formatDuration(h.duration_hours));
+  return parts.join(' · ');
 }
 function progressPct(start, end, now) { return Math.max(0, Math.min(100, Math.round(((now - start) / (end - start)) * 100))); }
 function tickCountdown() {
@@ -384,44 +398,45 @@ function tickCountdown() {
 // ── Rows and days ───────────────────────────────────────────────
 function notifyText(ev) {
   const m = ev.kind === 'announcement' ? ev.event_offset_minutes : ev.notify_minutes_before;
-  if (!m) return 'None';
-  return ev.kind === 'announcement' ? `Sent ${m} min before the event` : `${m} min before`;
+  if (!m) return t(EVENTS_KEY + 'notifyNone');
+  return t(EVENTS_KEY + (ev.kind === 'announcement' ? 'notifySentBefore' : 'notifyBefore'), { duration: I18N.unit(m, 'minute') });
 }
 function rowHtml(ev, cont, last, now, tz) {
-  const key = displayStatus(ev, now), st = STATUS[key];
+  const key = displayStatus(ev, now);
   const als = evAlliances(ev), open = OPEN.has(ev._k);
   const isAnn = ev.kind === 'announcement';
   const multi = daySpan(ev, tz).length > 1;
   const endDay = fmtDay(ev._end, tz, { weekday: 'short' });
   const timeBlock = cont
-    ? (last ? `<b>↳</b><small>until ${hm(ev._end, tz)}</small>` : `<b>↳</b><small>all day</small>`)
+    ? (last ? `<b>↳</b><small>${escapeHtml(t(EVENTS_KEY + 'rowUntil', { time: hm(ev._end, tz) }))}</small>` : `<b>↳</b><small>${escapeHtml(t(EVENTS_KEY + 'rowAllDay'))}</small>`)
     : `<b>${hm(ev._start, tz)}</b>${tz === 'UTC' ? '' : `<small>${hm(ev._start, 'UTC')} UTC</small>`}`;
-  const dur = isAnn ? '' : (multi ? `${formatDuration(ev.duration_hours)} · ends ${escapeHtml(endDay)} ${hm(ev._end, tz)}` : formatDuration(ev.duration_hours));
-  const relText = cont ? 'continues' : (key === 'live' ? `ends ${rel(ev._end - now)}` : (ev._start > now ? `${isAnn ? 'sends' : 'starts'} ${rel(ev._start - now)}` : ''));
-  const kind = (ev.type && ev.type.name ? ev.type.name : (isAnn ? 'Message' : 'Event'));
+  const dur = isAnn ? '' : (multi ? escapeHtml(t(EVENTS_KEY + 'rowDurationMulti', { duration: formatDuration(ev.duration_hours), day: endDay, time: hm(ev._end, tz) })) : escapeHtml(formatDuration(ev.duration_hours)));
+  const relKey = key === 'live' ? 'rowEnds' : (isAnn ? 'rowSends' : 'rowStarts');
+  const relText = cont ? t(EVENTS_KEY + 'rowContinues') : (key === 'live' ? t(EVENTS_KEY + relKey, { when: rel(ev._end - now) }) : (ev._start > now ? t(EVENTS_KEY + relKey, { when: rel(ev._start - now) }) : ''));
+  const kind = (ev.type && ev.type.name ? ev.type.name : kindText(isAnn ? 'message' : 'event'));
   const id = `d-${ev._k.replace(/\W/g, '_')}${cont ? '-c' : ''}`;
   const color = safeColor(ev.type && ev.type.color ? ev.type.color : als[0].color, KINGDOM_COLOR);
   return `<article class="row${key === 'live' ? ' is-live' : ''}${key === 'completed' || key === 'cancelled' ? ' is-done' : ''}" data-vars="--c:${color}" data-key="${escapeHtml(ev._k)}">
     <button type="button" class="row-head" data-action="toggle" aria-expanded="${open}" aria-controls="${id}">
       <span class="row-time">${timeBlock}</span>
       <span class="row-main"><span class="row-name">${escapeHtml(ev.event_name)}</span>
-        <span class="row-meta"><span>${escapeHtml(als.slice(0, 2).map((a) => a.name).join(', '))}${als.length > 2 ? ` +${als.length - 2}` : ''}</span><span>${kind}</span>${dur ? `<span>${dur}</span>` : ''}</span></span>
+        <span class="row-meta"><span>${escapeHtml(als.slice(0, 2).map((a) => a.name).join(', '))}${als.length > 2 ? ` +${I18N.number(als.length - 2)}` : ''}</span><span>${escapeHtml(kind)}</span>${dur ? `<span>${dur}</span>` : ''}</span></span>
       <span class="row-side">
-        <span class="row-rel">${relText}</span>
-        <span class="status" data-vars="--s:${st.color}"><i class="swatch"></i>${st.text}</span>
+        <span class="row-rel">${escapeHtml(relText)}</span>
+        <span class="status" data-vars="--s:${STATUS_COLORS[key]}"><i class="swatch"></i>${escapeHtml(statusText(key))}</span>
       </span>
       <span class="chev" aria-hidden="true">${open ? '▲' : '▼'}</span>
     </button>
     <div class="row-detail" id="${id}"${open ? '' : ' hidden'}>
       <dl class="facts">
-        <div><dt>Alliance</dt><dd>${escapeHtml(als.map((a) => a.name).join(', '))}</dd></div>
-        <div><dt>Discord channel</dt><dd>${escapeHtml(ev.discord_channel || 'Not set')}</dd></div>
-        <div><dt>Reminder</dt><dd>${escapeHtml(notifyText(ev))}</dd></div>
+        <div><dt>${escapeHtml(t(EVENTS_KEY + 'factAlliance'))}</dt><dd>${escapeHtml(als.map((a) => a.name).join(', '))}</dd></div>
+        <div><dt>${escapeHtml(t(EVENTS_KEY + 'factChannel'))}</dt><dd>${escapeHtml(ev.discord_channel || t(EVENTS_KEY + 'notSet'))}</dd></div>
+        <div><dt>${escapeHtml(t(EVENTS_KEY + 'factReminder'))}</dt><dd>${escapeHtml(notifyText(ev))}</dd></div>
       </dl>
       ${ev.description ? `<p class="desc">${escapeHtml(ev.description)}</p>` : ''}
       <div class="row-actions">
-        <button type="button" class="btn-plain" data-action="preview">Discord preview</button>
-        <button type="button" class="btn-plain" data-action="report">Report an issue</button>
+        <button type="button" class="btn-plain" data-action="preview">${escapeHtml(t(EVENTS_KEY + 'previewTitle'))}</button>
+        <button type="button" class="btn-plain" data-action="report">${escapeHtml(t(EVENTS_KEY + 'report.title'))}</button>
       </div>
     </div>
   </article>`;
@@ -430,9 +445,9 @@ function dayHeader(k, tz, now) {
   const [y, m, d] = k.split('-').map(Number);
   const ms = Date.UTC(y, m - 1, d, 12);
   const today = k === dayKey(now, tz), tom = k === dayKey(now + DAY, tz);
-  const w = new Intl.DateTimeFormat(undefined, { weekday: 'long', timeZone: 'UTC' }).format(ms);
-  const dt = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(ms);
-  return `<div class="day-head"><h2${today ? ' class="is-today"' : ''}>${today ? 'Today' : tom ? 'Tomorrow' : escapeHtml(w)}</h2><span>${escapeHtml(dt)}</span></div>`;
+  const w = new Intl.DateTimeFormat(I18N.intlLocale, { weekday: 'long', timeZone: 'UTC' }).format(ms);
+  const dt = new Intl.DateTimeFormat(I18N.intlLocale, { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(ms);
+  return `<div class="day-head"><h2${today ? ' class="is-today"' : ''}>${escapeHtml(today ? t(EVENTS_KEY + 'today') : tom ? t(EVENTS_KEY + 'tomorrow') : w)}</h2><span>${escapeHtml(dt)}</span></div>`;
 }
 function renderSchedule() {
   const now = Date.now(), tz = getDisplayTz();
@@ -440,7 +455,7 @@ function renderSchedule() {
   let keys = [...map.keys()].sort();
   if (VIEW === 'calendar') keys = keys.filter((k) => k === SEL_DAY);
   if (!keys.length) {
-    $('schedule').innerHTML = `<p class="empty">${ALL_LOADED ? (VIEW === 'calendar' ? 'Nothing scheduled on this day.' : 'No events scheduled. Check back soon, or subscribe to the calendar feed to be notified automatically.') : 'Loading events…'}</p>`;
+    $('schedule').innerHTML = `<p class="empty">${escapeHtml(t(EVENTS_KEY + (ALL_LOADED ? (VIEW === 'calendar' ? 'emptyDay' : 'emptyAll') : 'loadingEvents')))}</p>`;
     return;
   }
   $('schedule').innerHTML = keys.map((k) =>
@@ -468,7 +483,7 @@ function initCal() {
   CAL_YEAR = y; CAL_MONTH = m - 1;
   SEL_DAY = dayKey(Date.now(), getDisplayTz());
 }
-function monthName(y, m, opts) { return new Intl.DateTimeFormat(undefined, Object.assign({ timeZone: 'UTC' }, opts)).format(Date.UTC(y, m, 1)); }
+function monthName(y, m, opts) { return new Intl.DateTimeFormat(I18N.intlLocale, Object.assign({ timeZone: 'UTC' }, opts)).format(Date.UTC(y, m, 1)); }
 function renderCalendar() {
   initCal();
   const tz = getDisplayTz(), todayKey = dayKey(Date.now(), tz);
@@ -480,7 +495,7 @@ function renderCalendar() {
   const lead = (new Date(Date.UTC(CAL_YEAR, CAL_MONTH, 1)).getUTCDay() + 6) % 7;
   const dim = new Date(Date.UTC(CAL_YEAR, CAL_MONTH + 1, 0)).getUTCDate();
   const total = Math.ceil((lead + dim) / 7) * 7;
-  let html = Array.from({ length: 7 }, (_, i) => `<div class="cal-dow">${escapeHtml(new Intl.DateTimeFormat(undefined, { weekday: 'short', timeZone: 'UTC' }).format(Date.UTC(2024, 0, 1 + i)))}</div>`).join('');
+  let html = Array.from({ length: 7 }, (_, i) => `<div class="cal-dow">${escapeHtml(new Intl.DateTimeFormat(I18N.intlLocale, { weekday: 'short', timeZone: 'UTC' }).format(Date.UTC(2024, 0, 1 + i)))}</div>`).join('');
   for (let i = 0; i < total; i++) {
     const dt = new Date(Date.UTC(CAL_YEAR, CAL_MONTH, 1 - lead + i)), k = dt.toISOString().slice(0, 10);
     const items = map.get(k) || [], inMonth = dt.getUTCMonth() === CAL_MONTH;
@@ -488,8 +503,8 @@ function renderCalendar() {
       const a = evAlliances(ev)[0], c = safeColor(a.color, KINGDOM_COLOR);
       return `<span class="cal-chip${cont ? ' is-cont' : ''}" data-vars="--c:${c};--ink-on:${inkOn(c)}">${cont ? '◂ ' : hm(ev._start, tz) + ' '}${escapeHtml(ev.event_name)}</span>`;
     }).join('');
-    const label = `${fmtDay(dt.getTime(), 'UTC', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}${items.length ? `, ${items.length} item${items.length === 1 ? '' : 's'}` : ''}`;
-    html += `<button type="button" class="cal-cell${inMonth ? '' : ' is-adjacent'}${k === todayKey ? ' is-today' : ''}${k === SEL_DAY ? ' is-selected' : ''}" data-day="${k}" aria-label="${escapeHtml(label)}" aria-pressed="${k === SEL_DAY}"><span class="cal-num">${dt.getUTCDate()}</span>${chips}${items.length > 3 ? `<span class="cal-more">+${items.length - 3} more</span>` : ''}</button>`;
+    const label = `${fmtDay(dt.getTime(), 'UTC', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}${items.length ? `, ${t(EVENTS_KEY + 'calItems', { count: items.length })}` : ''}`;
+    html += `<button type="button" class="cal-cell${inMonth ? '' : ' is-adjacent'}${k === todayKey ? ' is-today' : ''}${k === SEL_DAY ? ' is-selected' : ''}" data-day="${k}" aria-label="${escapeHtml(label)}" aria-pressed="${k === SEL_DAY}"><span class="cal-num">${dt.getUTCDate()}</span>${chips}${items.length > 3 ? `<span class="cal-more">${escapeHtml(t(EVENTS_KEY + 'calMore', { count: items.length - 3 }))}</span>` : ''}</button>`;
   }
   $('calGrid').innerHTML = html;
 }
@@ -528,12 +543,13 @@ function renderAll() {
 
 // ── Discord preview ─────────────────────────────────────────────
 function formatDiscordAbsolutePreview(date) {
-  return date.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' (preview)';
+  const text = new Intl.DateTimeFormat(I18N.intlLocale, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date);
+  return t(EVENTS_KEY + 'previewSuffix', { text });
 }
 function formatDiscordRelativePreview(date) {
-  const mins = Math.round((date.getTime() - Date.now()) / 60000), abs = Math.abs(mins);
-  const text = abs < 60 ? `${abs} min` : abs < 1440 ? `${Math.round(abs / 60)} hr` : `${Math.round(abs / 1440)} day${Math.round(abs / 1440) === 1 ? '' : 's'}`;
-  return (mins >= 0 ? `in ${text}` : `${text} ago`) + ' (preview)';
+  const mins = Math.round((date.getTime() - Date.now()) / 60000), abs = Math.abs(mins), sign = mins >= 0 ? 1 : -1;
+  const text = abs < 60 ? I18N.relative(sign * abs, 'minute') : abs < 1440 ? I18N.relative(sign * Math.round(abs / 60), 'hour') : I18N.relative(sign * Math.round(abs / 1440), 'day');
+  return t(EVENTS_KEY + 'previewSuffix', { text });
 }
 function clientRenderPlaceholders(text, o) {
   const eventTime = new Date(o.scheduledFor.getTime() + (o.eventOffsetMinutes || 0) * 60000);
@@ -554,10 +570,10 @@ function renderDiscordMarkdownPreview(text) {
   html = html.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/__([^_]+)__/g, '<u>$1</u>');
   html = html.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>').replace(/~~([^~]+)~~/g, '<s>$1</s>');
   html = html.replace(/\|\|([^|]+)\|\|/g, '<span class="preview-spoiler" onclick="this.classList.add(\'revealed\')">$1</span>');
-  html = html.replace(/&lt;@&amp;(\d+)&gt;/g, '<span class="preview-mention">@role mention</span>').replace(/&lt;#(\d+)&gt;/g, '<span class="preview-mention">#channel mention</span>');
+  html = html.replace(/&lt;@&amp;(\d+)&gt;/g, `<span class="preview-mention">${escapeHtml(t(EVENTS_KEY + 'roleMention'))}</span>`).replace(/&lt;#(\d+)&gt;/g, `<span class="preview-mention">${escapeHtml(t(EVENTS_KEY + 'channelMention'))}</span>`);
   html = html.replace(/^- (.*)$/gm, '&nbsp;&nbsp;• $1').replace(/\n/g, '<br>');
   html = html.replace(/\u0000CODEBLOCK(\d+)\u0000/g, (m, i) => stash[Number(i)]);
-  return html || '<span class="discord-preview-muted">(nothing to preview yet)</span>';
+  return html || `<span class="discord-preview-muted">${escapeHtml(t(EVENTS_KEY + 'nothingToPreview'))}</span>`;
 }
 function openDiscordPreview(ev) {
   const pane = $('discordPreviewModalBody');
@@ -569,18 +585,18 @@ function openDiscordPreview(ev) {
   const html = renderDiscordMarkdownPreview(clientRenderPlaceholders(ev.description || '', { allianceName, kingdomName: '', scheduledFor, eventOffsetMinutes }));
   if (isAnn) {
     const multi = ev.targets && ev.targets.length > 1;
-    const note = multi ? `<p class="discord-preview-note">Sent independently to ${ev.targets.map((t) => escapeHtml(t.tenant_name)).join(', ')}. Preview uses ${escapeHtml(ev.targets[0].tenant_name)}’s name; each alliance’s actual post fills in its own name and channel.</p>` : '';
+    const note = multi ? `<p class="discord-preview-note">${escapeHtml(t(EVENTS_KEY + 'previewMultiNote', { alliances: I18N.list(ev.targets.map((x) => x.tenant_name)), first: ev.targets[0].tenant_name }))}</p>` : '';
     pane.innerHTML = `<div class="discord-preview-msg"><div class="discord-preview-avatar">S</div><div class="discord-preview-body">
-      <div class="discord-preview-header"><span class="discord-preview-name">Samaya</span><span class="discord-preview-bot-tag">BOT</span><span class="discord-preview-timestamp">${escapeHtml(formatDiscordAbsolutePreview(scheduledFor))}</span></div>
+      <div class="discord-preview-header"><span class="discord-preview-name">Samaya</span><span class="discord-preview-bot-tag">${escapeHtml(t(EVENTS_KEY + 'previewBot'))}</span><span class="discord-preview-timestamp">${escapeHtml(formatDiscordAbsolutePreview(scheduledFor))}</span></div>
       <div class="discord-preview-text">${html}</div></div></div>${note}`;
   } else {
     const start = new Date(scheduledFor.getTime() + eventOffsetMinutes * 60000);
     pane.innerHTML = `<div class="discord-preview-event">${ev.cover_image_data ? `<img class="discord-preview-event-cover" src="${escapeHtml(ev.cover_image_data)}" alt="">` : ''}
       <div class="discord-preview-event-body"><div class="discord-preview-event-title">${escapeHtml(ev.event_name)}</div>
       <div class="discord-preview-event-time">${escapeHtml(formatDiscordAbsolutePreview(start))} <span class="discord-preview-muted">(${escapeHtml(formatDiscordRelativePreview(start))})</span></div>
-      <div class="discord-preview-event-meta">${ev.duration_hours ? formatDuration(ev.duration_hours) : ''}${ev.discord_channel ? (ev.duration_hours ? ' · ' : '') + escapeHtml(ev.discord_channel) : ''}</div>
+      <div class="discord-preview-event-meta">${ev.duration_hours ? escapeHtml(formatDuration(ev.duration_hours)) : ''}${ev.discord_channel ? (ev.duration_hours ? ' · ' : '') + escapeHtml(ev.discord_channel) : ''}</div>
       <div class="discord-preview-text discord-preview-event-desc">${html}</div>
-      <button type="button" class="discord-preview-event-interested" disabled>✓ Interested</button></div></div>`;
+      <button type="button" class="discord-preview-event-interested" disabled>${escapeHtml(t(EVENTS_KEY + 'previewInterested'))}</button></div></div>`;
   }
   openModal('discordPreviewModal');
 }
@@ -589,7 +605,7 @@ function openDiscordPreview(ev) {
 let REPORT_TARGET = null;
 function openReportIssueModal(ev) {
   REPORT_TARGET = ev;
-  $('reportIssueModalSubject').textContent = `About: ${ev.event_name} (${ev.occurrence_date || dayKey(ev._start, 'UTC')})`;
+  $('reportIssueModalSubject').textContent = t(EVENTS_KEY + 'report.subject', { name: ev.event_name, date: ev.occurrence_date || dayKey(ev._start, 'UTC') });
   $('riErrorType').selectedIndex = 0; $('riDescription').value = ''; $('riContact').value = ''; $('riNote').textContent = '';
   $('riSubmit').disabled = false;
   openModal('reportIssueModal');
@@ -598,7 +614,7 @@ $('riSubmit').addEventListener('click', async () => {
   const ev = REPORT_TARGET;
   if (!ev) return;
   const description = $('riDescription').value.trim();
-  if (!description) { $('riNote').textContent = 'Please describe what looks wrong.'; $('riDescription').focus(); return; }
+  if (!description) { $('riNote').textContent = t(EVENTS_KEY + 'report.describeNeeded'); $('riDescription').focus(); return; }
   const payload = {
     kind: 'error', error_type: $('riErrorType').value, title: `Issue: ${ev.event_name}`, description,
     tenant_slug: ev.tenant_slug || TENANT_SLUG || null, submitter_contact: $('riContact').value.trim() || null,
@@ -608,10 +624,10 @@ $('riSubmit').addEventListener('click', async () => {
   try {
     const res = await fetch('/api/tickets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.detail || res.statusText); }
-    $('riNote').textContent = 'Thanks. Your report was submitted. You can follow its status on the Feedback page.';
+    $('riNote').textContent = t(EVENTS_KEY + 'report.thanks');
     setTimeout(() => closeModal('reportIssueModal'), 1800);
   } catch (err) {
-    $('riNote').textContent = `Could not submit that: ${err.message}`;
+    $('riNote').textContent = t(EVENTS_KEY + 'report.failed', { error: err.message });
     $('riSubmit').disabled = false;
   }
 });
@@ -635,7 +651,7 @@ async function loadEvents() {
   } catch (e) {
     ALL_LOADED = true; EVENTS = [];
     renderHero();
-    $('schedule').innerHTML = `<p class="empty">Could not load events. ${escapeHtml(e.message)}</p>`;
+    $('schedule').innerHTML = `<p class="empty">${escapeHtml(t(EVENTS_KEY + 'loadError', { error: e.message }))}</p>`;
   }
 }
 async function loadLastActivity() {
@@ -644,7 +660,7 @@ async function loadLastActivity() {
     const a = await (await fetch(COMBINED_MODE ? '/api/last-activity' : `/t/${TENANT_SLUG}/api/last-activity`)).json();
     if (!a) { el.hidden = true; return; }
     const tz = getDisplayTz(), at = parseIso(a.at);
-    el.innerHTML = `${a.kind === 'announcement' ? 'Last message' : 'Last event posted'}: <strong>${escapeHtml(a.name)}</strong>${COMBINED_MODE && a.tenant_name ? ' · ' + escapeHtml(a.tenant_name) : ''} · ${escapeHtml(fmtDay(at, tz, { day: 'numeric', month: 'short' }))} ${hm(at, tz)}`;
+    el.innerHTML = `${I18N.tHtml(EVENTS_KEY + (a.kind === 'announcement' ? 'activityMessageHtml' : 'activityEventHtml'), { name: a.name })}${COMBINED_MODE && a.tenant_name ? ' · ' + escapeHtml(a.tenant_name) : ''} · ${escapeHtml(fmtDay(at, tz, { day: 'numeric', month: 'short' }))} ${hm(at, tz)}`;
     el.hidden = false;
   } catch (e) { el.hidden = true; }
 }
@@ -660,8 +676,10 @@ fetch('/api/kingdom-branding').then((r) => r.json()).then((b) => {
 }).catch(() => {});
 
 // ── Boot ────────────────────────────────────────────────────────
+I18N.apply(document);
 buildCalMenu();
 $('icsLink').href = ICS_URL;
+setKeyLabel(false);
 renderKey(); renderHeader(); tickClock(); setView(VIEW); renderAll();
 loadAlliances(); loadEvents(); loadLastActivity();
 setInterval(tickClock, 30000);

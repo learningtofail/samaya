@@ -10,46 +10,46 @@
 <link rel="stylesheet" href="/static/events.css">
 </head>
 <body>
-<a class="skip-link" href="#main">Skip to schedule</a>
+<a class="skip-link" href="#main" data-i18n="public.events.skipLink">Skip to schedule</a>
 
 <header class="hdr">
   <div class="brand">
     <div class="brand-text">
-      <div class="kicker" id="pageKicker">Kingshot</div>
-      <h1 id="pageTitle">Event Schedule</h1>
+      <div class="kicker" id="pageKicker" data-i18n="public.events.kicker">Kingshot</div>
+      <h1 id="pageTitle" data-i18n="public.events.pageTitle">Event Schedule</h1>
     </div>
   </div>
   <div class="hdr-actions">
-    <button type="button" id="clockBtn" class="chip-btn" title="Current UTC time and your local time. Click to change your time zone.">Loading…</button>
+    <button type="button" id="clockBtn" class="chip-btn" title="Current UTC time and your local time. Click to change your time zone." data-i18n="public.common.loading" data-i18n-attr="title:public.events.clockTitle">Loading…</button>
     <div class="menu-wrap">
-      <button type="button" id="calMenuBtn" class="btn-gold" aria-haspopup="true" aria-expanded="false" aria-controls="calMenu">Add to calendar ▾</button>
+      <button type="button" id="calMenuBtn" class="btn-gold" aria-haspopup="true" aria-expanded="false" aria-controls="calMenu" data-i18n="public.events.addToCalendar">Add to calendar ▾</button>
       <div id="calMenu" class="menu" role="menu" hidden></div>
     </div>
   </div>
 </header>
 
 <main id="main" class="page" tabindex="-1">
-  <section id="hero" class="hero-row" aria-label="Live now and next up"></section>
+  <section id="hero" class="hero-row" aria-label="Live now and next up" data-i18n-attr="aria-label:public.events.heroLabel"></section>
   <p id="lastActivity" class="activity" hidden></p>
 
-  <section class="controls" aria-label="Schedule controls">
-    <div id="allianceChips" class="chips" role="group" aria-label="Filter by alliance"></div>
+  <section class="controls" aria-label="Schedule controls" data-i18n-attr="aria-label:public.events.controlsLabel">
+    <div id="allianceChips" class="chips" role="group" aria-label="Filter by alliance" data-i18n-attr="aria-label:public.events.filterLabel"></div>
     <div class="ctl-right">
       <button type="button" id="keyBtn" class="btn-plain" aria-expanded="false" aria-controls="legendPanel">Key ▾</button>
-      <div class="seg" role="group" aria-label="View">
-        <button type="button" id="viewListBtn" aria-pressed="true">List</button>
-        <button type="button" id="viewCalendarBtn" aria-pressed="false">Calendar</button>
+      <div class="seg" role="group" aria-label="View" data-i18n-attr="aria-label:public.events.viewLabel">
+        <button type="button" id="viewListBtn" aria-pressed="true" data-i18n="public.events.viewList">List</button>
+        <button type="button" id="viewCalendarBtn" aria-pressed="false" data-i18n="public.events.viewCalendar">Calendar</button>
       </div>
     </div>
   </section>
 
   <div id="legendPanel" class="legend" hidden></div>
 
-  <section id="calendarWrap" class="cal" hidden aria-label="Calendar">
+  <section id="calendarWrap" class="cal" hidden aria-label="Calendar" data-i18n-attr="aria-label:public.events.viewCalendar">
     <div class="cal-head">
       <div class="cal-nav">
         <button type="button" id="calPrevBtn" class="btn-plain"></button>
-        <button type="button" id="calTodayBtn" class="btn-plain">Today</button>
+        <button type="button" id="calTodayBtn" class="btn-plain" data-i18n="public.events.today">Today</button>
         <button type="button" id="calNextBtn" class="btn-plain"></button>
       </div>
       <h2 id="calMonthLabel" class="cal-title"></h2>
@@ -58,59 +58,60 @@
   </section>
 
   <div id="schedule" aria-live="polite">
-    <p class="empty">Loading events…</p>
+    <p class="empty" data-i18n="public.events.loadingEvents">Loading events…</p>
   </div>
 </main>
 
 <footer class="ftr">
-  <span id="footerText">Times shown in your time zone and UTC · Powered by Samaya</span>
-  <span class="ftr-links"><a href="/feedback">Feedback</a><a id="icsLink" href="/ics/events.ics">ICS feed</a></span>
+  <span id="footerText" data-i18n="public.events.footer">Times shown in your time zone and UTC · Powered by Samaya</span>
+  <span class="ftr-links"><a href="/feedback" data-i18n="public.events.feedbackLink">Feedback</a><a id="icsLink" href="/ics/events.ics" data-i18n="public.events.icsLink">ICS feed</a></span>
 </footer>
 
 <!-- Time zone -->
 <div class="modal" id="timezoneModal" hidden>
   <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="timezoneModalTitle">
-    <header class="modal-head"><h2 id="timezoneModalTitle">Time zone</h2><button type="button" class="modal-x" data-close aria-label="Close">×</button></header>
+    <header class="modal-head"><h2 id="timezoneModalTitle" data-i18n="public.events.tzTitle">Time zone</h2><button type="button" class="modal-x" data-close aria-label="Close" data-i18n-attr="aria-label:public.common.close">×</button></header>
     <div class="modal-body">
       <p id="timezoneModalIntro" class="muted"></p>
-      <label class="field"><span class="sr-only">Time zone</span><select id="timezoneSelect"></select></label>
+      <label class="field"><span class="sr-only" data-i18n="public.events.tzTitle">Time zone</span><select id="timezoneSelect"></select></label>
     </div>
-    <footer class="modal-foot"><button type="button" class="btn-gold" data-close>Done</button></footer>
+    <footer class="modal-foot"><button type="button" class="btn-gold" data-close data-i18n="public.common.done">Done</button></footer>
   </div>
 </div>
 
 <!-- Discord preview -->
 <div class="modal" id="discordPreviewModal" hidden>
   <div class="modal-box modal-md" role="dialog" aria-modal="true" aria-labelledby="discordPreviewModalTitle">
-    <header class="modal-head"><h2 id="discordPreviewModalTitle">Discord preview</h2><button type="button" class="modal-x" data-close aria-label="Close">×</button></header>
+    <header class="modal-head"><h2 id="discordPreviewModalTitle" data-i18n="public.events.previewTitle">Discord preview</h2><button type="button" class="modal-x" data-close aria-label="Close" data-i18n-attr="aria-label:public.common.close">×</button></header>
     <div class="modal-body"><div id="discordPreviewModalBody"></div></div>
-    <footer class="modal-foot"><button type="button" class="btn-gold" data-close>Close</button></footer>
+    <footer class="modal-foot"><button type="button" class="btn-gold" data-close data-i18n="public.common.close">Close</button></footer>
   </div>
 </div>
 
 <!-- Report an issue -->
 <div class="modal" id="reportIssueModal" hidden>
   <div class="modal-box modal-md" role="dialog" aria-modal="true" aria-labelledby="reportIssueModalTitle">
-    <header class="modal-head"><h2 id="reportIssueModalTitle">Report an issue</h2><button type="button" class="modal-x" data-close aria-label="Close">×</button></header>
+    <header class="modal-head"><h2 id="reportIssueModalTitle" data-i18n="public.events.report.title">Report an issue</h2><button type="button" class="modal-x" data-close aria-label="Close" data-i18n-attr="aria-label:public.common.close">×</button></header>
     <div class="modal-body">
       <p id="reportIssueModalSubject" class="muted"></p>
-      <label class="field"><span>What is wrong?</span>
+      <label class="field"><span data-i18n="public.events.report.whatWrong">What is wrong?</span>
         <select id="riErrorType">
-          <option>Wrong date or time</option>
-          <option>Wrong channel</option>
-          <option>Duplicate posting</option>
-          <option>Didn't happen as scheduled</option>
-          <option>Other</option>
+          <option value="Wrong date or time" data-i18n="public.events.report.typeTime">Wrong date or time</option>
+          <option value="Wrong channel" data-i18n="public.events.report.typeChannel">Wrong channel</option>
+          <option value="Duplicate posting" data-i18n="public.events.report.typeDuplicate">Duplicate posting</option>
+          <option value="Didn't happen as scheduled" data-i18n="public.events.report.typeMissed">Didn't happen as scheduled</option>
+          <option value="Other" data-i18n="public.events.report.typeOther">Other</option>
         </select>
       </label>
-      <label class="field"><span>Description</span><textarea id="riDescription" rows="4" maxlength="2000" placeholder="What did you notice?"></textarea></label>
-      <label class="field"><span>Contact (optional)</span><input id="riContact" placeholder="Discord handle or email. Used for follow-up only and never shown publicly."></label>
+      <label class="field"><span data-i18n="public.events.report.description">Description</span><textarea id="riDescription" rows="4" maxlength="2000" placeholder="What did you notice?" data-i18n-attr="placeholder:public.events.report.descriptionPlaceholder"></textarea></label>
+      <label class="field"><span data-i18n="public.events.report.contact">Contact (optional)</span><input id="riContact" placeholder="Discord handle or email. Used for follow-up only and never shown publicly." data-i18n-attr="placeholder:public.events.report.contactPlaceholder"></label>
       <p id="riNote" class="muted" role="status"></p>
     </div>
-    <footer class="modal-foot"><button type="button" id="riSubmit" class="btn-gold">Submit</button><button type="button" class="btn-plain" data-close>Cancel</button></footer>
+    <footer class="modal-foot"><button type="button" id="riSubmit" class="btn-gold" data-i18n="public.common.submit">Submit</button><button type="button" class="btn-plain" data-close data-i18n="public.common.cancel">Cancel</button></footer>
   </div>
 </div>
 
+<script src="/static/i18n.js"></script>
 <script src="/static/events-public.js"></script>
 </body>
 </html>

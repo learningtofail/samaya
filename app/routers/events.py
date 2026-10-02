@@ -1,7 +1,7 @@
 import time
 from datetime import date, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,9 +11,11 @@ from models.db import Delivery, Event, EventOccurrence, Kingdom, Tenant
 from services.discord_api import get_guild_channels
 from services.event_engine import effective_end, effective_start, platform_bot_token
 from services.public_events import PublicRow, public_rows
-from services.static_assets import bust_static_cache
+from services.public_pages import render_public_page
 
 router = APIRouter()
+
+EVENTS_PAGE_PREFIXES = ("public.common.", "public.events.")
 
 # Spec §53 — resolving a notification's destination channel *name* for
 # public display. The public page has no bot-API access of its own (see
@@ -125,15 +127,9 @@ async def list_events(tenant_slug: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/t/{tenant_slug}/events", response_class=HTMLResponse)
-async def events_page(tenant_slug: str, db: AsyncSession = Depends(get_db)):
+async def events_page(request: Request, tenant_slug: str, db: AsyncSession = Depends(get_db)):
     await _get_tenant_by_slug(tenant_slug, db)  # 404s early for an unknown slug
-    with open("/app/static/events.html") as f:
-        # Spec §62 — events.html now loads its own external events.css/
-        # events-public.js under /static/, which Cloudflare edge-caches by
-        # extension the same way it does admin.html's assets (spec §23);
-        # this page never needed busting before that, since everything was
-        # inline.
-        return HTMLResponse(bust_static_cache(f.read()))
+    return render_public_page(request, "events.html", EVENTS_PAGE_PREFIXES, "public.events.title")
 
 
 @router.get("/api/alliances")
@@ -233,6 +229,5 @@ async def last_activity_all(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/events", response_class=HTMLResponse)
-async def events_page_all():
-    with open("/app/static/events.html") as f:
-        return HTMLResponse(bust_static_cache(f.read()))
+async def events_page_all(request: Request):
+    return render_public_page(request, "events.html", EVENTS_PAGE_PREFIXES, "public.events.title")

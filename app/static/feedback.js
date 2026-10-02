@@ -22,6 +22,11 @@ function getVoterId() {
 }
 const VOTER_ID = getVoterId();
 
+// Interface strings and locale-aware formatting (spec §72), read from the page's i18n block.
+const I18N = SamayaI18n.fromDocument(document);
+const t = I18N.t;
+const FB = 'public.feedback.';
+
 function escapeHtml(s) {
   const d = document.createElement('div');
   d.textContent = s == null ? '' : String(s);
@@ -39,34 +44,26 @@ async function api(method, path, body) {
   return res.status === 204 ? null : res.json();
 }
 
-const KIND_META = {
-  feedback:              { label: 'Feedback',      color: 'pf-m-blue' },
-  event_request:         { label: 'Event Request',        color: 'pf-m-green' },
-  announcement_request:  { label: 'Announcement Request', color: 'pf-m-purple' },
-  error:                 { label: 'Issue',          color: 'pf-m-red' },
-};
-const STATUS_META = {
-  open:        { label: 'Open',        color: 'pf-m-gray' },
-  planned:     { label: 'Planned',     color: 'pf-m-cyan' },
-  in_progress: { label: 'In Progress', color: 'pf-m-orange' },
-  done:        { label: 'Done',        color: 'pf-m-green' },
-  declined:    { label: 'Declined',    color: 'pf-m-red' },
-  dismissed:   { label: 'Dismissed',   color: 'pf-m-gray' },
-};
+// Labels come from the catalogue (public.feedback.kind.<key>, .status.<key>).
+const KIND_COLORS = { feedback: 'pf-m-blue', event_request: 'pf-m-green', announcement_request: 'pf-m-purple', error: 'pf-m-red' };
+const STATUS_COLORS = { open: 'pf-m-gray', planned: 'pf-m-cyan', in_progress: 'pf-m-orange', done: 'pf-m-green', declined: 'pf-m-red', dismissed: 'pf-m-gray' };
+function metaFor(group, colors, key) {
+  const k = `${FB}${group}.${key}`;
+  return { label: I18N.has(k) ? t(k) : key, color: colors[key] || 'pf-m-gray' };
+}
 
 function pfLabel(text, color) {
-  return `<span class="pf-v6-c-label ${color} pf-m-filled"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${text}</span></span></span>`;
+  return `<span class="pf-v6-c-label ${color} pf-m-filled"><span class="pf-v6-c-label__content"><span class="pf-v6-c-label__text">${escapeHtml(text)}</span></span></span>`;
 }
 
 function formatRelativeTime(iso) {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.round(diffMs / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1) return t(FB + 'justNow');
+  if (mins < 60) return I18N.relative(-mins, 'minute');
   const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.round(hrs / 24);
-  return `${days}d ago`;
+  if (hrs < 24) return I18N.relative(-hrs, 'hour');
+  return I18N.relative(-Math.round(hrs / 24), 'day');
 }
 
 let TICKETS = { active: [], archived: [] };
@@ -76,17 +73,17 @@ async function loadTickets() {
     TICKETS = await api('GET', '/api/tickets');
     renderTickets();
   } catch (e) {
-    document.getElementById('ticketsWrap').innerHTML = `<div class="empty-state">Couldn't load the board: ${escapeHtml(e.message)}</div>`;
+    document.getElementById('ticketsWrap').innerHTML = `<div class="empty-state">${escapeHtml(t(FB + 'loadError', { error: e.message }))}</div>`;
   }
 }
 
 function formatWhen(iso) {
-  return iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  return iso ? new Intl.DateTimeFormat(I18N.intlLocale, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(iso)) : '';
 }
 
-function responsesHtml(t) {
-  if (!t.responses || !t.responses.length) return '';
-  return `<ul class="ticket-responses" aria-label="Responses from the team">${t.responses.map(r => `
+function responsesHtml(tk) {
+  if (!tk.responses || !tk.responses.length) return '';
+  return `<ul class="ticket-responses" aria-label="${escapeHtml(t(FB + 'responsesLabel'))}">${tk.responses.map(r => `
     <li class="ticket-responses__item">
       <div class="ticket-responses__head"><strong>${escapeHtml(r.author)}</strong>
         <span class="samaya-subtle-text">${escapeHtml(formatWhen(r.created_at))}</span></div>
@@ -98,15 +95,14 @@ function responsesHtml(t) {
 // onclick — the ticketsWrap container handles the click via delegation.
 // An archived ticket (done or declined) is read-only: no vote button, but
 // its status and responses stay visible so the reasoning can be looked up.
-function ticketHtml(t, archived) {
-  const kindMeta = KIND_META[t.kind] || { label: t.kind, color: 'pf-m-gray' };
-  const statusMeta = STATUS_META[t.status] || { label: t.status, color: 'pf-m-gray' };
-  const relatedLine = (t.kind === 'error' && t.related_name)
-    ? `<div class="pf-v6-u-font-size-sm samaya-subtle-text">Re: ${escapeHtml(t.related_name)}</div>` : '';
-  const allianceLine = t.tenant_name ? escapeHtml(t.tenant_name) : 'Kingdom-wide / general';
+function ticketHtml(tk, archived) {
+  const kindMeta = metaFor('kind', KIND_COLORS, tk.kind);
+  const statusMeta = metaFor('status', STATUS_COLORS, tk.status);
+  const relatedLine = (tk.kind === 'error' && tk.related_name)
+    ? `<div class="pf-v6-u-font-size-sm samaya-subtle-text">${escapeHtml(t(FB + 'relatedTo', { name: tk.related_name }))}</div>` : '';
   const vote = archived
-    ? `<span class="vote-btn vote-btn--static" aria-label="${t.upvote_count} upvotes"><span>▲</span><span class="vote-count">${t.upvote_count}</span></span>`
-    : `<button class="vote-btn${t.voted_by_me ? ' voted' : ''}" data-ticket-id="${t.id}" aria-label="Upvote ${escapeHtml(t.title)}"><span>▲</span><span class="vote-count">${t.upvote_count}</span></button>`;
+    ? `<span class="vote-btn vote-btn--static" aria-label="${escapeHtml(t(FB + 'upvotesCount', { count: tk.upvote_count }))}"><span>▲</span><span class="vote-count">${I18N.number(tk.upvote_count)}</span></span>`
+    : `<button class="vote-btn${tk.voted_by_me ? ' voted' : ''}" data-ticket-id="${tk.id}" aria-label="${escapeHtml(t(FB + 'upvoteTitle', { title: tk.title }))}"><span>▲</span><span class="vote-count">${I18N.number(tk.upvote_count)}</span></button>`;
   return `
     <div class="pf-v6-c-card pf-v6-u-mb-sm">
       <div class="pf-v6-c-card__body">
@@ -115,15 +111,15 @@ function ticketHtml(t, archived) {
           <div class="ticket-body">
             <div class="pf-v6-l-flex pf-m-align-items-center pf-m-space-items-sm">
               ${pfLabel(kindMeta.label, kindMeta.color)}
-              <strong>${escapeHtml(t.title)}</strong>
+              <strong>${escapeHtml(tk.title)}</strong>
             </div>
             ${relatedLine}
-            <p class="pf-v6-u-font-size-sm pf-v6-u-mt-xs samaya-ticket-description">${escapeHtml(t.description)}</p>
+            <p class="pf-v6-u-font-size-sm pf-v6-u-mt-xs samaya-ticket-description">${escapeHtml(tk.description)}</p>
             <div class="ticket-meta">
               ${pfLabel(statusMeta.label, statusMeta.color)}
-              <span class="pf-v6-u-font-size-sm samaya-subtle-text">${allianceLine} · reported ${formatRelativeTime(t.created_at)}</span>
+              <span class="pf-v6-u-font-size-sm samaya-subtle-text">${escapeHtml(t(FB + 'metaLine', { alliance: tk.tenant_name || t(FB + 'generalAlliance'), when: formatRelativeTime(tk.created_at) }))}</span>
             </div>
-            ${responsesHtml(t)}
+            ${responsesHtml(tk)}
           </div>
         </div>
       </div>
@@ -134,13 +130,13 @@ function renderTickets() {
   const wrap = document.getElementById('ticketsWrap');
   const { active, archived } = TICKETS;
   const activeHtml = active.length
-    ? active.map(t => ticketHtml(t, false)).join('')
-    : '<div class="empty-state">Nothing open right now. Be the first to submit feedback or a request.</div>';
+    ? active.map(tk => ticketHtml(tk, false)).join('')
+    : `<div class="empty-state">${escapeHtml(t(FB + 'emptyActive'))}</div>`;
   const archiveHtml = archived.length ? `
     <details class="ticket-archive">
-      <summary>Archived (${archived.length})</summary>
-      <p class="samaya-subtle-text ticket-archive__note">Finished or declined. Read-only, kept so you can see what was decided and why.</p>
-      ${archived.map(t => ticketHtml(t, true)).join('')}
+      <summary>${escapeHtml(t(FB + 'archivedTitle', { count: archived.length }))}</summary>
+      <p class="samaya-subtle-text ticket-archive__note">${escapeHtml(t(FB + 'archivedNote'))}</p>
+      ${archived.map(tk => ticketHtml(tk, true)).join('')}
     </details>` : '';
   wrap.innerHTML = activeHtml + archiveHtml;
 }
@@ -153,8 +149,8 @@ document.getElementById('ticketsWrap').addEventListener('click', (e) => {
 async function toggleVote(id) {
   try {
     const result = await api('POST', `/api/tickets/${id}/vote`);
-    const t = TICKETS.active.find(x => x.id === id);
-    if (t) { t.upvote_count = result.upvote_count; t.voted_by_me = result.voted_by_me; }
+    const tk = TICKETS.active.find(x => x.id === id);
+    if (tk) { tk.upvote_count = result.upvote_count; tk.voted_by_me = result.voted_by_me; }
     renderTickets();
   } catch (e) {
     alert(e.message);
@@ -182,7 +178,7 @@ function closeFeedbackModal() { document.getElementById('feedbackModal').classLi
 async function submitFeedback() {
   const title = document.getElementById('fbTitle').value.trim();
   const description = document.getElementById('fbDescription').value.trim();
-  if (!title || !description) { alert('Title and description are required.'); return; }
+  if (!title || !description) { alert(t(FB + 'titleRequired')); return; }
   try {
     await api('POST', '/api/tickets', {
       kind: 'feedback',
@@ -225,7 +221,7 @@ function closeRequestModal() { document.getElementById('requestModal').classList
 async function submitRequest() {
   const name = document.getElementById('reqName').value.trim();
   const details = document.getElementById('reqDetails').value.trim();
-  if (!name || !details) { alert('Proposed name and details are required.'); return; }
+  if (!name || !details) { alert(t(FB + 'requestRequired')); return; }
   const timing = document.getElementById('reqTiming').value.trim();
   const kind = document.getElementById('reqType').value;
   const description = `Proposed name: ${name}\nProposed timing: ${timing || '(not specified)'}\n\n${details}`;
@@ -257,6 +253,7 @@ document.querySelectorAll('[data-modal-dismiss]').forEach((btn) => {
   });
 });
 
+I18N.apply(document);
 loadTickets();
 
 })();

@@ -3,6 +3,7 @@ import html from "eslint-plugin-html";
 
 const globals = {
   MutationObserver: "readonly",
+  SamayaI18n: "readonly",
   Image:         "readonly",
   document:      "readonly",
   window:        "readonly",

@@ -2088,7 +2088,7 @@ Pre-deploy checks, made 2026-10-02 from `lxc-taraka` and from the owner's knowle
 
 ## 72. Interface Languages
 
-**Status:** Designed 2026-10-02, not built. The first part (the foundation and the public pages) comes before the theme work of §71.
+**Status:** Designed 2026-10-02. Built so far: §72.14 step 1, the English-only foundation for the public pages (`services/i18n.py`, `services/public_pages.py`, `static/i18n.js`, `app/i18n/en.json`, the `en-XA` pseudo-locale, `Intl` formatting). Not built: the Kingdom language settings and the language select, the logical-CSS and bidi work, translations, page text per language, admin and Discord. The first part (the foundation and the public pages) comes before the theme work of §71.
 
 **Problem.** The Kingshot community is international, and every label on the public pages is English text written into `events.html`, `events-public.js` and `feedback.html`. Leaders want the pages, and then the Discord commands and the admin console, in other languages, and soon. The text editing of §71.3 must not be designed for one language and migrated later.
 
@@ -2181,6 +2181,8 @@ Additive: `kingdoms.default_locale` (text, not null, default `en`), `kingdoms.en
 ### 72.14 Build order
 
 1. **Foundation, English only.** The catalogue and `t()`, extraction of the public pages, locale selection and `<html lang dir>`, the `i18n` JSON block, `Intl` formatting, `en-XA`, tests. Nothing changes for visitors except the small wording shifts of §72.4.
+Step 1 notes (built 2026-10-02): values sent to the API stay English whatever the page language (the report and feedback `error_type` options keep English `value` attributes, and the "Proposed name:" lines of a request), because admins read them and the server validates them. The calendar still starts its week on Monday in every locale, and names are not yet wrapped in `<bdi>`; both belong to step 2 with the logical-CSS work. The `en-XA` smoke test found one existing layout bug, the Add to calendar menu running off the left edge of a 390 px screen in English too; fixed in the same change.
+
 2. **Languages and page text.** Revision 0007, the page-text editor with a tab per language, the Languages panel, the language select, the logical-CSS and bidi work (needed for `ar`), the launch translations (seven languages besides English, about 150 strings each, an estimate; public pages only). Languages are enabled one at a time as each is reviewed, so the step can ship with English and the first reviewed languages and add the rest without a deploy.
 3. Then §71's theme, font, schedule and banner steps (§71.12).
 4. **Admin console** translation (`admin.*` keys), next after the public pages.
