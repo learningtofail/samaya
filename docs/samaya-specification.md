@@ -100,7 +100,7 @@ A Discord Scheduled Event is due 7 days before start and is skipped for leadersh
 
 ## CS.11 Known issues and open work
 
-- **Not built, by decision (§66.9):** monthly recurrence, leadership-only Discord channels, per-coordinator alliance limits, a creation-notice destination, downstream systems. §63 alliance branding and §64 scheduled theme resolution are deferred.
+- **Not built, by decision (§66.9):** monthly recurrence, leadership-only Discord channels, per-coordinator alliance limits, a creation-notice destination, downstream systems. §63.3 themes and §64 scheduled theme resolution are superseded by the §71 design (not built).
 - **Admin API gaps found while building the console (§66.7):** `/api/me` does not expose kingdom-coordinator grants, so the UI cannot hide event-type and kingdom-wide controls from users who lack them (the server returns 403); event list responses carry `cover_image_data` inline; the delivery list sorts by due time, so an old error row can fall behind the page limit (the UI asks for 200 and filters); a non-superadmin editing an event whose audience includes alliances they cannot see would drop those alliances.
 - **Known gaps:** no per-tenant custom Discord Interactions endpoint (§22); anonymous votes are per browser, not per person; the public page has no analytics; admin `js/*.js` has no lint coverage; Google Fonts load from an external host unless self-hosted.
 - **Roadmap ideas** are collected in §44 and §66.9.
@@ -112,7 +112,7 @@ A Discord Scheduled Event is due 7 days before start and is skipped for leadersh
 | Original baseline, corrected where facts changed | 1 to 12 (4, 5, 6 and 12 describe the previous system; see CS.3, CS.5, CS.6, CS.9) |
 | Current and still describing the system | 15, 17 (rationale only), 19 (rationale only), 21 to 26, 28, 29, 31 (audit log, viewer role), 33 to 35, 38, 40 to 46, 52, 53, 55 to 57, 59 to 62, 65, 66 |
 | Replaced by §66 (kept as design history) | 13, 20, 27, 30.1, 32, 37, 45, 49, 50, 51 (semantics kept) |
-| Deferred | 63, 64 |
+| Designed, not built | 71 (supersedes the deferred parts of 63 and 64; 63.1 and 63.2 are built, 64.1 is reused), 72 |
 | Archived (fully superseded) | 14, 18, 36, 39, 47, 54, 58 |
 | Intentionally empty | 16, 48 |
 
@@ -1398,7 +1398,7 @@ Two backend fixes surfaced while integrating this, both narrowly scoped and cove
 
 ## 63. Public Events Page: Alliance Branding
 
-**Status:** Partly built (2026-10-02). Built: hex validation of alliance colors, `services/contrast.py`, a Kingdom brand color (`kingdoms.color`, revision `a1f0c0de0006`, returned by `/api/kingdom-branding`), a color field in the alliance modal, and a Kingdom modal (name, slug, titles, color) that replaced the `prompt()` chain. Frontend: brand variables, theme and banner hooks (inert). Not built: themes and banners (§63.3, §64), which are being redesigned so a superadmin can create and edit them in the admin console, images included.
+**Status:** Partly built (2026-10-02). Built: hex validation of alliance colors, `services/contrast.py`, a Kingdom brand color (`kingdoms.color`, revision `a1f0c0de0006`, returned by `/api/kingdom-branding`), a color field in the alliance modal, and a Kingdom modal (name, slug, titles, color) that replaced the `prompt()` chain. Frontend: brand variables, theme and banner hooks (inert). Not built: themes and banners (§63.3, §64), superseded by the design in §71 so a superadmin or Kingdom coordinator can create and edit them in the admin console, images and fonts included.
 
 **Built behavior.** A superadmin sets an alliance color in Setup, Alliances, and the Kingdom color in Setup, Kingdoms. Both must be 6-digit hex; the alliance PATCH checks the color only when it is sent, so a legacy non-hex value (the column was never validated) survives edits to other fields, and the admin form sends the color only after the person touches it. A very light color is accepted with a note (`color_note`, under 3:1 against white) because a faint stripe is a choice, not an error. The page's "All alliances" chip, view toggle, hero accent and Kingdom-wide events use the Kingdom color; a single selected alliance uses its own. `tests/frontend/ink-fixtures.json` is the one table both `pick_ink` (Python) and `brandInk` (JS) are tested against. No Kingdom crest: the public page shows no crests.
 
@@ -1433,7 +1433,7 @@ Themes are CSS presets in `events.css`, selected by a `data-theme` attribute on 
 
 ## 64. Scheduled Theme Resolution
 
-**Status:** Deferred (2026-10-01), with §63.
+**Status:** Superseded by §71 (2026-10-02), except §64.1 (windows), which §71 reuses. Kept as design history.
 
 **Problem.** A seasonal base theme, a week-long celebration and a one-day event theme must switch on and off by date with no code change, and one date has to be that date for players in every time zone.
 
@@ -1921,6 +1921,280 @@ The Setup tab no longer has an "Alliances and audiences" panel. Which alliances 
 **Not built.** Coordinator commands (create, cancel), personal reminders, buttons on posts. They need the Discord ID to Samaya user mapping and a permission pass, and come after read-only has proven stable.
 
 **Setup (owner).** Slash commands belong to the application the bot token belongs to, which may differ from the OAuth login application. Use that application's Public Key for `PLATFORM_PUBLIC_KEY`, set its Interactions Endpoint URL to `https://ks138.taraka.dev/webhooks/discord`, invite the bot with the `applications.commands` scope, then run the registration script.
+
+## 71. Public Page Theming, Page Text and Fonts
+
+**Status:** Designed 2026-10-02, not built. Supersedes §63.3 (theme presets in CSS) and §64.2 to §64.5 (scheduled theme storage and admin). §64.1 (global-day windows) and §63.1, §63.2 (colors, brand variables; built) stand.
+
+**Problem.** The Kingdom wants to change how the public pages look for a season or a festival, and what their headers and titles say, without a deploy. A superadmin should create and edit themes in the admin console, including a banner image and fonts, and schedule them by date. Today the palettes live in `events.css`, the titles are one Kingdom field, and the fonts are fixed.
+
+**Principles.**
+- A theme is data, never code. The admin edits a fixed set of values; there is no free-form CSS. A bad value can then neither break the layout nor make text unreadable.
+- Every text and background pair a theme can change is checked for WCAG contrast on save, in the browser for feedback and on the server for enforcement. A theme that fails cannot be saved.
+- The server resolves the active theme and writes it into the page before first paint. No script applies a theme, so there is no flash of the wrong theme.
+- Page text and theme are separate systems. A theme may override some text (for example a festival title); the Kingdom's own text is the fallback.
+
+### 71.1 What a theme contains
+
+| Field | Rule |
+|---|---|
+| `name` | Required, at most 60 characters, unique per Kingdom. |
+| `bg` | Page background, hex. Contrast against the fixed `ink` token at least 7:1 and against `muted` at least 4.5:1. |
+| `accent` | Accent fill (the "All alliances" chip, live accents), hex. Text on it is `pick_ink(accent)` (§63.1), so no pairing rule. |
+| `accent_text` | Accent-colored text (the kicker, links), hex. At least 4.5:1 against white and against `bg`. |
+| `primary` | Primary buttons and the active view toggle, hex. White text on it at least 4.5:1. |
+| `font_heading`, `font_body`, `font_numerals` | Keys from the font catalogue (§71.2). Null means the page default. |
+| `banner_asset_id` | Optional image (§71.4). |
+| `banner_overlay` | A number from 0.90 to 1.00, default 0.96. The strength of the near-white overlay between the banner and the hero text. At 0.90 or more, any image, including pure black, keeps the fixed `ink` and `muted` text above their contrast floors; a test computes the worst case. |
+| `copy` | Optional JSON object of text overrides (§71.3). |
+| `archived` | Hides the theme from pickers; a scheduled or base theme cannot be archived. |
+
+Derived by the server, not edited: `--gold-deep` (accent, darker), `--navy-hover` (primary, lighter), and the live, line, tint and surface tokens stay as shipped. The generated stylesheet maps these onto the existing CSS variables (`--bg`, `--gold`, `--gold-deep`, `--gold-ink`, `--navy`, `--navy-hover`, `--font`, `--mono`) and adds `--font-heading`, `--banner` and `--hero-overlay`. `events.css` keeps the shipped defaults, so a page with no theme looks as it does today, and the `[data-theme]` presets are removed. The five seasonal palettes become starter templates in code (`services/theme_templates.py`, converted to hex and checked by the same contrast rules); the editor offers "Start from a template". No seed rows.
+
+### 71.2 Fonts
+
+**Catalogue in code, not free text.** `services/fonts.py` holds an allow-list of Google Fonts families. Each entry has a key, display name, the Google family string, the weights loaded (at most three), a CSS fallback stack, the scripts covered, the roles it may fill (`heading`, `body`, `numerals`) and a `tabular` flag. Adding a family is a reviewed code change. The launch list is about 15 families (the page's current Noto Sans and IBM Plex Mono, a few more neutral sans families, a few serif and display faces for headings such as Cinzel and Merriweather, and a few monospace faces); each is checked for availability, license (open source), weights and scripts when the catalogue is built.
+- `numerals` accepts only monospace families and proportional families whose tabular figures were verified, so the time column does not shift.
+- Decorative faces are limited to `heading`.
+- A catalogue key that no longer exists (removed in a later deploy) renders as the default for that slot and logs a warning. It never fails the page.
+
+**Loading.** One Google Fonts CSS2 request, built by the server from the resolved theme's three keys, with `display=swap` and `preconnect`. Google serves per-script chunks, so a visitor downloads only the scripts a page uses. Alliance names and translated text (§72) in scripts the font lacks fall back through the stack to the catalogue's fallback for that script, then to system fonts (§72.6). Each visitor's IP address reaches Google; self-hosting the catalogue is a later per-font change and needs no data change, because themes store keys. To limit layout shift when a heading font swaps in, each catalogue entry carries a fallback stack chosen to match its metrics.
+
+### 71.3 Page text
+
+A fixed registry in `services/page_copy.py` lists every editable string: key, default, page, maximum length and the placeholders it accepts (`{alliance_name}`, `{kingdom_name}`). Text only: it is length-capped, stripped of control characters, and rendered with `textContent`, never as HTML.
+
+| Key | Where | Default |
+|---|---|---|
+| `events.title` | Page heading, tab title | "Event Schedule" (tab: "Kingshot Event Schedule"). Stored in the existing `kingdoms.public_site_title`. |
+| `events.kicker_all` | Line above the heading, combined view | "Kingshot · All alliances" |
+| `events.kicker_alliance` | Same, one alliance | "Kingshot · {alliance_name}" |
+| `events.description` | Meta and link-preview description | "Upcoming events for {kingdom_name}." |
+| `events.hero_live`, `events.hero_next`, `events.hero_then` | Hero labels | "Live now", "Next up", "Then" |
+| `events.all_chip` | Filter chip | "All alliances" |
+| `events.footer` | Footer line | "Times shown in your time zone and UTC · Powered by Samaya" |
+| `feedback.title` | Feedback page heading and tab title | "Feedback & Requests" |
+| `feedback.intro` | Feedback page introduction | The current paragraph |
+| `feedback.back_link` | Link back to events | "← Back to Events" |
+
+**Resolution and languages.** Every registry key is also a key in the interface catalogue of §72, and Kingdom and theme values are stored per language: `kingdoms.page_copy` is `{key: {locale: text}}`, and a theme's `copy` has the same shape. For the visitor's language the order is: the active theme's value, the Kingdom's value, then the shipped catalogue text for that language (which falls back through language, the Kingdom default and `en`, §72.4). A custom value applies only to the language it was written for; a visitor in another language sees the shipped translation, not the custom text in a language they did not choose. The admin shows each language's inherited text as the placeholder and flags keys customised in one language but not another. A blank value means "inherit". The legacy `kingdoms.public_site_title` counts as the default language's value of `events.title` until the first save of that key in the new editor.
+
+**Delivery.** The server writes the resolved values into the HTML: the `<title>`, `<meta name="description">` and Open Graph tags at a marker in `<head>`, and a `<script type="application/json" id="page-copy">` block (with `<` escaped) that the page scripts read at start-up. Link previews in Discord, which as far as is known do not run JavaScript, therefore show the custom title and description. Both pages keep their default text in the markup, so a page still reads correctly if the block is missing.
+
+### 71.4 Images (Pillow) and banners
+
+Pillow is added now (decided 2026-10-02), not only for banners. One module, `services/images.py`, verifies and normalises every image the app stores, with a profile per use. The same processing then protects the Discord Scheduled Event covers and alliance icons, which today are stored exactly as uploaded (§33, §38.7) with only a regex check.
+
+**Shared rules.** Input is a base64 data URI in JSON, as today (no multipart dependency). Encoded size at most 8 MB (the existing ceiling). PNG, JPEG, WebP or GIF; SVG is refused, because opened directly in a browser it can run script on this origin. The decoder runs with a pixel limit (`Image.MAX_IMAGE_PIXELS` at 40 million), and a decompression bomb returns a 422 naming the image. EXIF orientation is applied, then all metadata is dropped (GPS location, camera data). An animated GIF becomes its first frame. Alpha is kept or flattened per profile. The work runs in the thread pool (`run_in_threadpool`), because the app has one worker and an image decode must not stall the delivery tick. Each failure is a 422 that names the field and the reason.
+
+| Profile | Used for | Output |
+|---|---|---|
+| `event_cover` | Discord Scheduled Event cover (`events.cover_image_data`) | Fit within 1600 by 800, never upscaled, flattened onto white, JPEG quality 85. The editor shows a guide for Discord's visible band: Discord's own guidance is 800 by 400 and community reports say only the central 800 by 320 shows, so keep text and faces there (widely reported, not official). |
+| `tenant_icon` | Alliance icon (`tenants.icon_image_data`) | Center-cropped to a square, at most 256 by 256, PNG with alpha. |
+| `theme_banner` | Theme hero banner (below) | Fit within 1600 wide, WebP quality 82. |
+
+**Behavior kept.** PATCH semantics are unchanged: omitted or null leaves the image alone, an empty string clears it. Processing runs only when a new image arrives, and the existing `parse_cover_image_data` stays as the cheap first check in the request models; the routers then call `services/images.py` and store its output. Re-processing an already processed image is stable. The Discord engine is untouched: it still sends the stored data URI, which is now smaller and in a format Discord's cover endpoint already accepts (JPEG), so fewer oversized-image rejections. Existing stored images are not rewritten automatically; `app/reprocess_images.py` (dry run by default, `--apply`, run in the container) re-encodes stored covers and icons and reports the bytes saved. This also shrinks the admin event list, which today returns each cover inline (CS.11).
+
+**Dependency.** `Pillow>=11` in `requirements.txt` (the first release with Python 3.13 wheels; the Docker base is `python:3.13-slim`, so the image needs no compiler). The wheels bundle libwebp. CI builds the image, which proves the install.
+
+**Banner storage.** Table `theme_assets`: `id`, `kingdom_id`, `sha256` (of the stored bytes), `content_type`, `width`, `height`, `byte_size`, `data` (bytea), `created_at`, unique on `(kingdom_id, sha256)`. In Postgres, so the nightly `pg_dump` covers it and no volume is added. `POST /admin/api/theme-assets` runs the `theme_banner` profile.
+
+**Banner serving.** `GET /theme-assets/{sha256}.webp`, public, `Cache-Control: public, max-age=31536000, immutable`, `X-Content-Type-Options: nosniff`. The hash makes the URL unguessable and cache-safe, and a replaced image gets a new URL. Cloudflare has no custom cache rules on this site (checked 2026-10-02), so it caches by its default list of file extensions; a `.webp` URL is on that list and `Cache-Control` is respected, which is what an immutable hashed URL wants.
+
+**Lifecycle.** Replacing or removing a theme's banner deletes the old asset in the same transaction when no other theme uses it. Deleting a theme does the same.
+
+**Rendering.** The hero keeps its reserved height, and its gradient and `background-color` sit beneath the image layer, so a missing or slow image shows the gradient with no layout shift (§63.3 rule, kept).
+
+### 71.5 Scheduling and resolution
+
+- **Base theme.** `kingdoms.default_theme_id` (nullable FK). Null means the shipped defaults. This replaces §64.2's "base season is a priority-10 row".
+- **Scheduled themes.** Table `scheduled_themes` as §64.2: `kingdom_id`, `theme_id` (FK, restrict on delete), `start_utc`, `end_utc`, `priority_level` 0 to 1000, `CHECK (start_utc < end_utc)`, index on `(kingdom_id, start_utc, end_utc)`. Convention: 50 week-long celebration, 100 global day. The admin offers the §64.1 windows (global day, build-up) as one-click date ranges.
+- **Resolution.** `services/themes.py::resolve_active_theme(kingdom, rows, now)` is pure with an injected clock: rows with `start_utc <= now < end_utc`, ordered by priority, then latest start, then id, all descending; the first wins; none falls back to the base theme, then to the defaults. Datetimes pass through `ensure_utc()`.
+- **Deleting** a theme that is the base theme or is scheduled returns a 409 naming where it is used.
+
+### 71.6 Delivery to the pages
+
+- `/events`, `/t/{slug}/events` and `/feedback` resolve the theme and copy per request (one small query, with a short in-process cache of the result; the app has one worker) and replace marker comments in the static HTML. This removes the hard-coded Google Fonts `<link>` from both pages.
+- Generated stylesheet: `GET /theme/{theme_id}.css?v={updated_at}.{STATIC_ASSET_VERSION}` (`/theme/default.css` when no theme is active). It contains only `:root { --variable: value; }` declarations from validated values, so there is nothing to escape beyond hex colors, catalogue font strings, a hash-based banner URL and two numbers. It is cached for a year because the URL changes whenever the theme or the code changes.
+- The HTML itself must not be cached at the edge for longer than a theme change should take to appear. Cloudflare does not cache `/events`, `/feedback` or `/api/kingdom-branding` today (checked 2026-10-02, §71.14); any future cache rule for them must bypass or vary (§72.3).
+- `GET /events?preview_theme={id}` renders that theme for a signed-in superadmin; for anyone else the parameter is ignored. Previews send `Cache-Control: no-store` and `X-Robots-Tag: noindex`. The admin editor shows the real page in an iframe from this URL, so the preview cannot drift from the page. No `X-Frame-Options` or CSP header was seen on these pages (§71.14), so the iframe is expected to work; confirm with a `GET` on the first build.
+
+### 71.7 Admin
+
+A new **Appearance** tab (superadmin only) with four panels:
+1. **Themes.** List with a swatch, fonts and an in-use marker. The editor has color pickers with live contrast ratios, font selects that load a family only when chosen and show sample text, a banner upload with a crop preview of the hero, the overlay slider, a copy-overrides section, "Start from a template", and the iframe preview. Save is disabled while any rule fails.
+2. **Schedule.** The base theme select and the scheduled windows table, with the §64.1 shortcuts and a warning when windows overlap at the same priority.
+3. **Page text.** The Kingdom's values for every registry key, a tab per enabled language (§72.7), the shipped text as the placeholder, and a link to preview the page.
+4. **Kingdom branding.** The existing Kingdom color and titles move here from the Setup modal; the modal keeps name and slug.
+
+**Permissions.** Superadmin only (decided 2026-10-02), matching Kingdom titles and colors today. The Appearance tab is hidden from everyone else and every endpoint uses `require_superadmin`. Opening it to Kingdom coordinators later is a permission change only. Every write goes through `services/audit.log_change` (asset rows log metadata, never bytes).
+
+### 71.8 API
+
+All under `/admin/api`, Kingdom-scoped by `kingdom_id`:
+- `GET/POST/PATCH/DELETE /themes`, `GET /theme-templates`, `GET /fonts` (the catalogue)
+- `POST /theme-assets`, `DELETE /theme-assets/{id}` (only when unreferenced)
+- `GET/POST/PATCH/DELETE /scheduled-themes`
+- `GET/PUT /page-copy` (Kingdom values)
+- `PATCH /kingdoms/{id}` gains `default_theme_id`
+
+Public, unauthenticated: `GET /theme/{id}.css`, `GET /theme-assets/{sha256}.webp`. Neither returns anything about an unscheduled theme beyond what its own stylesheet contains. `/api/kingdom-branding` keeps its current fields for the admin console and gains none.
+
+### 71.9 Schema change (revision `a1f0c0de0008`)
+
+Additive, after the language revision `a1f0c0de0007` of §72.13 (which creates `kingdoms.page_copy`). New tables `themes`, `theme_assets`, `scheduled_themes`; new column `kingdoms.default_theme_id` (nullable FK to `themes`, `ON DELETE RESTRICT`; created after `themes`). Named constraints so `db_errors.py` can translate them. The downgrade drops them. A code-only rollback is safe because nothing reads the new columns when the code is old. The migration needs the usual PG test under `SAMAYA_MIGRATION_TEST_PG`.
+
+### 71.10 Failure behavior
+
+| Case | Result |
+|---|---|
+| No themes, no copy set | Pages render exactly as today. |
+| Theme row fails validation at render (hand-edited data) | Log, use the shipped defaults. |
+| Font key not in the catalogue | Default font for that slot, warning logged. |
+| Banner asset missing or the image fails to load | The hero gradient, no layout shift. |
+| Copy value over its limit or unknown key | Rejected on save; ignored at render. |
+| Google Fonts unreachable | System fallback stack. |
+
+### 71.11 Tests
+
+Contrast rules (each accept and reject case, shared fixtures with the frontend), overlay worst-case math, theme CRUD, permissions (superadmin allowed; coordinator, owner and viewer refused), copy resolution order and escaping, HTML marker injection and the JSON block's escaping (`</script>` in a value), resolution with overlapping windows and equal priorities, 409 on deleting a used theme, image processing for every profile (§71.4: size, pixel bomb, animation to a still, wrong type, SVG, EXIF dropped and orientation applied, alpha flattened for covers, icon cropped square, banner width cap, re-processing is stable) and the PATCH semantics of covers and icons, i18n catalogue parity and locale choice (§72.5), asset serving headers, stylesheet content, preview parameter ignored for anonymous users, the §64.1 window functions, the 0007 migration upgrade and downgrade on Postgres.
+
+### 71.12 Build order
+
+Each step is deployable and leaves the site working. §72.14 holds the language steps; together:
+1. **Images.** `services/images.py` with Pillow, applied to event covers and alliance icons; `reprocess_images.py`. No theme code needed, and it shrinks what the admin and the Discord engine carry today.
+2. **Language foundation** (§72.14 step 1), English only.
+3. **Languages and page text** (§72.14 step 2, with §71.3's editor, server-side head and JSON injection, feedback page wiring).
+4. **Themes, fonts and schedule** (tables, editor, catalogue, generated stylesheet, base theme, scheduled windows, preview).
+5. **Banner images** (assets table, upload, serving, hero rendering).
+
+### 71.13 Out of scope
+
+Per-alliance themes (an alliance's color still tints the page while it is selected, §63.2), dark mode, free-form CSS, uploaded font files, per-visitor theme choice, animated or video banners, themes for the admin console, and self-hosted fonts (a later per-font change). Translated page text is in scope (§72); translated event content is not (§72.9).
+
+### 71.14 Decisions
+
+Decided 2026-10-02:
+1. **Who edits:** superadmin only.
+2. **Numerals font:** restricted to monospace and verified tabular families, so times stay aligned.
+3. **Base theme:** a selectable setting, `kingdoms.default_theme_id`, configured in the Schedule panel.
+4. **Font source:** Google Fonts.
+5. **Pillow:** added now and used for Discord event covers and alliance icons as well as banners (§71.4).
+6. **Languages:** the interface becomes multilingual soon; page text is stored per language (§72).
+
+Pre-deploy checks, made 2026-10-02 from `lxc-taraka` and from the owner's knowledge of the Cloudflare account:
+- **Caching.** `/events`, `/feedback` and `/api/kingdom-branding` return `cf-cache-status: DYNAMIC`; `/static/events.css` is cached (`max-age=14400`). The owner has configured no Cloudflare cache rules. HTML and JSON are therefore not cached at the edge, so a page-text or theme change shows on the next load. The new `/theme/*.css` and `/theme-assets/*.webp` URLs end in cacheable extensions and are cached by default, which their immutable hashed URLs want.
+- **Framing.** No `X-Frame-Options` and no `Content-Security-Policy` header came back for those URLs, so the same-origin preview iframe is expected to work. These were `HEAD` requests; the check is repeated with `GET` on the first preview build.
+
+## 72. Interface Languages
+
+**Status:** Designed 2026-10-02, not built. The first part (the foundation and the public pages) comes before the theme work of §71.
+
+**Problem.** The Kingshot community is international, and every label on the public pages is English text written into `events.html`, `events-public.js` and `feedback.html`. Leaders want the pages, and then the Discord commands and the admin console, in other languages, and soon. The text editing of §71.3 must not be designed for one language and migrated later.
+
+### 72.1 Scope
+
+1. **Public pages** (`/events`, `/t/{slug}/events`, `/feedback`): in the first release.
+2. **Admin console:** second, with the same mechanism (§72.10).
+3. **Discord slash command replies and command names** (§70): last, handled later (decided 2026-10-02). Until then Discord replies stay English. The `t()` catalogue is shared, so the `discord.*` keys are added when this phase starts, not before.
+
+Not translated: event names, descriptions and messages, message templates, alliance and Kingdom names. Leaders write those in whatever language they choose. Translating them is a separate feature (§72.9).
+
+### 72.2 Locales
+
+A locale is a BCP 47 tag (`en`, `tr`, `ko`, `es`, `pt-BR`, `de`, `fr`, `ru`, `ar`, `zh-Hans`). A shipped locale is a file in `app/i18n/<locale>.json`. Each file has a `_meta` object: `name` (the language in its own script), `dir` (`ltr` or `rtl`), `script`, and `reviewed` (a native speaker has confirmed the text). Matching is exact, then language only (`fr-CA` falls back to `fr`, `ar-EG` to `ar`), then the Kingdom default. The Kingdom has `default_locale` (default `en`) and `enabled_locales` (a list). Only enabled locales are offered or matched. Chinese is script-aware: `zh`, `zh-CN`, `zh-SG` and `zh-Hans` match `zh-Hans`, while `zh-TW`, `zh-HK` and `zh-Hant` do not match it (a Traditional-script reader should not silently get Simplified) and fall to the Kingdom default until a `zh-Hant` locale exists.
+
+**Launch languages (decided 2026-10-02).** English, Simplified Chinese, Modern Standard Arabic, French, Spanish, Turkish, Russian and German:
+
+| Tag | Native name | `dir` | Script | CLDR plural categories | Fallback font for the script |
+|---|---|---|---|---|---|
+| `en` | English | ltr | Latin | one, other | none (Noto Sans) |
+| `zh-Hans` | 简体中文 | ltr | Han | other | Noto Sans SC |
+| `ar` | العربية (Modern Standard Arabic) | rtl | Arabic | zero, one, two, few, many, other | Noto Sans Arabic |
+| `fr` | Français | ltr | Latin | one, many, other | none |
+| `es` | Español | ltr | Latin | one, many, other | none |
+| `tr` | Türkçe | ltr | Latin | one, other | none |
+| `ru` | Русский | ltr | Cyrillic | one, few, many, other | none (Noto Sans covers Cyrillic) |
+| `de` | Deutsch | ltr | Latin | one, other | none |
+
+`ar` text is written in Modern Standard Arabic, not a regional dialect, so one file serves every Arabic-speaking region. Of these, Arabic (right to left, six plural forms, a different script) and Chinese (a large glyph set, no plurals, no spaces between words) are the two that change code, not only text.
+
+### 72.3 Choosing the visitor's language
+
+In order: a valid `?lang=` parameter (so a shared link opens in a chosen language), the `samaya_lang` cookie (set by the language select; functional, holds only the tag, one year), the browser's `Accept-Language` best match among enabled locales, then the Kingdom default. A language select appears in the header only when more than one locale is enabled. The server sets `<html lang dir>`, the `<title>`, description and Open Graph tags, and `hreflang` alternates, so a link pasted into Discord previews in the language of the link. The HTML varies by `?lang`, cookie and `Accept-Language`; Cloudflare does not cache these pages today (checked 2026-10-02), and any future cache rule for them must vary on all three or bypass.
+
+### 72.4 Catalogue and runtime
+
+`app/i18n/en.json` is canonical. Keys are flat and grouped by prefix: `public.*`, `discord.*`, later `admin.*`. A value is a string, or an object of CLDR plural categories (`zero`, `one`, `two`, `few`, `many`, `other`) for counted text. Placeholders are `{name}`. Lookup for one key: the locale, its language, the Kingdom default, then `en`.
+
+- **Server:** `services/i18n.py` with `t(locale, key, **params)`, used by the page injection and by the Discord handlers, so one catalogue serves both. Plural categories on the server need CLDR rules, which Python does not ship; the options are the `Babel` library (a new dependency) or writing `discord.*` strings without counts. To decide when the Discord step starts.
+- **Browser:** the server merges the lookup chain for the page's keys and writes it into the HTML as `<script type="application/json" id="i18n">` (with `<` escaped), next to the page-text block of §71.3. A small `t(key, params)` reads it, using `Intl.PluralRules` for plurals. No separate fetch, so no flash of English. Elements carry `data-i18n` (text) and `data-i18n-attr` (for `aria-label`, `title`, `placeholder`), applied at start-up before first paint. The static markup keeps its English text, so the page reads correctly if the block is missing.
+- **Dates, numbers, durations:** `Intl` with the selected locale (today the page passes `undefined`, the browser's language). Relative times and durations that are hand-built English phrases now ("starts in 3h", "ends in 30 min", "2 days") move to `Intl.RelativeTimeFormat` and `Intl.NumberFormat` with `unit`, and lists to `Intl.ListFormat`. The 24-hour clock and the UTC column stay. In English a few phrases will read slightly differently ("in 3 hours" for "in 3h").
+- **Digits:** times and the countdown always use Western digits (`numberingSystem: latn`), in every locale, so the UTC column, the tabular alignment of §71.2 and screenshots agree.
+
+### 72.5 Extraction and checks
+
+Every user-visible literal in `events.html`, `events-public.js`, `feedback.html`, `feedback.js` and `services/discord_commands.py` moves into the catalogue (roughly 150 strings for the public pages, an estimate). Tests, in `tests/test_i18n.py` and the vitest suite:
+- every key used in code exists in `en.json`, and no `en.json` key is unused;
+- every locale file has no unknown keys, the same placeholders as `en` for each key, and only the plural categories its language uses;
+- a pseudo-locale, `en-XA`, generated from `en.json` (accented letters, about 40 percent longer, bracketed), is used in development and by a Playwright smoke test to expose hard-coded English and overflow. It is never shipped or enabled.
+
+### 72.6 Layout, scripts and fonts
+
+- **Right-to-left (required at launch, because `ar` is a launch language).** `dir` comes from the locale. `events.css` and `feedback.css` move from physical properties (`margin-left`, `left`, `text-align: left`) to logical ones (`margin-inline-start`, `inset-inline-start`, `text-align: start`), and the calendar grid, the hero's progress bar, chevrons and menus are checked in a mirrored layout (`ar` and the `en-XA` mirror variant). Icons and arrows that carry direction (back link, chevrons) mirror; clocks and the progress bar do not need to, but the bar fills from the inline start.
+- **Mixed-direction text.** Alliance names, event names and Kingdom names are written by leaders in any language and sit inside sentences. In HTML every interpolated name goes in a `<bdi>` element, and free text uses `dir="auto"`, so an English event name in an Arabic sentence (or the reverse) keeps its own punctuation and order. In Discord replies the same names are wrapped in Unicode isolates (U+2068 and U+2069) when the reply locale is right to left.
+- **Calendar week.** The first weekday follows the locale (`Intl.Locale.prototype.getWeekInfo` where the browser has it, otherwise Monday), because Arabic regions and the US start the week on different days than Europe. To check against the calendar code when the step is built.
+- **Length.** Labels must not clip at the longest languages (German and Russian run 30 to 40 percent longer than English). The `en-XA` smoke test at 360 px is the check.
+- **Fonts.** A theme's fonts must cover the visitor's script. Catalogue entries list their scripts (§71.2). For a locale whose script a chosen font lacks, the generated stylesheet appends the catalogue's fallback family for that script to that page's stack: `Noto Sans SC` for `zh-Hans` and `Noto Sans Arabic` for `ar`, loaded in script chunks (Google splits the Chinese set into many small slices), so only those visitors download them. A Latin-only heading face such as Cinzel renders Russian, Chinese and Arabic headings in the fallback font; the Languages panel warns about that for the base theme. Enabling a locale whose script the base theme's fonts do not cover shows a warning in the admin.
+
+### 72.7 Page text per language
+
+§71.3 stores and resolves page text per language as described there. In the admin each page-text field has a tab per enabled language, with the shipped text as the placeholder.
+
+### 72.8 Discord
+
+- **Replies.** The interaction payload carries the asker's `locale`, which uses Discord's own tags. A reply uses it if it maps to an enabled locale, then the payload's `guild_locale`, then the Kingdom default. Each asker therefore gets their own language. Event times are already localised by Discord's `<t:...>` tokens. Mapping: `en-US` and `en-GB` to `en`; `zh-CN` to `zh-Hans` (`zh-TW` has no match, as in §72.2); `es-ES` and `es-419` to `es`; `fr`, `de`, `tr` and `ru` to themselves.
+- **Arabic caveat.** To the author's knowledge Discord's client has no Arabic interface language, so the payload `locale` of an Arabic speaker is never `ar` (usually `en-US`), and Discord accepts `name_localizations` only for its own list of locales. Arabic would therefore not appear in command names or in replies chosen by the asker's locale. Two possible remedies, neither designed: a reply language set per Discord server (`discord_servers.locale`, used when the asker's locale does not map to an enabled locale), and an `ar` option on the commands. To verify against Discord's current locale list when the Discord step starts.
+- **Command names.** `app/register_discord_commands.py` sends `name_localizations` and `description_localizations` from the catalogue (`discord.cmd.*`) for each enabled locale. Discord restricts command names (lowercase, 1 to 32 characters, limited character classes), so a locale whose translated name fails the check keeps the English name; the registration dry run lists those.
+- **Feedback modal.** Title, field labels and the confirmation come from the catalogue.
+
+### 72.9 Not in the first release: translated content
+
+Leaders' own words are the other half of a multilingual Kingdom. Two possible designs, neither started: per-language text on an event (name, description, message), shown on the public page by the visitor's language; and a language on each Audience destination (§68), so a Discord message or Scheduled Event goes out in the language of that server. The second needs the language of the post to be chosen per destination, which touches the delivery engine's merge rule (§67), so it needs its own design.
+
+### 72.10 Admin console
+
+The same catalogue under `admin.*`. Each user gets a language (`users.locale`, in `/api/me` and settable on the Setup tab). Strings in `admin.html` and `js/*.js` are extracted the same way (several hundred, an estimate). Error text from the API (`detail` strings written in English in the routers) is not translated at first; localising it needs error codes, which is its own change.
+
+### 72.11 Admin settings
+
+In the Appearance tab (superadmin only), a **Languages** panel: one row per shipped locale with its native name, its `reviewed` flag and a script-coverage warning; checkboxes to enable; the default language. Enabling an unreviewed locale is allowed and the panel says so.
+
+### 72.12 Translation workflow
+
+The catalogue files are in the repository and change by pull request. First drafts may be machine-assisted (Claude can draft them) and stay `reviewed: false` until a native speaker from the community confirms them. CI enforces the parity checks of §72.5. If community translators need an in-app editor, database overrides on top of the files are a later addition and are not designed here.
+
+### 72.13 Schema (revision `a1f0c0de0007`)
+
+Additive: `kingdoms.default_locale` (text, not null, default `en`), `kingdoms.enabled_locales` (JSON text, default `["en"]`), `kingdoms.page_copy` (JSON text, nullable; shape in §71.3). Later, with the admin console, `users.locale`. The downgrade drops the columns. A code-only rollback is safe.
+
+### 72.14 Build order
+
+1. **Foundation, English only.** The catalogue and `t()`, extraction of the public pages, locale selection and `<html lang dir>`, the `i18n` JSON block, `Intl` formatting, `en-XA`, tests. Nothing changes for visitors except the small wording shifts of §72.4.
+2. **Languages and page text.** Revision 0007, the page-text editor with a tab per language, the Languages panel, the language select, the logical-CSS and bidi work (needed for `ar`), the launch translations (seven languages besides English, about 150 strings each, an estimate; public pages only). Languages are enabled one at a time as each is reviewed, so the step can ship with English and the first reviewed languages and add the rest without a deploy.
+3. Then §71's theme, font, schedule and banner steps (§71.12).
+4. **Admin console** translation (`admin.*` keys), next after the public pages.
+5. **Discord** localisation (§72.8), last: replies, `name_localizations`, and the Arabic remedy.
+
+### 72.15 Decisions
+
+Decided 2026-10-02: plan for multilingual UI soon; per-language page text from the start (not one language and a later migration); the launch languages are English, Simplified Chinese, Modern Standard Arabic, French, Spanish, Turkish, Russian and German (§72.2).
+
+Decided 2026-10-02: scope order is public pages, then admin pages, then Discord (§72.1). The Arabic-in-Discord question (below) waits for the Discord phase.
+
+Decided 2026-10-02, accepting the recommended defaults: (1) Claude drafts translations and community natives review them, with `reviewed` shown in the admin only, and Arabic and Chinese get a native read before they are enabled; (2) Western digits for times and counts in every language (§72.4); (3) `?lang=` plus cookie, no path prefix (§72.3); (4) the `Babel` library for server plural rules (§72.5).
+
+No open decisions remain. Build starts with §71.12 step 1 (images).
 
 # Archive
 
