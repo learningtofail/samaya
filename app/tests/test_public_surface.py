@@ -251,6 +251,21 @@ class TestIcsContent:
         assert "SUMMARY:Bear Hunt" in r.text and "DESCRIPTION:Bring bandages" in r.text
         assert "STATUS:TENTATIVE" in r.text
 
+    async def test_feed_header_has_no_nonstandard_properties(self, client, sf, tenant):
+        """CALNAME is not an iCalendar property; X-WR-CALNAME is the one calendar apps read."""
+        await _published(sf, tenant)
+        for path in PUBLIC_ICS:
+            lines = (await client.get(path)).text.splitlines()
+            assert not any(ln.startswith("CALNAME") for ln in lines)
+            assert any(ln.startswith("X-WR-CALNAME:") for ln in lines)
+
+    async def test_feeds_answer_head_for_subscription_probes(self, client, sf, tenant):
+        await _published(sf, tenant)
+        for path in PUBLIC_ICS:
+            r = await client.head(path)
+            assert r.status_code == 200
+            assert r.headers["content-type"].startswith("text/calendar")
+
     async def test_posted_is_confirmed_and_cancelled_is_cancelled(self, client, sf, tenant):
         event_id = await _published(sf, tenant)
         await _mark_posted(sf, event_id)

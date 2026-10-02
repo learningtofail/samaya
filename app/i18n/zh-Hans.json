@@ -48,7 +48,7 @@
  "public.events.calScopeOne": "订阅后只会添加 {alliance} 的活动。要订阅其他联盟，请先切换联盟。",
  "public.events.calGoogle": "Google Calendar",
  "public.events.calGoogleHint": "打开 Google Calendar 并订阅",
- "public.events.calApple": "Apple Calendar / Outlook 桌面版",
+ "public.events.calApple": "Apple Calendar",
  "public.events.calAppleHint": "使用你设备的默认日历应用",
  "public.events.calOutlook": "Outlook.com",
  "public.events.calOutlookHint": "打开网页版 Outlook 并订阅",
@@ -204,5 +204,8 @@
  "public.feedback.archivedCount": "{count} 项已完成或已拒绝，仅供查看",
  "public.feedback.optional": "选填",
  "public.feedback.reqTimingLabel": "建议时间",
- "public.feedback.contactHint": "联系方式仅用于跟进，绝不会公开显示。"
+ "public.feedback.contactHint": "联系方式仅用于跟进，绝不会公开显示。",
+ "public.events.calCopy": "复制订阅链接",
+ "public.events.calCopyHint": "粘贴到 Outlook 桌面版或任意应用的“通过网址订阅”中",
+ "public.events.calCopied": "链接已复制"
 }

@@ -47,7 +47,7 @@
  "public.events.calScopeOne": "Mit dem Abo erhältst du nur die Events von {alliance}. Wechsle die Allianz für einen anderen Feed.",
  "public.events.calGoogle": "Google Calendar",
  "public.events.calGoogleHint": "Öffnet Google Calendar und abonniert",
- "public.events.calApple": "Apple Calendar / Outlook (Desktop)",
+ "public.events.calApple": "Apple Calendar",
  "public.events.calAppleHint": "Nutzt die Standard-Kalender-App deines Geräts",
  "public.events.calOutlook": "Outlook.com",
  "public.events.calOutlookHint": "Öffnet Outlook im Web und abonniert",
@@ -207,5 +207,8 @@
  "public.feedback.archivedCount": "{count} erledigt oder abgelehnt, nur lesbar",
  "public.feedback.optional": "optional",
  "public.feedback.reqTimingLabel": "Vorgeschlagener Zeitpunkt",
- "public.feedback.contactHint": "Der Kontakt dient nur für Rückfragen. Er wird nie öffentlich angezeigt."
+ "public.feedback.contactHint": "Der Kontakt dient nur für Rückfragen. Er wird nie öffentlich angezeigt.",
+ "public.events.calCopy": "Feed-Link kopieren",
+ "public.events.calCopyHint": "In Outlook (Desktop) oder die Option „Per URL abonnieren“ einer beliebigen App einfügen",
+ "public.events.calCopied": "Link kopiert"
 }

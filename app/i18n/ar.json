@@ -48,7 +48,7 @@
  "public.events.calScopeOne": "الاشتراك يضيف فعاليات {alliance} فقط. بدّل التحالف للحصول على خلاصة مختلفة.",
  "public.events.calGoogle": "Google Calendar",
  "public.events.calGoogleHint": "يفتح Google Calendar ويشترك",
- "public.events.calApple": "Apple Calendar / Outlook للمكتب",
+ "public.events.calApple": "Apple Calendar",
  "public.events.calAppleHint": "يستخدم تطبيق التقويم الافتراضي في جهازك",
  "public.events.calOutlook": "Outlook.com",
  "public.events.calOutlookHint": "يفتح Outlook على الويب ويشترك",
@@ -224,5 +224,8 @@
  "public.feedback.archivedCount": "{count} منتهٍ أو مرفوض، للقراءة فقط",
  "public.feedback.optional": "اختياري",
  "public.feedback.reqTimingLabel": "التوقيت المقترح",
- "public.feedback.contactHint": "وسيلة التواصل للمتابعة فقط، ولا تظهر علنًا أبدًا."
+ "public.feedback.contactHint": "وسيلة التواصل للمتابعة فقط، ولا تظهر علنًا أبدًا.",
+ "public.events.calCopy": "نسخ رابط الخلاصة",
+ "public.events.calCopyHint": "الصقه في Outlook لسطح المكتب أو في خيار «الاشتراك عبر عنوان URL» في أي تطبيق",
+ "public.events.calCopied": "تم نسخ الرابط"
 }

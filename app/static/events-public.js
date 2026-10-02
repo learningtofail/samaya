@@ -62,12 +62,11 @@ function applyBrand(color) {
     page.style.removeProperty('--brand-ink');
   }
 }
-function currentBrandSlug() { return COMBINED_MODE ? (FILTER === 'all' ? '' : FILTER) : TENANT_SLUG; }
+function currentBrandSlug() { return TENANT_SLUG; }
 
 // ── State ───────────────────────────────────────────────────────
 let ALLIANCES = [];
 let EVENTS = [];          // grouped rows, each with _start/_end/_k
-let FILTER = 'all';
 let VIEW = localStorage.getItem('samaya_events_view') === 'calendar' ? 'calendar' : 'list';
 let SITE_TITLE = '';
 let CAL_YEAR = null, CAL_MONTH = null, SEL_DAY = null;
@@ -173,11 +172,6 @@ function evAlliances(ev) {
   if (!targets.length) return kingdom();
   return targets.map((x) => allianceInfo(x.tenant_slug, x.tenant_name));
 }
-function matchesFilter(ev) {
-  if (FILTER === 'all' || ev.scope === 'kingdom-wide') return true;
-  const slugs = ev.targets && ev.targets.length ? ev.targets.map((x) => x.tenant_slug) : [ev.tenant_slug];
-  return slugs.includes(FILTER);
-}
 
 // The combined API returns one row per (item, target alliance). Collapse them to one card per item.
 function groupCombinedFanoutRows(events) {
@@ -221,6 +215,21 @@ function buildDayMap(list, tz) {
   return map;
 }
 
+/**
+ * Subscribe links per provider (spec §73). Only the manual paths are documented by the vendors
+ * (Google "From URL", Apple "New Calendar Subscription", Outlook "Subscribe from web"), so every
+ * one-click link below has the copyable feed address next to it as the fallback.
+ * Google's `cid` link needs the webcal:// form; an https:// value there is rejected with
+ * "Unable to add calendar".
+ */
+function calendarLinks(icsAbsolute, icsWebcal, title) {
+  return {
+    google: `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(icsWebcal)}`,
+    apple: icsWebcal,
+    outlook: `https://outlook.live.com/calendar/0/addfromweb?url=${encodeURIComponent(icsAbsolute)}&name=${encodeURIComponent(title)}`,
+    download: icsAbsolute,
+  };
+}
 // Everything above this line is pure/DOM-independent; everything below
 // wires up real page elements and fetches. Under test, stop here and hand
 // the pure functions to the test file instead of running any of that
@@ -228,8 +237,8 @@ function buildDayMap(list, tz) {
 if (SAMAYA_TEST) {
   globalThis.__SAMAYA_TEST_EXPORTS__ = {
     escapeHtml, safeColor, inkOn, brandInk, pad2, parseIso, hm, dayKey, fmtDay, tzShort, cd, rel, formatDuration,
-    displayStatus, fallbackColor, allianceInfo, initials, crestHtml, evAlliances, matchesFilter,
-    groupCombinedFanoutRows, daySpan, buildDayMap,
+    displayStatus, fallbackColor, allianceInfo, initials, crestHtml, evAlliances,
+    groupCombinedFanoutRows, daySpan, buildDayMap, calendarLinks,
   };
   return;
 }
@@ -291,16 +300,27 @@ function buildCalMenu() {
     ? t(EVENTS_KEY + 'calScopeAll')
     : t(EVENTS_KEY + 'calScopeOne', { alliance: iso(TENANT_SLUG.toUpperCase()) });
   const title = COMBINED_MODE ? t(EVENTS_KEY + 'title') : t(EVENTS_KEY + 'docTitleAlliance', { alliance: TENANT_SLUG.toUpperCase(), title: t(EVENTS_KEY + 'title') });
-  const google = `https://calendar.google.com/calendar/render?cid=${encodeURIComponent(ICS_ABSOLUTE_URL)}`;
-  const outlook = `https://outlook.live.com/calendar/0/addfromweb?url=${encodeURIComponent(ICS_ABSOLUTE_URL)}&name=${encodeURIComponent(title)}`;
+  const links = calendarLinks(ICS_ABSOLUTE_URL, ICS_WEBCAL_URL, title);
   const item = (href, name, hint, external) =>
     `<a role="menuitem" href="${href}"${external ? ' target="_blank" rel="noopener"' : ''}>${escapeHtml(t(EVENTS_KEY + name))}<small>${escapeHtml(t(EVENTS_KEY + hint))}</small></a>`;
   $('calMenu').innerHTML = `<div class="menu-note">${escapeHtml(scope)}</div>
-    ${item(google, 'calGoogle', 'calGoogleHint', true)}
-    ${item(ICS_WEBCAL_URL, 'calApple', 'calAppleHint', false)}
-    ${item(outlook, 'calOutlook', 'calOutlookHint', true)}
-    ${item(ICS_ABSOLUTE_URL, 'calDownload', 'calDownloadHint', false)}`;
+    ${item(links.google, 'calGoogle', 'calGoogleHint', true)}
+    ${item(links.apple, 'calApple', 'calAppleHint', false)}
+    ${item(links.outlook, 'calOutlook', 'calOutlookHint', true)}
+    <button type="button" role="menuitem" class="menu__copy" id="calCopy">${escapeHtml(t(EVENTS_KEY + 'calCopy'))}<small>${escapeHtml(t(EVENTS_KEY + 'calCopyHint'))}</small></button>
+    ${item(links.download, 'calDownload', 'calDownloadHint', false)}`;
 }
+async function copyFeedLink() {
+  const btn = $('calCopy');
+  try {
+    await navigator.clipboard.writeText(ICS_ABSOLUTE_URL);
+    btn.firstChild.textContent = t(EVENTS_KEY + 'calCopied');
+  } catch (err) {
+    // Clipboard blocked (insecure context, permissions): show the address so it can be copied by hand.
+    btn.querySelector('small').textContent = ICS_ABSOLUTE_URL;
+  }
+}
+document.addEventListener('click', (e) => { if (e.target.closest('#calCopy')) copyFeedLink(); });
 function closeCalMenu() { $('calMenu').hidden = true; $('calMenuBtn').setAttribute('aria-expanded', 'false'); }
 $('calMenuBtn').addEventListener('click', (e) => {
   e.stopPropagation();
@@ -326,22 +346,10 @@ function renderChips() {
     const cc = safeColor(a.color, KINGDOM_COLOR);
     const style = `data-vars="--c:${cc};--ink-on:${inkOn(cc)}"`;
     const href = a.slug === 'all' ? '/events' : `/t/${encodeURIComponent(a.slug)}/events`;
-    if (COMBINED_MODE) {
-      return `<a class="chip" ${style} href="${href}" data-filter="${escapeHtml(a.slug)}"${FILTER === a.slug ? ' aria-current="true"' : ''}>${crest}${bdi(a.name)}</a>`;
-    }
-    const current = a.slug === TENANT_SLUG;
+    const current = a.slug === (COMBINED_MODE ? 'all' : TENANT_SLUG);
     return `<a class="chip" ${style} href="${href}"${current ? ' aria-current="page"' : ''}>${crest}${bdi(a.name)}</a>`;
   }).join('');
 }
-$('allianceChips').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-filter]');
-  if (!b) return;
-  // Modified clicks (new tab, copy link) keep the real alliance URL.
-  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button > 0) return;
-  e.preventDefault();
-  FILTER = b.dataset.filter;
-  renderAll();
-});
 function renderKey() {
   const items = Object.keys(KIND_COLORS).map((k) => ({ color: KIND_COLORS[k], text: kindText(k), desc: t(`${EVENTS_KEY}kind.${k}Desc`) }))
     .concat(Object.keys(STATUS_COLORS).map((k) => ({ color: STATUS_COLORS[k], text: statusText(k), desc: t(`${EVENTS_KEY}status.${k}Desc`) })));
@@ -359,7 +367,7 @@ $('keyBtn').addEventListener('click', () => {
 // ── Hero ────────────────────────────────────────────────────────
 function renderHero() {
   const now = Date.now(), tz = getDisplayTz();
-  const list = EVENTS.filter(matchesFilter).filter((e) => {
+  const list = EVENTS.filter((e) => {
     const s = displayStatus(e, now);
     return s !== 'cancelled' && s !== 'failed' && s !== 'completed' && e._end > now;
   }).sort((a, b) => a._start - b._start);
@@ -456,7 +464,7 @@ function dayHeader(k, tz, now) {
 }
 function renderSchedule() {
   const now = Date.now(), tz = getDisplayTz();
-  const map = buildDayMap(EVENTS.filter(matchesFilter), tz);
+  const map = buildDayMap(EVENTS, tz);
   let keys = [...map.keys()].sort();
   if (VIEW === 'calendar') keys = keys.filter((k) => k === SEL_DAY);
   if (!keys.length) {
@@ -498,7 +506,7 @@ function renderCalendar() {
   // The arrows point the way the page reads: previous is toward the start of the line.
   $('calPrevBtn').textContent = I18N.dir === 'rtl' ? `▶ ${prevName}` : `◀ ${prevName}`;
   $('calNextBtn').textContent = I18N.dir === 'rtl' ? `${nextName} ◀` : `${nextName} ▶`;
-  const map = buildDayMap(EVENTS.filter(matchesFilter), tz);
+  const map = buildDayMap(EVENTS, tz);
   const firstDay = I18N.firstWeekday();
   const lead = (new Date(Date.UTC(CAL_YEAR, CAL_MONTH, 1)).getUTCDay() + 7 - (firstDay % 7)) % 7;
   const dim = new Date(Date.UTC(CAL_YEAR, CAL_MONTH + 1, 0)).getUTCDate();

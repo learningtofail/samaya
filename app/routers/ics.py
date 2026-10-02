@@ -34,7 +34,6 @@ def _build_calendar(rows, calname: str, uid_prefix: str = "") -> bytes:
     cal = Calendar()
     cal.add("version",  "2.0")
     cal.add("prodid",   "-//Samaya//taraka.dev//EN")
-    cal.add("calname",  calname)
     cal.add("x-wr-calname", calname)
     cal.add("refresh-interval;value=duration", "PT1H")
     cal.add("x-published-ttl", "PT1H")
@@ -75,7 +74,7 @@ def _calendar_rows(rows: list[PublicRow]) -> list[PublicRow]:
     return [r for r in rows if r.has_calendar_entry]
 
 
-@router.get("/t/{tenant_slug}/ics/events.ics")
+@router.api_route("/t/{tenant_slug}/ics/events.ics", methods=["GET", "HEAD"])
 async def ics_feed(tenant_slug: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Tenant).where(Tenant.slug == tenant_slug))
     tenant = result.scalar_one_or_none()
@@ -96,7 +95,7 @@ async def ics_feed(tenant_slug: str, db: AsyncSession = Depends(get_db)):
     )
 
 
-@router.get("/ics/events.ics")
+@router.api_route("/ics/events.ics", methods=["GET", "HEAD"])
 async def ics_feed_all(db: AsyncSession = Depends(get_db)):
     """The combined feed: every alliance's public events in one calendar."""
     today = date.today()

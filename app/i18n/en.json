@@ -47,7 +47,7 @@
  "public.events.calScopeOne": "Subscribing adds only {alliance}’s events. Switch alliances for a different feed.",
  "public.events.calGoogle": "Google Calendar",
  "public.events.calGoogleHint": "Opens Google Calendar and subscribes",
- "public.events.calApple": "Apple Calendar / Outlook desktop",
+ "public.events.calApple": "Apple Calendar",
  "public.events.calAppleHint": "Uses your device’s default calendar app",
  "public.events.calOutlook": "Outlook.com",
  "public.events.calOutlookHint": "Opens Outlook on the web and subscribes",
@@ -207,5 +207,8 @@
  "public.feedback.archivedCount": "{count} finished or declined, read-only",
  "public.feedback.optional": "optional",
  "public.feedback.reqTimingLabel": "Proposed timing",
- "public.feedback.contactHint": "Contact is for follow-up only. It is never shown publicly."
+ "public.feedback.contactHint": "Contact is for follow-up only. It is never shown publicly.",
+ "public.events.calCopy": "Copy feed link",
+ "public.events.calCopyHint": "Paste into Outlook desktop or any app’s “subscribe by URL”",
+ "public.events.calCopied": "Link copied"
 }

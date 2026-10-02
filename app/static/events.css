@@ -78,9 +78,9 @@ h1 { margin: 0; font-family: var(--font-heading); font-weight: 700; font-size: 2
 /* Add-to-calendar menu */
 .menu { position: absolute; inset-inline-end: 0; top: 42px; z-index: 30; width: 310px; max-width: calc(100vw - 40px); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 40px rgba(20, 30, 60, .18); overflow: hidden; }
 .menu-note { padding: 10px 14px; font-size: 14px; color: var(--muted); border-bottom: 1px solid var(--line); }
-.menu a { display: block; padding: 10px 14px; color: var(--ink); text-decoration: none; }
-.menu a:hover, .menu a:focus-visible { background: var(--tint); }
-.menu a small { display: block; font-size: 14px; color: var(--muted); }
+.menu a, .menu__copy { display: block; width: 100%; padding: 10px 14px; color: var(--ink); text-decoration: none; text-align: start; background: none; border: 0; font: inherit; cursor: pointer; }
+.menu a:hover, .menu a:focus-visible, .menu__copy:hover, .menu__copy:focus-visible { background: var(--tint); }
+.menu a small, .menu__copy small { display: block; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
 
 /* Page */
 .page { --brand: var(--navy); --brand-ink: #fff; max-width: 1080px; margin: 0 auto; padding: 0 20px; }

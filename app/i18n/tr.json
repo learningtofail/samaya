@@ -47,7 +47,7 @@
  "public.events.calScopeOne": "Abone olunca yalnızca şu ittifakın etkinlikleri eklenir: {alliance}. Başka bir akış için ittifakı değiştir.",
  "public.events.calGoogle": "Google Calendar",
  "public.events.calGoogleHint": "Google Calendar’ı açar ve abone olur",
- "public.events.calApple": "Apple Calendar / Outlook masaüstü",
+ "public.events.calApple": "Apple Calendar",
  "public.events.calAppleHint": "Cihazındaki varsayılan takvim uygulamasını kullanır",
  "public.events.calOutlook": "Outlook.com",
  "public.events.calOutlookHint": "Web’deki Outlook’u açar ve abone olur",
@@ -207,5 +207,8 @@
  "public.feedback.archivedCount": "{count} tamamlanan veya reddedilen, salt okunur",
  "public.feedback.optional": "isteğe bağlı",
  "public.feedback.reqTimingLabel": "Önerilen zamanlama",
- "public.feedback.contactHint": "İletişim bilgisi yalnızca geri dönüş içindir. Asla herkese açık gösterilmez."
+ "public.feedback.contactHint": "İletişim bilgisi yalnızca geri dönüş içindir. Asla herkese açık gösterilmez.",
+ "public.events.calCopy": "Akış bağlantısını kopyala",
+ "public.events.calCopyHint": "Outlook masaüstüne veya herhangi bir uygulamanın “URL ile abone ol” seçeneğine yapıştırın",
+ "public.events.calCopied": "Bağlantı kopyalandı"
 }

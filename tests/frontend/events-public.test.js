@@ -205,21 +205,34 @@ describe("evAlliances", () => {
   });
 });
 
-describe("matchesFilter", () => {
-  // matchesFilter reads the module-scoped FILTER variable indirectly
-  // (it's not a parameter), so these only exercise the branch that
-  // doesn't depend on FILTER's current value — a kingdom-wide item always
-  // matches regardless of which alliance filter chip is active.
-  test("a kingdom-wide event always matches, regardless of the active filter", () => {
-    expect(fns.matchesFilter({ scope: "kingdom-wide" })).toBe(true);
-  });
-});
-
 // Shared with app/tests/test_contrast.py: the backend's pick_ink() and the
 // page's brandInk() must agree on every color in this table (spec §63.1).
 describe("brandInk matches the backend", () => {
   const fixtures = JSON.parse(readFileSync(new URL("./ink-fixtures.json", import.meta.url), "utf8"));
   test.each(fixtures)("%s -> %s", (hex, ink) => {
     expect(fns.brandInk(hex).toLowerCase()).toBe(ink.toLowerCase());
+  });
+});
+
+describe("calendarLinks (vendor subscribe URL formats)", () => {
+  const abs = "https://ks138.taraka.dev/t/mod/ics/events.ics";
+  const web = "webcal://ks138.taraka.dev/t/mod/ics/events.ics";
+  let links;
+  beforeAll(() => { links = fns.calendarLinks(abs, web, "Events & More"); });
+
+  test("Google gets the webcal:// form inside cid; https:// there is rejected by Google", () => {
+    expect(links.google).toBe("https://calendar.google.com/calendar/r?cid=webcal%3A%2F%2Fks138.taraka.dev%2Ft%2Fmod%2Fics%2Fevents.ics");
+  });
+  test("Apple opens the bare webcal:// address", () => {
+    expect(links.apple).toBe(web);
+  });
+  test("Outlook.com takes the https feed and an encoded calendar name", () => {
+    const u = new URL(links.outlook);
+    expect(u.origin + u.pathname).toBe("https://outlook.live.com/calendar/0/addfromweb");
+    expect(u.searchParams.get("url")).toBe(abs);
+    expect(u.searchParams.get("name")).toBe("Events & More");
+  });
+  test("download is the plain https feed", () => {
+    expect(links.download).toBe(abs);
   });
 });
