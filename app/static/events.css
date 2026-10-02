@@ -121,7 +121,7 @@ h1 { margin: 0; font-family: var(--font-heading); font-weight: 700; font-size: 2
   border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--muted); font-weight: 500; font-size: 13.5px; text-decoration: none;
 }
 .chip:hover { background: var(--tint); }
-.chip[aria-pressed="true"], .chip[aria-current="page"] { background: var(--c); border-color: var(--c); color: var(--ink-on, #fff); font-weight: 600; }
+.chip[aria-current="true"], .chip[aria-current="page"] { background: var(--c); border-color: var(--c); color: var(--ink-on, #fff); font-weight: 600; }
 .seg { display: flex; border: 1px solid var(--line-strong); border-radius: 7px; overflow: hidden; background: var(--surface); }
 .seg button { min-height: 32px; padding: 0 14px; border: 0; background: transparent; font-weight: 500; font-size: 13.5px; }
 .seg button[aria-pressed="true"] { background: var(--brand); color: var(--brand-ink); }
@@ -272,6 +272,8 @@ body::before {
 }
 @keyframes art-in { from { opacity: 0; } to { opacity: 1; } }
 .hdr, .page { position: relative; z-index: 1; }
+/* The header holds the open Add-to-calendar menu, so it must stack above the page content that follows it. */
+.hdr { z-index: 2; }
 .brand-text { background: var(--plate-bg, transparent); padding: var(--plate-pad, 0); border-radius: 10px; }
 @media (max-width: 640px) {
   body::before { background-image: var(--page-art-mobile, var(--page-art, none)); height: min(var(--art-h), 240px); }
