@@ -1924,7 +1924,7 @@ The Setup tab no longer has an "Alliances and audiences" panel. Which alliances 
 
 ## 71. Public Page Theming, Page Text and Fonts
 
-**Status:** Designed 2026-10-02, not built. Supersedes §63.3 (theme presets in CSS) and §64.2 to §64.5 (scheduled theme storage and admin). §64.1 (global-day windows) and §63.1, §63.2 (colors, brand variables; built) stand.
+**Status:** Designed 2026-10-02. Built so far: §71.4 images for event covers and alliance icons (`services/images.py`, `reprocess_images.py`, Pillow); the banner profile exists but `theme_assets` and the rest are not built. Supersedes §63.3 (theme presets in CSS) and §64.2 to §64.5 (scheduled theme storage and admin). §64.1 (global-day windows) and §63.1, §63.2 (colors, brand variables; built) stand.
 
 **Problem.** The Kingdom wants to change how the public pages look for a season or a festival, and what their headers and titles say, without a deploy. A superadmin should create and edit themes in the admin console, including a banner image and fonts, and schedule them by date. Today the palettes live in `events.css`, the titles are one Kingdom field, and the fonts are fixed.
 

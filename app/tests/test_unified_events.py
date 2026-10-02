@@ -251,10 +251,11 @@ class TestUpdateAndDelete:
         assert (await client.patch(f"{BASE}/events/{e['id']}", json={"active": False})).json()["active"] is False
 
     async def test_patch_cover_image_empty_string_clears_and_null_keeps(self, client):
-        png = "data:image/png;base64,iVBORw0KGgo="
-        _, e = await self._event(client, cover_image_data=png)
-        assert e["cover_image_data"] == png
-        assert (await client.patch(f"{BASE}/events/{e['id']}", json={"cover_image_data": None})).json()["cover_image_data"] == png
+        from tests.test_admin_consolidation import TINY_PNG_DATA_URI
+        _, e = await self._event(client, cover_image_data=TINY_PNG_DATA_URI)
+        stored = e["cover_image_data"]
+        assert stored.startswith("data:image/jpeg;base64,")
+        assert (await client.patch(f"{BASE}/events/{e['id']}", json={"cover_image_data": None})).json()["cover_image_data"] == stored
         assert (await client.patch(f"{BASE}/events/{e['id']}", json={"cover_image_data": ""})).json()["cover_image_data"] is None
 
     async def test_patch_unknown_event_404(self, client):

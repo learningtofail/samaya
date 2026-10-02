@@ -23,6 +23,7 @@ from services.destinations import alliance_overrides, plan_destinations
 from services.event_engine import (
     apply_event_change, event_overview, remove_event_from_discord, sync_event_occurrences,
 )
+from services.images import EVENT_COVER, process_data_uri_async
 from services.validators import check_recurrence_shape
 
 from .deps import (
@@ -414,7 +415,9 @@ async def apply_event_patch(
     if "duration_hours" in given:
         event.duration_hours = payload.duration_hours
     if "cover_image_data" in given and payload.cover_image_data is not None:
-        event.cover_image_data = payload.cover_image_data or None
+        event.cover_image_data = (
+            await process_data_uri_async(payload.cover_image_data, EVENT_COVER, "Cover image")
+            if payload.cover_image_data else None)
 
     if "recurrence_kind" in given and payload.recurrence_kind is not None:
         event.recurrence_kind = payload.recurrence_kind
@@ -549,6 +552,9 @@ async def create_event(
 
     etype = await _get_type_in_kingdom(db, payload.type_id, tenant.kingdom_id)
     given = payload.model_fields_set
+    cover_image_data = (
+        await process_data_uri_async(payload.cover_image_data, EVENT_COVER, "Cover image")
+        if payload.cover_image_data else None)
 
     duration = payload.duration_hours if "duration_hours" in given else (
         float(etype.default_duration_hours) if etype.default_duration_hours is not None else None
@@ -595,7 +601,7 @@ async def create_event(
         until_date=until,
         mention_role=mention_role,
         active=True,
-        cover_image_data=payload.cover_image_data or None,
+        cover_image_data=cover_image_data,
     )
     event.alliances = await _resolve_alliance_rows(db, user, tenant, payload.scope, payload.alliances)
     event.reminders = _reminder_rows(reminder_minutes)
