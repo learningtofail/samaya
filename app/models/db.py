@@ -671,6 +671,8 @@ class ThemeAsset(Base):
     content    = Column(LargeBinary, nullable=False)
     width      = Column(Integer, nullable=False)
     height     = Column(Integer, nullable=False)
+    # Where the image came from and its license (spec §71.15); required on upload.
+    credit     = Column(Text, nullable=False, default="", server_default="")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -696,6 +698,14 @@ class Theme(Base):
     font_numerals   = Column(Text, nullable=True)
     banner_asset_id = Column(Integer, ForeignKey("theme_assets.id", ondelete="RESTRICT"), nullable=True)
     banner_overlay  = Column(Numeric(3, 2), nullable=False, default=0.96, server_default=text("0.96"))
+    # Spec §71.15: header art, the wash color over the hero banner (banner_overlay is its
+    # strength), a hover tint, corner radius and art band height. NULL means the shipped value.
+    header_asset_id        = Column(Integer, ForeignKey("theme_assets.id", ondelete="RESTRICT", name="fk_theme_header_asset"), nullable=True)
+    header_mobile_asset_id = Column(Integer, ForeignKey("theme_assets.id", ondelete="RESTRICT", name="fk_theme_header_mobile_asset"), nullable=True)
+    hero_wash       = Column(Text, nullable=False, default="#FFFFFF", server_default="#FFFFFF")
+    tint            = Column(Text, nullable=True)
+    radius          = Column(Integer, nullable=True)
+    art_height      = Column(Integer, nullable=True)
     copy            = Column(JSON, nullable=True)
     archived        = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     created_at      = Column(DateTime(timezone=True), server_default=func.now())
@@ -704,6 +714,8 @@ class Theme(Base):
     __table_args__ = (
         UniqueConstraint("kingdom_id", "name", name="uq_theme_name"),
         CheckConstraint("banner_overlay >= 0.90 AND banner_overlay <= 1.00", name="ck_theme_overlay"),
+        CheckConstraint("radius IS NULL OR (radius >= 4 AND radius <= 14)", name="ck_theme_radius"),
+        CheckConstraint("art_height IS NULL OR (art_height >= 240 AND art_height <= 360)", name="ck_theme_art_height"),
     )
 
 

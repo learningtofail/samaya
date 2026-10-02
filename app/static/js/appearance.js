@@ -3,8 +3,11 @@
 // The contrast rules live on the server (services/theme_rules.py); this file
 // only shows the ratios live. The server refuses a failing theme regardless.
 
-const APPEARANCE = { kingdom: null, themes: [], windows: [], fonts: [], templates: [], rules: null };
+const APPEARANCE = { kingdom: null, themes: [], windows: [], assets: [], fonts: [], templates: [], rules: null };
 const WHITE_HEX = '#FFFFFF';
+const ART_SLOTS = ['header', 'header_mobile', 'banner'];
+const ART_FIELDS = { header: 'header_asset_id', header_mobile: 'header_mobile_asset_id', banner: 'banner_asset_id' };
+const ART = { header: null, header_mobile: null, banner: null }; // the images chosen in the open editor
 
 function hexLuminance(hex) {
   const n = parseInt(hex.slice(1), 16);
@@ -15,23 +18,30 @@ function hexContrast(a, b) {
   const la = hexLuminance(a), lb = hexLuminance(b);
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
-function overlayWorstCase(overlay) {
-  const v = Math.round(255 * overlay).toString(16).toUpperCase().padStart(2, '0');
-  return '#' + v + v + v;
+function overlayWorstCase(overlay, wash) {
+  const n = parseInt((wash || WHITE_HEX).slice(1), 16);
+  const ch = [n >> 16, (n >> 8) & 255, n & 255].map((c) => Math.round(c * overlay).toString(16).toUpperCase().padStart(2, '0'));
+  return '#' + ch.join('');
 }
 
 // Each rule: label, colors compared, minimum. Mirrors contrast_failures().
-function contrastChecks(values, rules) {
-  const hero = overlayWorstCase(values.overlay);
-  return [
-    ['Page background and body text', values.bg, rules.ink, rules.ink_min],
-    ['Page background and secondary text', values.bg, rules.muted, rules.muted_min],
-    ['Accent text on white', values.accentText, WHITE_HEX, rules.text_min],
-    ['Accent text on the background', values.accentText, values.bg, rules.text_min],
-    ['White text on primary buttons', values.primary, WHITE_HEX, rules.text_min],
+function contrastChecks(v, rules) {
+  const hero = overlayWorstCase(v.overlay, v.heroWash);
+  const checks = [
+    ['Page background and body text', v.bg, rules.ink, rules.ink_min],
+    ['Page background and secondary text', v.bg, rules.muted, rules.muted_min],
+    ['Accent text on white', v.accentText, WHITE_HEX, rules.text_min],
+    ['Accent text on the background', v.accentText, v.bg, rules.text_min],
+    ['Accent text on table bands', v.accentText, rules.surface_2, rules.text_min],
+    ['White text on primary buttons', v.primary, WHITE_HEX, rules.text_min],
     ['Body text over a black banner', hero, rules.ink, rules.ink_min],
     ['Secondary text over a black banner', hero, rules.muted, rules.muted_min],
-  ].map(([label, a, b, min]) => ({ label, ratio: hexContrast(a, b), min }));
+    ['Accent text over a black banner', v.accentText, hero, rules.text_min],
+  ];
+  if (v.tint) {
+    checks.push(['Hover tint and body text', v.tint, rules.ink, rules.ink_min], ['Hover tint and secondary text', v.tint, rules.muted, rules.muted_min]);
+  }
+  return checks.map(([label, a, b, min]) => ({ label, ratio: hexContrast(a, b), min }));
 }
 
 function themeFormValues() {
@@ -41,6 +51,10 @@ function themeFormValues() {
     accentText: byId('thAccentText').value.toUpperCase(),
     primary: byId('thPrimary').value.toUpperCase(),
     overlay: parseFloat(byId('thOverlay').value),
+    heroWash: byId('thHeroWash').value.toUpperCase(),
+    tint: byId('thTintDefault').checked ? null : byId('thTint').value.toUpperCase(),
+    radius: byId('thRadiusDefault').checked ? null : parseInt(byId('thRadius').value, 10),
+    artHeight: byId('thArtHeightDefault').checked ? null : parseInt(byId('thArtHeight').value, 10),
   };
 }
 
@@ -53,6 +67,11 @@ function renderThemeContrast() {
   }).join('');
   byId('btnSaveTheme').disabled = checks.some((c) => c.ratio < c.min);
   byId('thOverlayOut').textContent = v.overlay.toFixed(2);
+  byId('thRadiusOut').textContent = v.radius === null ? '(shipped)' : v.radius + ' px';
+  byId('thArtHeightOut').textContent = v.artHeight === null ? '(shipped)' : v.artHeight + ' px';
+  byId('thTint').disabled = byId('thTintDefault').checked;
+  byId('thRadius').disabled = byId('thRadiusDefault').checked;
+  byId('thArtHeight').disabled = byId('thArtHeightDefault').checked;
   const s = byId('thSample');
   s.style.setProperty('--sample-bg', v.bg);
   s.style.setProperty('--sample-accent', v.accent);
@@ -74,6 +93,14 @@ function setThemeForm(t) {
   byId('thAccentText').value = t.accent_text;
   byId('thPrimary').value = t.primary;
   byId('thOverlay').value = String(t.banner_overlay);
+  byId('thHeroWash').value = t.hero_wash || WHITE_HEX;
+  byId('thTintDefault').checked = !t.tint;
+  byId('thTint').value = t.tint || APPEARANCE.rules.default_tint;
+  byId('thRadiusDefault').checked = t.radius == null;
+  byId('thRadius').value = String(t.radius == null ? 10 : t.radius);
+  byId('thArtHeightDefault').checked = t.art_height == null;
+  byId('thArtHeight').value = String(t.art_height == null ? 300 : t.art_height);
+  ART_SLOTS.forEach((slot) => setArtSlot(slot, t[ART_FIELDS[slot]] ? APPEARANCE.assets.find((a) => a.id === t[ART_FIELDS[slot]]) : null));
   byId('thFontHeading').innerHTML = fontOptions('heading', t.font_heading);
   byId('thFontBody').innerHTML = fontOptions('body', t.font_body);
   byId('thFontNumerals').innerHTML = fontOptions('numerals', t.font_numerals);
@@ -118,7 +145,44 @@ byId('thTemplate').addEventListener('change', (e) => {
   if (!byId('thName').value.trim()) byId('thName').value = tpl.name;
   renderThemeContrast();
 });
-['thBg', 'thAccent', 'thAccentText', 'thPrimary', 'thOverlay'].forEach((id) => byId(id).addEventListener('input', renderThemeContrast));
+['thBg', 'thAccent', 'thAccentText', 'thPrimary', 'thOverlay', 'thHeroWash', 'thTint', 'thRadius', 'thArtHeight', 'thTintDefault', 'thRadiusDefault', 'thArtHeightDefault']
+  .forEach((id) => byId(id).addEventListener('input', renderThemeContrast));
+
+function setArtSlot(slot, asset) {
+  ART[slot] = asset ? { id: asset.id, url: asset.url } : null;
+  const thumb = byId('artThumb-' + slot);
+  thumb.classList.toggle('hidden', !asset);
+  if (asset) thumb.src = asset.url; else thumb.removeAttribute('src');
+  byId('artClear-' + slot).classList.toggle('hidden', !asset);
+  byId('artCredit-' + slot).value = asset ? asset.credit : '';
+  byId('artFile-' + slot).value = '';
+}
+
+function readAsDataUri(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('Could not read the file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+ART_SLOTS.forEach((slot) => {
+  byId('artFile-' + slot).addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const credit = byId('artCredit-' + slot).value.trim();
+    if (credit.length < 3) { toast('Enter the source and license first', true); e.target.value = ''; return; }
+    try {
+      const asset = await api('POST', '/api/theme-assets', {
+        kingdom_id: APPEARANCE.kingdom.id, slot, image_data: await readAsDataUri(file), credit }, true);
+      APPEARANCE.assets = APPEARANCE.assets.filter((a) => a.id !== asset.id).concat(asset);
+      setArtSlot(slot, asset);
+      toast('Image uploaded. Save the theme to use it.');
+    } catch (err) { toast(err.message, true); e.target.value = ''; }
+  });
+  byId('artClear-' + slot).addEventListener('click', () => setArtSlot(slot, null));
+});
 
 async function saveTheme() {
   const v = themeFormValues();
@@ -127,6 +191,9 @@ async function saveTheme() {
     name: byId('thName').value.trim(), bg: v.bg, accent: v.accent, accent_text: v.accentText, primary: v.primary,
     font_heading: byId('thFontHeading').value || null, font_body: byId('thFontBody').value || null,
     font_numerals: byId('thFontNumerals').value || null, banner_overlay: v.overlay,
+    hero_wash: v.heroWash, tint: v.tint, radius: v.radius, art_height: v.artHeight,
+    banner_asset_id: ART.banner ? ART.banner.id : null, header_asset_id: ART.header ? ART.header.id : null,
+    header_mobile_asset_id: ART.header_mobile ? ART.header_mobile.id : null,
   };
   if (!payload.name) { toast('Name is required', true); return; }
   try {
@@ -283,6 +350,7 @@ async function loadAppearance() {
     const id = APPEARANCE.kingdom.id;
     [APPEARANCE.themes, APPEARANCE.windows] = await Promise.all([
       api('GET', `/api/themes?kingdom_id=${id}`, null, true), api('GET', `/api/scheduled-themes?kingdom_id=${id}`, null, true)]);
+    APPEARANCE.assets = await api('GET', `/api/theme-assets?kingdom_id=${id}`, null, true);
     byId('themesBody').innerHTML = APPEARANCE.themes.length ? APPEARANCE.themes.map(buildThemeRow).join('') : emptyRow(5, 'No themes yet. The public page uses the shipped look.');
     byId('windowsBody').innerHTML = APPEARANCE.windows.length ? APPEARANCE.windows.map(buildWindowRow).join('') : emptyRow(5, 'Nothing scheduled.');
     paintSwatches(byId('themesBody'));

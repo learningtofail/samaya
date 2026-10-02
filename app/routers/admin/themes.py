@@ -4,19 +4,23 @@ Themes are validated data: colors are hex, fonts are catalogue keys, and the
 contrast rules of services/theme_rules.py run on every save. Banner images and
 text overrides arrive in later build steps.
 """
+import base64
+import hashlib
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_db
-from models.db import Kingdom, ScheduledTheme, Theme, User
+from models.db import Kingdom, ScheduledTheme, Theme, ThemeAsset, User
 from services.audit import log_change
 from services.db_errors import raise_friendly_integrity_error
 from services.fonts import catalogue_json
+from services.images import THEME_BANNER, THEME_HEADER, THEME_HEADER_MOBILE, process_data_uri_async
+from services.themes import asset_url
 from services import theme_rules as rules
 from services.theme_rules import OVERLAY_DEFAULT, validate_theme_values
 from services.theme_templates import TEMPLATES
@@ -33,7 +37,18 @@ _THEME_TAKEN = {
 _THEME_FIELDS = (
     "name", "bg", "accent", "accent_text", "primary",
     "font_heading", "font_body", "font_numerals", "banner_overlay", "archived",
+    "banner_asset_id", "header_asset_id", "header_mobile_asset_id", "hero_wash", "tint", "radius", "art_height",
 )
+# Fields where an explicit null (or "") in a PATCH clears the value; omitted keeps it.
+_CLEARABLE = ("font_heading", "font_body", "font_numerals", "banner_asset_id", "header_asset_id",
+              "header_mobile_asset_id", "tint", "radius", "art_height")
+_SIMPLE = ("name", "bg", "accent", "accent_text", "primary", "banner_overlay", "archived", "hero_wash")
+_ASSET_SLOTS = {
+    "banner_asset_id": ("banner", THEME_BANNER),
+    "header_asset_id": ("header", THEME_HEADER),
+    "header_mobile_asset_id": ("header_mobile", THEME_HEADER_MOBILE),
+}
+_CREDIT_MAX = 300
 
 
 class ThemeIn(BaseModel):
@@ -47,6 +62,20 @@ class ThemeIn(BaseModel):
     font_body:      str | None = None
     font_numerals:  str | None = None
     banner_overlay: float = float(OVERLAY_DEFAULT)
+    banner_asset_id:        int | None = None
+    header_asset_id:        int | None = None
+    header_mobile_asset_id: int | None = None
+    hero_wash:      str = "#FFFFFF"
+    tint:           str | None = None
+    radius:         int | None = None
+    art_height:     int | None = None
+
+
+class AssetIn(BaseModel):
+    kingdom_id: int
+    slot:       str = Field(pattern="^(banner|header|header_mobile)$")
+    image_data: str
+    credit:     str = Field(min_length=3, max_length=_CREDIT_MAX)
 
 
 class ThemePatch(BaseModel):
@@ -61,6 +90,13 @@ class ThemePatch(BaseModel):
     font_numerals:  str | None = None
     banner_overlay: float | None = None
     archived:       bool | None = None
+    banner_asset_id:        int | None = None
+    header_asset_id:        int | None = None
+    header_mobile_asset_id: int | None = None
+    hero_wash:      str | None = None
+    tint:           str | None = None
+    radius:         int | None = None
+    art_height:     int | None = None
 
 
 class ScheduleIn(BaseModel):
@@ -89,6 +125,9 @@ def _theme_dict(t: Theme, used_by: dict | None = None) -> dict:
         "bg": t.bg, "accent": t.accent, "accent_text": t.accent_text, "primary": t.primary,
         "font_heading": t.font_heading, "font_body": t.font_body, "font_numerals": t.font_numerals,
         "banner_overlay": float(t.banner_overlay), "archived": bool(t.archived),
+        "banner_asset_id": t.banner_asset_id, "header_asset_id": t.header_asset_id,
+        "header_mobile_asset_id": t.header_mobile_asset_id,
+        "hero_wash": t.hero_wash, "tint": t.tint, "radius": t.radius, "art_height": t.art_height,
         "updated_at": t.updated_at.isoformat() if t.updated_at else None,
     }
     if used_by is not None:
@@ -165,7 +204,9 @@ async def theme_rules(_: User = Depends(require_superadmin)):
     return {
         "ink": rules.INK, "muted": rules.MUTED, "ink_min": rules.INK_MIN, "muted_min": rules.MUTED_MIN,
         "text_min": rules.TEXT_MIN, "overlay_min": float(rules.OVERLAY_MIN), "overlay_max": float(rules.OVERLAY_MAX),
-        "overlay_default": float(rules.OVERLAY_DEFAULT),
+        "overlay_default": float(rules.OVERLAY_DEFAULT), "surface_2": rules.SURFACE_2,
+        "default_tint": rules.DEFAULT_TINT, "radius_range": list(rules.RADIUS_RANGE),
+        "art_height_range": list(rules.ART_HEIGHT_RANGE),
     }
 
 
@@ -188,10 +229,97 @@ async def list_themes(kingdom_id: int, _: User = Depends(require_superadmin), db
     ]
 
 
+async def _check_assets(db: AsyncSession, kingdom_id: int, values: dict) -> None:
+    """Each referenced image must exist, belong to the Kingdom and have its slot's exact size."""
+    for field, (slot, profile) in _ASSET_SLOTS.items():
+        asset_id = values.get(field)
+        if asset_id is None:
+            continue
+        asset = await db.get(ThemeAsset, asset_id)
+        if asset is None or asset.kingdom_id != kingdom_id:
+            raise HTTPException(status_code=422, detail=f"That {slot.replace('_', ' ')} image does not belong to this Kingdom")
+        if (asset.width, asset.height) != profile.crop:
+            raise HTTPException(status_code=422, detail=f"That image is {asset.width} by {asset.height}; the {slot.replace('_', ' ')} slot needs {profile.crop[0]} by {profile.crop[1]}")
+
+
+async def _prune_assets(db: AsyncSession, asset_ids: set[int | None]) -> None:
+    """Delete images no theme references any more, in the caller's transaction."""
+    for asset_id in {i for i in asset_ids if i}:
+        used = (await db.execute(select(Theme.id).where(or_(
+            Theme.banner_asset_id == asset_id, Theme.header_asset_id == asset_id,
+            Theme.header_mobile_asset_id == asset_id)).limit(1))).first()
+        if used is None:
+            asset = await db.get(ThemeAsset, asset_id)
+            if asset is not None:
+                await db.delete(asset)
+
+
+def _asset_ids(t: Theme) -> set[int | None]:
+    return {t.banner_asset_id, t.header_asset_id, t.header_mobile_asset_id}
+
+
+@router.post("/theme-assets", status_code=201)
+async def upload_asset(payload: AssetIn, user: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)):
+    """Normalise an uploaded image for its slot and store it by content hash. A
+    re-upload of the same result returns the existing row (and updates its credit)."""
+    await _kingdom_or_404(db, payload.kingdom_id)
+    slot_field = {"banner": "banner_asset_id", "header": "header_asset_id", "header_mobile": "header_mobile_asset_id"}[payload.slot]
+    label = {"banner": "Banner image", "header": "Header image", "header_mobile": "Mobile header image"}[payload.slot]
+    processed = await process_data_uri_async(payload.image_data, _ASSET_SLOTS[slot_field][1], label)
+    content = base64.b64decode(processed.split(",", 1)[1])
+    digest = hashlib.sha256(content).hexdigest()
+    asset = (await db.execute(select(ThemeAsset).where(
+        ThemeAsset.kingdom_id == payload.kingdom_id, ThemeAsset.sha256 == digest))).scalar_one_or_none()
+    created = asset is None
+    width, height = _ASSET_SLOTS[slot_field][1].crop
+    if created:
+        asset = ThemeAsset(kingdom_id=payload.kingdom_id, sha256=digest, content=content, width=width, height=height,
+                           credit=payload.credit.strip())
+        db.add(asset)
+        await db.flush()
+    else:
+        asset.credit = payload.credit.strip()
+    # Metadata only: audit rows never hold image bytes (spec §71.7).
+    await log_change(db, user_id=user.id, tenant_id=None, table_name="theme_assets", row_id=asset.id,
+                     action="create" if created else "update",
+                     after={"sha256": digest, "width": width, "height": height, "bytes": len(content), "credit": asset.credit})
+    await db.commit()
+    return _asset_dict(asset)
+
+
+def _asset_dict(a: ThemeAsset) -> dict:
+    return {"id": a.id, "sha256": a.sha256, "url": asset_url(a.sha256), "width": a.width, "height": a.height,
+            "bytes": len(a.content), "credit": a.credit}
+
+
+@router.get("/theme-assets")
+async def list_assets(kingdom_id: int, _: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)):
+    await _kingdom_or_404(db, kingdom_id)
+    rows = (await db.execute(select(ThemeAsset).where(ThemeAsset.kingdom_id == kingdom_id).order_by(ThemeAsset.id))).scalars().all()
+    return [_asset_dict(a) for a in rows]
+
+
+@router.delete("/theme-assets/{asset_id}", status_code=204)
+async def delete_asset(asset_id: int, user: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)):
+    asset = await db.get(ThemeAsset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+    used = (await db.execute(select(Theme.name).where(or_(
+        Theme.banner_asset_id == asset_id, Theme.header_asset_id == asset_id,
+        Theme.header_mobile_asset_id == asset_id)))).scalars().all()
+    if used:
+        raise HTTPException(status_code=409, detail="This image is used by: " + ", ".join(used))
+    await log_change(db, user_id=user.id, tenant_id=None, table_name="theme_assets", row_id=asset.id,
+                     action="delete", before={"sha256": asset.sha256, "credit": asset.credit})
+    await db.delete(asset)
+    await db.commit()
+
+
 @router.post("/themes", status_code=201)
 async def create_theme(payload: ThemeIn, user: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)):
     await _kingdom_or_404(db, payload.kingdom_id)
     values = _validated(payload.model_dump(exclude={"kingdom_id"}))
+    await _check_assets(db, payload.kingdom_id, values)
     theme = Theme(kingdom_id=payload.kingdom_id, **values)
     db.add(theme)
     try:
@@ -212,12 +340,13 @@ async def update_theme(
 ):
     theme = await _theme_or_404(db, theme_id)
     before = _audit_theme(theme)
+    old_assets = _asset_ids(theme)
     sent = payload.model_fields_set
     merged = {f: getattr(theme, f) for f in _THEME_FIELDS}
-    for f in ("name", "bg", "accent", "accent_text", "primary", "banner_overlay", "archived"):
+    for f in _SIMPLE:
         if f in sent and getattr(payload, f) is not None:
             merged[f] = getattr(payload, f)
-    for f in ("font_heading", "font_body", "font_numerals"):
+    for f in _CLEARABLE:
         if f in sent:
             merged[f] = getattr(payload, f)
     usage = await _usage(db, theme)
@@ -226,9 +355,12 @@ async def update_theme(
         if message:
             raise HTTPException(status_code=409, detail=message)
     values = _validated({**merged, "banner_overlay": float(merged["banner_overlay"])})
+    await _check_assets(db, theme.kingdom_id, values)
     for f, v in values.items():
         setattr(theme, f, v)
     try:
+        await db.flush()
+        await _prune_assets(db, old_assets - _asset_ids(theme))
         await log_change(db, user_id=user.id, tenant_id=None, table_name="themes", row_id=theme.id,
                          action="update", before=before, after=_audit_theme(theme))
         await db.commit()
@@ -245,9 +377,12 @@ async def delete_theme(theme_id: int, user: User = Depends(require_superadmin), 
     message = _in_use_message(await _usage(db, theme), "delete")
     if message:
         raise HTTPException(status_code=409, detail=message)
+    assets = _asset_ids(theme)
     await log_change(db, user_id=user.id, tenant_id=None, table_name="themes", row_id=theme.id,
                      action="delete", before=_audit_theme(theme))
     await db.delete(theme)
+    await db.flush()
+    await _prune_assets(db, assets)
     await db.commit()
 
 

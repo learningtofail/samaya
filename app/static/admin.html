@@ -919,7 +919,36 @@
             <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thFontHeading"><span class="pf-v6-c-form__label-text">Heading font</span></label><select class="pf-v6-c-form-control" id="thFontHeading"></select></div>
             <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thFontBody"><span class="pf-v6-c-form__label-text">Body font</span></label><select class="pf-v6-c-form-control" id="thFontBody"></select></div>
             <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thFontNumerals"><span class="pf-v6-c-form__label-text">Numbers font</span></label><select class="pf-v6-c-form-control" id="thFontNumerals"></select><p class="pf-v6-c-form__helper-text">Monospace only, so times stay aligned.</p></div>
-            <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thOverlay"><span class="pf-v6-c-form__label-text">Banner overlay <output id="thOverlayOut"></output></span></label><input type="range" id="thOverlay" min="0.90" max="1.00" step="0.01"><p class="pf-v6-c-form__helper-text">Banner images arrive in a later update; the overlay is stored now.</p></div>
+            <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thHeroWash"><span class="pf-v6-c-form__label-text">Hero wash color</span></label><input class="pf-v6-c-form-control color-input" type="color" id="thHeroWash"><p class="pf-v6-c-form__helper-text">Tints the "next up" card over its banner image.</p></div>
+            <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thOverlay"><span class="pf-v6-c-form__label-text">Wash strength <output id="thOverlayOut"></output></span></label><input type="range" id="thOverlay" min="0.90" max="1.00" step="0.01"><p class="pf-v6-c-form__helper-text">Never below 0.90, so text stays readable over any image.</p></div>
+            <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thTint"><span class="pf-v6-c-form__label-text">Hover tint</span></label><input class="pf-v6-c-form-control color-input" type="color" id="thTint"><label class="check"><input type="checkbox" id="thTintDefault"> Use the shipped tint</label></div>
+            <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thRadius"><span class="pf-v6-c-form__label-text">Corner radius <output id="thRadiusOut"></output></span></label><input type="range" id="thRadius" min="4" max="14" step="1"><label class="check"><input type="checkbox" id="thRadiusDefault"> Use the shipped radius</label></div>
+            <div class="pf-v6-c-form__group"><label class="pf-v6-c-form__label" for="thArtHeight"><span class="pf-v6-c-form__label-text">Header art height <output id="thArtHeightOut"></output></span></label><input type="range" id="thArtHeight" min="240" max="360" step="10"><label class="check"><input type="checkbox" id="thArtHeightDefault"> Use the shipped height</label></div>
+            <fieldset class="art-slots">
+              <legend class="pf-v6-c-form__label-text">Images</legend>
+              <p class="pf-v6-c-form__helper-text">Cropped to the exact size from the center, never enlarged. Keep the focal point in the middle third. Header art fades out toward the bottom. Credit the source and license for every image.</p>
+              <div class="art-slot" data-slot="header">
+                <div class="art-slot__head"><strong>Header, desktop</strong> <span class="samaya-muted">1920 by 400, at most 150 KB</span></div>
+                <img class="art-slot__thumb hidden" alt="" id="artThumb-header">
+                <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" id="artFile-header" aria-label="Header image, desktop">
+                <input class="pf-v6-c-form-control" type="text" id="artCredit-header" maxlength="300" placeholder="Source and license" aria-label="Credit for the desktop header image">
+                <button type="button" class="pf-v6-c-button pf-m-link pf-m-small hidden" id="artClear-header">Remove</button>
+              </div>
+              <div class="art-slot" data-slot="header_mobile">
+                <div class="art-slot__head"><strong>Header, mobile</strong> <span class="samaya-muted">900 by 500, at most 80 KB, used at 640 px and narrower</span></div>
+                <img class="art-slot__thumb hidden" alt="" id="artThumb-header_mobile">
+                <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" id="artFile-header_mobile" aria-label="Header image, mobile">
+                <input class="pf-v6-c-form-control" type="text" id="artCredit-header_mobile" maxlength="300" placeholder="Source and license" aria-label="Credit for the mobile header image">
+                <button type="button" class="pf-v6-c-button pf-m-link pf-m-small hidden" id="artClear-header_mobile">Remove</button>
+              </div>
+              <div class="art-slot" data-slot="banner">
+                <div class="art-slot__head"><strong>Next-up banner</strong> <span class="samaya-muted">1200 by 360, at most 100 KB</span></div>
+                <img class="art-slot__thumb hidden" alt="" id="artThumb-banner">
+                <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" id="artFile-banner" aria-label="Banner image">
+                <input class="pf-v6-c-form-control" type="text" id="artCredit-banner" maxlength="300" placeholder="Source and license" aria-label="Credit for the banner image">
+                <button type="button" class="pf-v6-c-button pf-m-link pf-m-small hidden" id="artClear-banner">Remove</button>
+              </div>
+            </fieldset>
           </form>
           <div class="theme-editor__preview">
             <div class="theme-sample" id="thSample" aria-hidden="true">

@@ -11,7 +11,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.db import Kingdom, ScheduledTheme, Theme
+from models.db import Kingdom, ScheduledTheme, Theme, ThemeAsset
 from services.fonts import Font, google_fonts_url, resolve_font
 from services.theme_rules import contrast_failures
 from services.time_utils import ensure_utc
@@ -61,7 +61,8 @@ def is_renderable(theme: Theme) -> bool:
     try:
         for field in (theme.bg, theme.accent, theme.accent_text, theme.primary):
             parse_hex_color(field)
-        return not contrast_failures(theme.bg, theme.accent_text, theme.primary, float(theme.banner_overlay))
+        return not contrast_failures(
+            theme.bg, theme.accent_text, theme.primary, float(theme.banner_overlay), theme.hero_wash or "#FFFFFF", theme.tint)
     except (ValueError, TypeError):
         return False
 
@@ -74,8 +75,28 @@ def theme_fonts(theme: Theme) -> dict[str, Font | None]:
     }
 
 
-def theme_css(theme: Theme) -> str:
-    """The generated stylesheet for one theme."""
+async def asset_hashes(db: AsyncSession, theme: Theme) -> dict[int, str]:
+    """{asset id: sha256} for the images a theme references."""
+    ids = {i for i in (theme.banner_asset_id, theme.header_asset_id, theme.header_mobile_asset_id) if i}
+    if not ids:
+        return {}
+    rows = (await db.execute(select(ThemeAsset.id, ThemeAsset.sha256).where(ThemeAsset.id.in_(ids)))).all()
+    return {row.id: row.sha256 for row in rows}
+
+
+def asset_url(sha256: str) -> str:
+    return f"/theme-assets/{sha256}.webp"
+
+
+def _rgb_channels(hex_color: str) -> str:
+    h = parse_hex_color(hex_color)[1:]
+    return " ".join(str(int(h[i:i + 2], 16)) for i in (0, 2, 4))
+
+
+def theme_css(theme: Theme, hashes: dict[int, str] | None = None) -> str:
+    """The generated stylesheet for one theme. `hashes` maps the theme's asset
+    ids to their sha256; an image with no hash (missing row) is simply left out."""
+    hashes = hashes or {}
     fonts = theme_fonts(theme)
     lines = [
         f"  --bg: {parse_hex_color(theme.bg)};",
@@ -87,6 +108,27 @@ def theme_css(theme: Theme) -> str:
         "  --navy-hover: color-mix(in oklch, var(--navy) 88%, white);",
         f"  --hero-overlay: {Decimal(str(theme.banner_overlay)).quantize(Decimal('0.01'))};",
     ]
+    wash = f"rgb({_rgb_channels(theme.hero_wash or '#FFFFFF')} / {Decimal(str(theme.banner_overlay)).quantize(Decimal('0.01'))})"
+    lines.append(f"  --hero-wash-1: {wash};")
+    lines.append(f"  --hero-wash-2: color-mix(in srgb, {wash} 70%, rgb(255 255 255 / {Decimal(str(theme.banner_overlay)).quantize(Decimal('0.01'))}));")
+    if theme.tint:
+        lines.append(f"  --tint: {parse_hex_color(theme.tint)};")
+    if theme.radius is not None:
+        lines.append(f"  --radius: {int(theme.radius)}px;")
+    if theme.art_height is not None:
+        lines.append(f"  --art-h: {int(theme.art_height)}px;")
+    if hashes.get(theme.banner_asset_id):
+        lines.append(f"  --banner: url('{asset_url(hashes[theme.banner_asset_id])}');")
+    header = hashes.get(theme.header_asset_id) or hashes.get(theme.header_mobile_asset_id)
+    if header:
+        desktop = hashes.get(theme.header_asset_id)
+        mobile = hashes.get(theme.header_mobile_asset_id)
+        if desktop:
+            lines.append(f"  --page-art: url('{asset_url(desktop)}');")
+        if mobile:
+            lines.append(f"  --page-art-mobile: url('{asset_url(mobile)}');")
+        lines.append("  --plate-bg: color-mix(in oklch, white 88%, transparent);")
+        lines.append("  --plate-pad: 10px 16px;")
     if fonts["body"]:
         lines.append(f"  --font-body: {fonts['body'].css_stack};")
     if fonts["heading"]:

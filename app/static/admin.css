@@ -493,3 +493,6 @@ textarea.pf-v6-c-form-control { min-height: 5rem; resize: vertical; }
 .theme-sample__btn { padding: 2px 12px; border-radius: 6px; background: var(--sample-primary, #151F32); color: #fff; }
 .theme-sample__time { font-family: ui-monospace, Menlo, monospace; }
 @media (min-width: 900px) { .theme-editor { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); } }
+.art-slots { display: grid; gap: var(--space-3); border: 0; padding: 0; margin: 0; }
+.art-slot { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line, #ccc); border-radius: 8px; }
+.art-slot__thumb { max-width: 100%; max-height: 90px; object-fit: cover; border-radius: 6px; }

@@ -17,13 +17,14 @@
   --navy-hover: oklch(0.32 0.05 262);
   --navy-ink: #fff;
   --radius: 10px;
+  --art-h: 300px;
   --font-heading: var(--font);
   --font-body: 'Noto Sans';
   --font: var(--font-body), system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
-body { margin: 0; min-height: 100vh; color: var(--ink); font: 400 16px/1.5 var(--font); background: linear-gradient(var(--bg-wash), transparent 240px), var(--bg); }
+body { margin: 0; min-height: 100vh; color: var(--ink); font: 400 16px/1.5 var(--font); background: linear-gradient(var(--bg-wash), transparent var(--art-h)), var(--bg); position: relative; }
 a { color: var(--gold-ink); }
 a:hover { color: oklch(0.33 0.12 75); }
 button, select, input, textarea { font: inherit; color: inherit; }
@@ -146,3 +147,22 @@ button.vote:hover { background: var(--tint); }
 .lang-select { max-width: 11rem; min-height: 36px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); font-weight: 500; font-size: 13.5px; }
 :root:lang(zh-Hans) { --font: var(--font-body), 'Noto Sans SC', system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; }
 :root:lang(ar) { --font: var(--font-body), 'Noto Sans Arabic', system-ui, -apple-system, 'Segoe UI', Tahoma, sans-serif; }
+
+/* Theme header art (spec §71.15), same layer as events.css. */
+body::before {
+  content: ''; position: absolute; top: 0; inset-inline: 0; height: var(--art-h); z-index: 0; pointer-events: none;
+  background: var(--page-art, none) center top / cover no-repeat;
+  -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent);
+  animation: art-in 200ms ease-out;
+}
+@keyframes art-in { from { opacity: 0; } to { opacity: 1; } }
+.hdr, .page { position: relative; z-index: 1; }
+.hdr .brand { background: var(--plate-bg, transparent); padding: var(--plate-pad, 0); border-radius: 10px; }
+@media (max-width: 640px) {
+  body::before { background-image: var(--page-art-mobile, var(--page-art, none)); height: min(var(--art-h), 240px); }
+}
+@media (prefers-reduced-motion: reduce) { body::before { animation: none; } }
+@media (forced-colors: active), (prefers-contrast: more) {
+  body::before { display: none; }
+  .hdr .brand { background: transparent; padding: 0; }
+}
