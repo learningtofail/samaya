@@ -308,14 +308,12 @@ function renderHeader() {
   $('pageKicker').textContent = COMBINED_MODE ? 'Kingshot · All alliances' : `Kingshot · ${cur.name}`;
   $('pageTitle').textContent = SITE_TITLE || 'Event Schedule';
   document.title = `${COMBINED_MODE ? '' : cur.name + ' · '}${SITE_TITLE || 'Kingshot Event Schedule'}`;
-  const c = COMBINED_MODE ? { name: 'Kingdom', icon: '', color: KINGDOM_COLOR } : cur;
-  $('brandCrest').innerHTML = crestHtml(c.name, c.icon, c.color, 'lg');
 }
 function renderChips() {
   const all = { slug: 'all', name: 'All alliances', icon: '', color: KINGDOM_COLOR };
   const items = [all].concat(ALLIANCES.map((a) => allianceInfo(a.slug, a.name)));
   $('allianceChips').innerHTML = items.map((a) => {
-    const crest = a.slug === 'all' ? '' : crestHtml(a.name, a.icon, a.color);
+    const crest = '';
     const cc = safeColor(a.color, KINGDOM_COLOR);
     const style = `data-vars="--c:${cc};--ink-on:${inkOn(cc)}"`;
     if (COMBINED_MODE) {
@@ -334,7 +332,7 @@ $('allianceChips').addEventListener('click', (e) => {
 });
 function renderKey() {
   $('legendPanel').innerHTML = KINDS.concat(Object.values(STATUS)).map((i) =>
-    `<div class="legend-item"><span class="tag" data-vars="--s:${i.color}">${i.text}</span><span>${i.desc}</span></div>`).join('');
+    `<div class="legend-item"><span class="legend-name" data-vars="--s:${i.color}"><i class="swatch"></i>${i.text}</span><span>${i.desc}</span></div>`).join('');
 }
 $('keyBtn').addEventListener('click', () => {
   const open = $('legendPanel').hidden;
@@ -360,21 +358,25 @@ function renderHero() {
       <div class="hero-main">
         <div class="hero-label">${live ? '<span class="dot"></span>Live now' : 'Next up'}</div>
         <div class="hero-name">${escapeHtml(h.event_name)}</div>
-        <div class="hero-meta">${escapeHtml(evAlliances(h).map((x) => x.name).join(', '))} · ${hm(h._start, tz)} ${escapeHtml(tzShort(tz))} · ${hm(h._start, 'UTC')} UTC${h.duration_hours ? ' · ' + formatDuration(h.duration_hours) : ''}</div>
+        <div class="hero-meta">${escapeHtml(evAlliances(h).map((x) => x.name).join(', '))} · ${live ? 'started ' : ''}${hm(h._start, tz)} ${escapeHtml(tzShort(tz))} · ${hm(h._start, 'UTC')} UTC${h.duration_hours ? ' · ' + formatDuration(h.duration_hours) : ''}</div>
       </div>
       <div class="hero-cd"><small>${live ? 'Ends in' : 'Starts in'}</small><b id="heroCd" data-target="${live ? h._end : h._start}">${cd((live ? h._end : h._start) - now)}</b></div>
+      ${live ? `<span class="hero-bar" id="heroBar" data-start="${h._start}" data-end="${h._end}" data-vars="--p:${progressPct(h._start, h._end, now)}%"></span>` : ''}
     </div>`;
   } else {
     html += `<div class="hero"><div class="hero-main"><div class="hero-label">No events</div><div class="hero-name">Nothing scheduled</div></div></div>`;
   }
   const then = list.filter((e) => e !== h && displayStatus(e, now) !== 'live').slice(0, 3);
   html += `<aside class="then"><h2>Then</h2>${then.length ? then.map((e) =>
-    `<div class="then-item"><span class="then-time">${hm(e._start, tz)}</span><span>${escapeHtml(e.event_name)} <small>${escapeHtml(fmtDay(e._start, tz, { weekday: 'short' }))} · ${rel(e._start - now)}</small></span></div>`).join('') : '<p class="muted">Nothing else coming up.</p>'}</aside>`;
+    `<div class="then-item"><span class="then-time">${hm(e._start, tz)}</span><span class="then-name">${escapeHtml(e.event_name)}</span><span class="then-when">${escapeHtml(fmtDay(e._start, tz, { weekday: 'short' }))} · ${rel(e._start - now)}</span></div>`).join('') : '<p class="muted">Nothing else coming up.</p>'}</aside>`;
   $('hero').innerHTML = html;
 }
+function progressPct(start, end, now) { return Math.max(0, Math.min(100, Math.round(((now - start) / (end - start)) * 100))); }
 function tickCountdown() {
   const el = $('heroCd');
   if (el) el.textContent = cd(Number(el.dataset.target) - Date.now());
+  const bar = $('heroBar');
+  if (bar) bar.style.setProperty('--p', progressPct(Number(bar.dataset.start), Number(bar.dataset.end), Date.now()) + '%');
 }
 
 // ── Rows and days ───────────────────────────────────────────────
@@ -394,19 +396,19 @@ function rowHtml(ev, cont, last, now, tz) {
     : `<b>${hm(ev._start, tz)}</b>${tz === 'UTC' ? '' : `<small>${hm(ev._start, 'UTC')} UTC</small>`}`;
   const dur = isAnn ? '' : (multi ? `${formatDuration(ev.duration_hours)} · ends ${escapeHtml(endDay)} ${hm(ev._end, tz)}` : formatDuration(ev.duration_hours));
   const relText = cont ? 'continues' : (key === 'live' ? `ends ${rel(ev._end - now)}` : (ev._start > now ? `${isAnn ? 'sends' : 'starts'} ${rel(ev._start - now)}` : ''));
-  const kind = (ev.type && ev.type.name ? ev.type.name : (isAnn ? 'Message' : 'Event')) + (ev.scope === 'kingdom-wide' ? ' · Kingdom-wide' : '');
+  const kind = (ev.type && ev.type.name ? ev.type.name : (isAnn ? 'Message' : 'Event'));
   const id = `d-${ev._k.replace(/\W/g, '_')}${cont ? '-c' : ''}`;
   const color = safeColor(ev.type && ev.type.color ? ev.type.color : als[0].color, KINGDOM_COLOR);
   return `<article class="row${key === 'live' ? ' is-live' : ''}${key === 'completed' || key === 'cancelled' ? ' is-done' : ''}" data-vars="--c:${color}" data-key="${escapeHtml(ev._k)}">
     <button type="button" class="row-head" data-action="toggle" aria-expanded="${open}" aria-controls="${id}">
       <span class="row-time">${timeBlock}</span>
       <span class="row-main"><span class="row-name">${escapeHtml(ev.event_name)}</span>
-        <span class="row-meta"><span>${kind}</span>${dur ? `<span>${dur}</span>` : ''}${relText ? `<span class="row-rel">${relText}</span>` : ''}</span></span>
+        <span class="row-meta"><span>${escapeHtml(als.slice(0, 2).map((a) => a.name).join(', '))}${als.length > 2 ? ` +${als.length - 2}` : ''}</span><span>${kind}</span>${dur ? `<span>${dur}</span>` : ''}</span></span>
       <span class="row-side">
+        <span class="row-rel">${relText}</span>
         <span class="status" data-vars="--s:${st.color}"><i class="swatch"></i>${st.text}</span>
-        <span class="crests">${als.slice(0, 3).map((a) => crestHtml(a.name, a.icon, a.color)).join('')}</span>
-        <span class="chev" aria-hidden="true">${open ? '▲' : '▼'}</span>
       </span>
+      <span class="chev" aria-hidden="true">${open ? '▲' : '▼'}</span>
     </button>
     <div class="row-detail" id="${id}"${open ? '' : ' hidden'}>
       <dl class="facts">
