@@ -1926,7 +1926,7 @@ The Setup tab no longer has an "Alliances and audiences" panel. Which alliances 
 
 **Status:** Designed 2026-10-02, not built. Supersedes §63.3 (theme presets in CSS) and §64.2 to §64.5 (scheduled theme storage and admin). §64.1 (global-day windows) and §63.1, §63.2 (colors, brand variables; built) stand.
 
-**Problem.** The Kingdom wants to change how the public pages look for a season or a festival, and what their headers and titles say, without a deploy. A superadmin or Kingdom coordinator should create and edit themes in the admin console, including a banner image and fonts, and schedule them by date. Today the palettes live in `events.css`, the titles are one Kingdom field, and the fonts are fixed.
+**Problem.** The Kingdom wants to change how the public pages look for a season or a festival, and what their headers and titles say, without a deploy. A superadmin should create and edit themes in the admin console, including a banner image and fonts, and schedule them by date. Today the palettes live in `events.css`, the titles are one Kingdom field, and the fonts are fixed.
 
 **Principles.**
 - A theme is data, never code. The admin edits a fixed set of values; there is no free-form CSS. A bad value can then neither break the layout nor make text unreadable.
@@ -2001,17 +2001,17 @@ A fixed registry in `services/page_copy.py` lists every editable string: key, de
 - `/events`, `/t/{slug}/events` and `/feedback` resolve the theme and copy per request (one small query, with a short in-process cache of the result; the app has one worker) and replace marker comments in the static HTML. This removes the hard-coded Google Fonts `<link>` from both pages.
 - Generated stylesheet: `GET /theme/{theme_id}.css?v={updated_at}.{STATIC_ASSET_VERSION}` (`/theme/default.css` when no theme is active). It contains only `:root { --variable: value; }` declarations from validated values, so there is nothing to escape beyond hex colors, catalogue font strings, a hash-based banner URL and two numbers. It is cached for a year because the URL changes whenever the theme or the code changes.
 - The HTML itself must not be cached at the edge for longer than a theme change should take to appear. Whether Cloudflare caches `/events`, `/feedback` or `/api/kingdom-branding` today is not checked and is a pre-deploy task.
-- `GET /events?preview_theme={id}` renders that theme for a signed-in user with a Kingdom grant (superadmin included); for anyone else the parameter is ignored. Previews send `Cache-Control: no-store` and `X-Robots-Tag: noindex`. The admin editor shows the real page in an iframe from this URL, so the preview cannot drift from the page. Whether Caddy or Cloudflare sends `X-Frame-Options` or a CSP `frame-ancestors` that blocks this same-origin iframe is not checked and is a pre-deploy task.
+- `GET /events?preview_theme={id}` renders that theme for a signed-in superadmin; for anyone else the parameter is ignored. Previews send `Cache-Control: no-store` and `X-Robots-Tag: noindex`. The admin editor shows the real page in an iframe from this URL, so the preview cannot drift from the page. Whether Caddy or Cloudflare sends `X-Frame-Options` or a CSP `frame-ancestors` that blocks this same-origin iframe is not checked and is a pre-deploy task.
 
 ### 71.7 Admin
 
-A new **Appearance** tab (Kingdom grant required) with four panels:
+A new **Appearance** tab (superadmin only) with four panels:
 1. **Themes.** List with a swatch, fonts and an in-use marker. The editor has color pickers with live contrast ratios, font selects that load a family only when chosen and show sample text, a banner upload with a crop preview of the hero, the overlay slider, a copy-overrides section, "Start from a template", and the iframe preview. Save is disabled while any rule fails.
 2. **Schedule.** The base theme select and the scheduled windows table, with the §64.1 shortcuts and a warning when windows overlap at the same priority.
 3. **Page text.** The Kingdom's values for every registry key, with defaults as placeholders and a link to preview the page.
 4. **Kingdom branding.** The existing Kingdom color and titles move here from the Setup modal; the modal keeps name and slug.
 
-**Permissions.** Superadmin and Kingdom coordinators (a `UserKingdom` grant on that Kingdom). Today Kingdom titles are superadmin-only, so this widens access (see decision 1). Viewers and alliance owners without a Kingdom grant cannot read or write. Every write goes through `services/audit.log_change` (asset rows log metadata, never bytes).
+**Permissions.** Superadmin only (decided 2026-10-02), matching Kingdom titles and colors today. The Appearance tab is hidden from everyone else and every endpoint uses `require_superadmin`. Opening it to Kingdom coordinators later is a permission change only. Every write goes through `services/audit.log_change` (asset rows log metadata, never bytes).
 
 ### 71.8 API
 
@@ -2041,7 +2041,7 @@ Additive. New tables `themes`, `theme_assets`, `scheduled_themes`; new columns `
 
 ### 71.11 Tests
 
-Contrast rules (each accept and reject case, shared fixtures with the frontend), overlay worst-case math, theme CRUD, permissions (superadmin, coordinator, owner, viewer), copy resolution order and escaping, HTML marker injection and the JSON block's escaping (`</script>` in a value), resolution with overlapping windows and equal priorities, 409 on deleting a used theme, asset upload limits (size, dimensions, animation, wrong type, SVG, pixel bomb), re-encoding strips EXIF, asset serving headers, stylesheet content, preview parameter ignored for anonymous users, the §64.1 window functions, the 0007 migration upgrade and downgrade on Postgres.
+Contrast rules (each accept and reject case, shared fixtures with the frontend), overlay worst-case math, theme CRUD, permissions (superadmin allowed; coordinator, owner and viewer refused), copy resolution order and escaping, HTML marker injection and the JSON block's escaping (`</script>` in a value), resolution with overlapping windows and equal priorities, 409 on deleting a used theme, asset upload limits (size, dimensions, animation, wrong type, SVG, pixel bomb), re-encoding strips EXIF, asset serving headers, stylesheet content, preview parameter ignored for anonymous users, the §64.1 window functions, the 0007 migration upgrade and downgrade on Postgres.
 
 ### 71.12 Build order
 
@@ -2054,13 +2054,19 @@ Three deployable steps; each leaves the site working.
 
 Per-alliance themes (an alliance's color still tints the page while it is selected, §63.2), dark mode, free-form CSS, uploaded font files, per-visitor theme choice, animated or video banners, themes for the admin console, translated text per language, and self-hosted fonts (a later per-font change).
 
-### 71.14 Decisions to confirm
+### 71.14 Decisions
 
-1. **Who edits.** Superadmin and Kingdom coordinators (assumed). Alternative: superadmin only, as for Kingdom titles today.
-2. **Numerals font.** Restricted to monospace and verified tabular families (assumed), so times stay aligned. Alternative: any font, accepting uneven columns.
-3. **Pillow.** Adding it to `requirements.txt` for image checks and resizing (assumed). Alternative: store the uploaded bytes unchanged with only header checks, which keeps EXIF and large files.
-4. **Base theme as a column.** `kingdoms.default_theme_id` (assumed) instead of §64.2's priority-10 row.
-5. **Single language.** One set of text per Kingdom, with no per-language variants (assumed).
+Decided 2026-10-02:
+1. **Who edits:** superadmin only.
+2. **Numerals font:** restricted to monospace and verified tabular families, so times stay aligned.
+3. **Base theme:** a selectable setting, `kingdoms.default_theme_id`, configured in the Schedule panel.
+4. **Font source:** Google Fonts.
+
+Open, with the recommended default:
+5. **Image processing.** Add Pillow so the server verifies, shrinks and cleans every banner (recommended). Alternative: shrink in the browser before upload and have the server check only the file header and size.
+6. **Text language.** One set of text per Kingdom, in one language (recommended). The page's other labels (buttons, status words, dialogs) are English in the code and are not in the editable registry, so a Kingdom that retitles the page in another language gets a mixed-language page. Per-language text would need a locale on every registry value, a way to choose the visitor's language, and translations of those other labels. `page_copy` stores values by key, so a later move to per-locale values is a data migration, not a redesign.
+
+Pre-deploy checks (not yet made): whether Cloudflare caches `/events`, `/feedback` or `/api/kingdom-branding` (relevant from step 1, since cached HTML would delay a text change), and whether Caddy or Cloudflare sends `X-Frame-Options` or a CSP `frame-ancestors` that blocks the same-origin preview iframe (relevant from step 2). Both are answered from the response headers of those URLs and the Cloudflare cache and transform rules.
 
 # Archive
 
