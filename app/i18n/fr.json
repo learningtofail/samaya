@@ -214,5 +214,14 @@
  "public.feedback.contactHint": "Le contact sert uniquement au suivi. Il n’est jamais affiché publiquement.",
  "public.events.calCopy": "Copier le lien du flux",
  "public.events.calCopyHint": "À coller dans Outlook (bureau) ou l’option « s’abonner par URL » de toute application",
- "public.events.calCopied": "Lien copié"
+ "public.events.calCopied": "Lien copié",
+ "public.events.calRange": "Période du calendrier",
+ "public.events.calMonth": "Mois",
+ "public.events.calWeek": "Semaine",
+ "public.events.cal3Days": "3 jours",
+ "public.events.calAllDay": "Toute la journée",
+ "public.events.calPrevWeek": "Semaine précédente",
+ "public.events.calNextWeek": "Semaine suivante",
+ "public.events.calPrev3Days": "3 jours précédents",
+ "public.events.calNext3Days": "3 jours suivants"
 }

@@ -70,6 +70,9 @@ let EVENTS = [];          // grouped rows, each with _start/_end/_k
 let VIEW = localStorage.getItem('samaya_events_view') === 'calendar' ? 'calendar' : 'list';
 let SITE_TITLE = '';
 let CAL_YEAR = null, CAL_MONTH = null, SEL_DAY = null;
+const CAL_MODES = ['month', 'week', '3day'];
+let CAL_MODE = CAL_MODES.includes(localStorage.getItem('samaya_cal_mode')) ? localStorage.getItem('samaya_cal_mode') : 'month';
+let GRID_START = null;   // first day shown in Week / 3-day mode
 const OPEN = new Set();
 const COLOR_MAP = {};
 let ALL_LOADED = false;
@@ -230,6 +233,52 @@ function calendarLinks(icsAbsolute, icsWebcal, title) {
     download: icsAbsolute,
   };
 }
+// ── Calendar geometry (pure; the Week and 3-day views, spec §73) ─
+const HOUR_PX = 56;
+function addDays(k, n) { const [y, m, d] = k.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); }
+/** First day of the week containing day key `k`. `first` is 1 = Monday ... 7 = Sunday. */
+function weekStartOf(k, first) {
+  const [y, m, d] = k.split('-').map(Number);
+  return addDays(k, -((new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 7 - (first % 7)) % 7));
+}
+function keyMs(k) { const [y, m, d] = k.split('-').map(Number); return Date.UTC(y, m - 1, d, 12); }
+/** Minutes after local midnight of an instant, in the display zone. */
+function minsOf(ms, tz) {
+  const [h, m] = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: tz }).format(ms).split(':').map(Number);
+  return h * 60 + m;
+}
+/**
+ * What one day column shows. `blocks` are the timed events (start and end minute, plus the lane
+ * `col` of `n` lanes they share with overlapping events); `blocks.full` are those that cover the
+ * whole day and go to the all-day strip. cs / ce mark a block that continues from or into the
+ * neighbouring day. Announcements have no duration and get a 30 minute block.
+ */
+function dayBlocks(events, k, tz) {
+  const timed = [], full = [];
+  events.forEach((ev) => {
+    const last = Math.max(ev._start, ev._end - 1);
+    if (dayKey(ev._start, tz) > k || dayKey(last, tz) < k) return;
+    const s = dayKey(ev._start, tz) === k ? minsOf(ev._start, tz) : 0;
+    let e = 1440;
+    if (dayKey(last, tz) === k && ev._end > ev._start) e = minsOf(ev._end, tz) || 1440;
+    if (ev._end <= ev._start) e = s + 30;
+    e = Math.min(1440, Math.max(e, s + 20));
+    const b = { ev, s, e, cs: dayKey(ev._start, tz) < k, ce: dayKey(last, tz) > k };
+    (b.s === 0 && b.e === 1440 ? full : timed).push(b);
+  });
+  timed.sort((a, b) => a.s - b.s || b.e - a.e);
+  let cluster = [], clusterEnd = -1;
+  const close = () => { const n = Math.max(1, ...cluster.map((x) => x.col + 1)); cluster.forEach((x) => { x.n = n; }); cluster = []; };
+  timed.forEach((b) => {
+    if (b.s >= clusterEnd) { close(); clusterEnd = -1; }
+    const used = cluster.filter((x) => x.e > b.s).map((x) => x.col);
+    b.col = 0; while (used.includes(b.col)) b.col++;
+    cluster.push(b); clusterEnd = Math.max(clusterEnd, b.e);
+  });
+  close();
+  timed.full = full;
+  return timed;
+}
 // Everything above this line is pure/DOM-independent; everything below
 // wires up real page elements and fetches. Under test, stop here and hand
 // the pure functions to the test file instead of running any of that
@@ -238,7 +287,7 @@ if (SAMAYA_TEST) {
   globalThis.__SAMAYA_TEST_EXPORTS__ = {
     escapeHtml, safeColor, inkOn, brandInk, pad2, parseIso, hm, dayKey, fmtDay, tzShort, cd, rel, formatDuration,
     displayStatus, fallbackColor, allianceInfo, initials, crestHtml, evAlliances,
-    groupCombinedFanoutRows, daySpan, buildDayMap, calendarLinks,
+    groupCombinedFanoutRows, daySpan, buildDayMap, calendarLinks, addDays, weekStartOf, minsOf, dayBlocks,
   };
   return;
 }
@@ -499,13 +548,23 @@ function initCal() {
 function monthName(y, m, opts) { return new Intl.DateTimeFormat(I18N.intlLocale, Object.assign({ timeZone: 'UTC' }, opts)).format(Date.UTC(y, m, 1)); }
 function renderCalendar() {
   initCal();
+  document.querySelectorAll('#calMode [data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === CAL_MODE)));
+  $('calGrid').hidden = CAL_MODE !== 'month';
+  $('calTime').hidden = CAL_MODE === 'month';
+  if (CAL_MODE === 'month') renderMonth(); else renderTimeGrid();
+}
+// The arrows point the way the page reads: previous is toward the start of the line.
+function setNavLabels(prev, next) {
+  const rtl = I18N.dir === 'rtl';
+  $('calPrevBtn').textContent = rtl ? `▶ ${prev}` : `◀ ${prev}`;
+  $('calNextBtn').textContent = rtl ? `${next} ◀` : `${next} ▶`;
+}
+function renderMonth() {
   const tz = getDisplayTz(), todayKey = dayKey(Date.now(), tz);
   $('calMonthLabel').textContent = monthName(CAL_YEAR, CAL_MONTH, { month: 'long', year: 'numeric' });
   const pm = new Date(Date.UTC(CAL_YEAR, CAL_MONTH - 1, 1)), nm = new Date(Date.UTC(CAL_YEAR, CAL_MONTH + 1, 1));
   const prevName = monthName(pm.getUTCFullYear(), pm.getUTCMonth(), { month: 'short' }), nextName = monthName(nm.getUTCFullYear(), nm.getUTCMonth(), { month: 'short' });
-  // The arrows point the way the page reads: previous is toward the start of the line.
-  $('calPrevBtn').textContent = I18N.dir === 'rtl' ? `▶ ${prevName}` : `◀ ${prevName}`;
-  $('calNextBtn').textContent = I18N.dir === 'rtl' ? `${nextName} ◀` : `${nextName} ▶`;
+  setNavLabels(prevName, nextName);
   const map = buildDayMap(EVENTS, tz);
   const firstDay = I18N.firstWeekday();
   const lead = (new Date(Date.UTC(CAL_YEAR, CAL_MONTH, 1)).getUTCDay() + 7 - (firstDay % 7)) % 7;
@@ -532,10 +591,99 @@ $('calGrid').addEventListener('click', (e) => {
   const s = $('calGrid').querySelector(`[data-day="${SEL_DAY}"]`);
   if (s) s.focus();
 });
+// ── Week / 3-day time grid ──────────────────────────────────────
+// Positions travel as custom properties (data-vars), never inline declarations: --top, --h,
+// --lane, --lanes on a block; --cols and --hp on the grid.
+function renderTimeGrid() {
+  const tz = getDisplayTz(), todayKey = dayKey(Date.now(), tz), week = CAL_MODE === 'week', n = week ? 7 : 3;
+  if (!GRID_START) GRID_START = SEL_DAY;
+  const start = week ? weekStartOf(GRID_START, I18N.firstWeekday()) : GRID_START;
+  const days = Array.from({ length: n }, (_, i) => addDays(start, i));
+  const a = keyMs(days[0]), b = keyMs(days[n - 1]);
+  const rangeFmt = new Intl.DateTimeFormat(I18N.intlLocale, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  $('calMonthLabel').textContent = typeof rangeFmt.formatRange === 'function' ? rangeFmt.formatRange(a, b) : `${rangeFmt.format(a)} – ${rangeFmt.format(b)}`;
+  setNavLabels(t(EVENTS_KEY + (week ? 'calPrevWeek' : 'calPrev3Days')), t(EVENTS_KEY + (week ? 'calNextWeek' : 'calNext3Days')));
+  const dual = tz !== 'UTC';
+  const gutterPx = dual ? 92 : 52, colMin = week ? 118 : 150;
+  const cols = `${gutterPx}px repeat(${n}, minmax(${colMin}px, 1fr))`;
+  const blocks = days.map((k) => dayBlocks(EVENTS, k, tz));
+  const corner = dual
+    ? `<div class="tg-corner tg-corner--dual"><span>${escapeHtml(tzShort(tz))}</span><span>UTC</span></div>`
+    : '<div class="tg-corner"><span>UTC</span></div>';
+  let html = `<div class="tg" data-vars="--cols:${cols};--hp:${HOUR_PX}px;--minw:${gutterPx + n * colMin}px"><div class="tg-top"><div class="tg-head">${corner}`;
+  days.forEach((k) => {
+    html += `<button type="button" class="tg-dh${k === todayKey ? ' is-today' : ''}${k === SEL_DAY ? ' is-selected' : ''}" data-day="${k}" aria-pressed="${k === SEL_DAY}"><span>${escapeHtml(fmtDay(keyMs(k), 'UTC', { weekday: 'short' }))}</span><b>${escapeHtml(fmtDay(keyMs(k), 'UTC', { day: 'numeric' }))}</b><small>${escapeHtml(fmtDay(keyMs(k), 'UTC', { month: 'short' }))}</small></button>`;
+  });
+  html += '</div>';
+  if (blocks.some((x) => x.full.length)) {
+    html += `<div class="tg-allday"><div class="tg-corner"><span>${escapeHtml(t(EVENTS_KEY + 'calAllDay'))}</span></div>`;
+    days.forEach((k, i) => {
+      html += `<div class="tg-adc">${blocks[i].full.map((x) => {
+        const c = safeColor(evAlliances(x.ev)[0].color, KINGDOM_COLOR);
+        return `<button type="button" class="tg-ad${x.cs ? ' is-cs' : ''}${x.ce ? ' is-ce' : ''}" data-vars="--c:${c}" data-day="${k}" data-key="${escapeHtml(x.ev._k)}" title="${escapeHtml(x.ev.event_name)}">${x.cs ? '◂ ' : ''}${bdi(x.ev.event_name)}${x.ce ? ' ▸' : ''}</button>`;
+      }).join('')}</div>`;
+    });
+    html += '</div>';
+  }
+  html += `</div><div class="tg-body" data-vars="--h:${HOUR_PX * 24}px">`;
+  // Hour labels: the display zone, and beside it UTC computed from the first day's local midnight.
+  const [sy, sm, sd] = days[0].split('-').map(Number), parts = {};
+  new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZone: tz }).formatToParts(Date.UTC(sy, sm - 1, sd)).forEach((x) => { parts[x.type] = Number(x.value); });
+  const midnightUtc = Date.UTC(sy, sm - 1, sd) - (Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - Date.UTC(sy, sm - 1, sd));
+  const hours = Array.from({ length: 24 }, (_, h) => h);
+  const local = hours.map((h) => `<em data-vars="--top:${h * HOUR_PX}px"><span>${h ? pad2(h) + ':00' : ''}</span></em>`).join('');
+  const utc = dual ? hours.map((h) => { const u = new Date(midnightUtc + h * 3600000); return `<em data-vars="--top:${h * HOUR_PX}px"><span>${pad2(u.getUTCHours())}:${pad2(u.getUTCMinutes())}</span></em>`; }).join('') : '';
+  html += `<div class="tg-gutter${dual ? ' tg-gutter--dual' : ''}"><div class="tg-gutter__col">${local}</div>${dual ? `<div class="tg-gutter__col tg-gutter__col--utc">${utc}</div>` : ''}</div>`;
+  days.forEach((k, i) => {
+    html += `<div class="tg-col${k === todayKey ? ' is-today' : ''}" data-col="${k}">`;
+    blocks[i].forEach((x) => {
+      const ev = x.ev, c = safeColor(evAlliances(ev)[0].color, KINGDOM_COLOR);
+      const ht = Math.max(18, (x.e - x.s) / 60 * HOUR_PX - 2);
+      const range = ev._end > ev._start ? `${hm(ev._start, tz)}–${hm(ev._end, tz)}` : hm(ev._start, tz);
+      html += `<button type="button" class="tg-ev${x.cs ? ' is-cs' : ''}${x.ce ? ' is-ce' : ''}${ht < 34 ? ' is-short' : ''}" data-vars="--c:${c};--top:${x.s / 60 * HOUR_PX}px;--bh:${ht}px;--lane:${x.col};--lanes:${x.n}" data-day="${k}" data-key="${escapeHtml(ev._k)}" title="${escapeHtml(ev.event_name + ' · ' + range)}"><b>${bdi(ev.event_name)}</b><span>${x.cs ? '◂ ' : ''}<bdi dir="ltr">${range}</bdi></span></button>`;
+    });
+    if (k === todayKey) html += `<i class="tg-now" data-vars="--top:${minsOf(Date.now(), tz) / 60 * HOUR_PX}px"></i>`;
+    html += '</div>';
+  });
+  html += '</div></div>';
+  const sc = $('calTime'), keep = sc.scrollTop, first = !sc.firstChild;
+  sc.innerHTML = html;
+  sc.setAttribute('aria-label', $('calMonthLabel').textContent);
+  // Paint the geometry now: the scroll offset below needs the grid's height, and the observer only runs after this task.
+  sc.querySelectorAll('[data-vars]').forEach(paintOne);
+  sc.scrollTop = first ? Math.max(0, (days.includes(todayKey) ? minsOf(Date.now(), tz) / 60 - 1 : 7) * HOUR_PX) : keep;
+}
+$('calTime').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-day]');
+  if (!b) return;
+  SEL_DAY = b.dataset.day;
+  if (b.dataset.key) OPEN.add(b.dataset.key);
+  renderCalendar(); renderSchedule();
+  if (!b.dataset.key) return;
+  const row = $('schedule').querySelector(`[data-key="${CSS.escape(b.dataset.key)}"]`);
+  if (row) window.scrollTo({ top: row.getBoundingClientRect().top + window.scrollY - 80, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+});
+document.querySelectorAll('#calMode [data-mode]').forEach((btn) => btn.addEventListener('click', () => {
+  initCal();
+  CAL_MODE = btn.dataset.mode;
+  localStorage.setItem('samaya_cal_mode', CAL_MODE);
+  GRID_START = SEL_DAY;
+  if (CAL_MODE === 'month') { const [y, m] = SEL_DAY.split('-').map(Number); CAL_YEAR = y; CAL_MONTH = m - 1; }
+  $('calTime').innerHTML = '';
+  renderCalendar();
+}));
+function shiftCal(n) {
+  if (CAL_MODE === 'month') return shiftMonth(n);
+  initCal();
+  if (!GRID_START) GRID_START = SEL_DAY;
+  const week = CAL_MODE === 'week';
+  GRID_START = addDays(week ? weekStartOf(GRID_START, I18N.firstWeekday()) : GRID_START, n * (week ? 7 : 3));
+  renderCalendar();
+}
 function shiftMonth(n) { initCal(); const d = new Date(Date.UTC(CAL_YEAR, CAL_MONTH + n, 1)); CAL_YEAR = d.getUTCFullYear(); CAL_MONTH = d.getUTCMonth(); renderCalendar(); }
-$('calPrevBtn').addEventListener('click', () => shiftMonth(-1));
-$('calNextBtn').addEventListener('click', () => shiftMonth(1));
-$('calTodayBtn').addEventListener('click', () => { CAL_YEAR = null; initCal(); renderCalendar(); renderSchedule(); });
+$('calPrevBtn').addEventListener('click', () => shiftCal(-1));
+$('calNextBtn').addEventListener('click', () => shiftCal(1));
+$('calTodayBtn').addEventListener('click', () => { CAL_YEAR = null; GRID_START = null; $('calTime').innerHTML = ''; initCal(); renderCalendar(); renderSchedule(); });
 
 function setView(v) {
   VIEW = v;

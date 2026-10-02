@@ -210,5 +210,14 @@
  "public.feedback.contactHint": "Der Kontakt dient nur für Rückfragen. Er wird nie öffentlich angezeigt.",
  "public.events.calCopy": "Feed-Link kopieren",
  "public.events.calCopyHint": "In Outlook (Desktop) oder die Option „Per URL abonnieren“ einer beliebigen App einfügen",
- "public.events.calCopied": "Link kopiert"
+ "public.events.calCopied": "Link kopiert",
+ "public.events.calRange": "Kalenderzeitraum",
+ "public.events.calMonth": "Monat",
+ "public.events.calWeek": "Woche",
+ "public.events.cal3Days": "3 Tage",
+ "public.events.calAllDay": "Ganztägig",
+ "public.events.calPrevWeek": "Vorherige Woche",
+ "public.events.calNextWeek": "Nächste Woche",
+ "public.events.calPrev3Days": "Vorherige 3 Tage",
+ "public.events.calNext3Days": "Nächste 3 Tage"
 }

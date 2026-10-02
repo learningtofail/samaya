@@ -214,5 +214,14 @@
  "public.feedback.contactHint": "El contacto es solo para dar seguimiento. Nunca se muestra públicamente.",
  "public.events.calCopy": "Copiar enlace del feed",
  "public.events.calCopyHint": "Pégalo en Outlook de escritorio o en la opción «suscribirse por URL» de cualquier app",
- "public.events.calCopied": "Enlace copiado"
+ "public.events.calCopied": "Enlace copiado",
+ "public.events.calRange": "Rango del calendario",
+ "public.events.calMonth": "Mes",
+ "public.events.calWeek": "Semana",
+ "public.events.cal3Days": "3 días",
+ "public.events.calAllDay": "Todo el día",
+ "public.events.calPrevWeek": "Semana anterior",
+ "public.events.calNextWeek": "Semana siguiente",
+ "public.events.calPrev3Days": "3 días anteriores",
+ "public.events.calNext3Days": "3 días siguientes"
 }

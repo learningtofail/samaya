@@ -227,5 +227,14 @@
  "public.feedback.contactHint": "وسيلة التواصل للمتابعة فقط، ولا تظهر علنًا أبدًا.",
  "public.events.calCopy": "نسخ رابط الخلاصة",
  "public.events.calCopyHint": "الصقه في Outlook لسطح المكتب أو في خيار «الاشتراك عبر عنوان URL» في أي تطبيق",
- "public.events.calCopied": "تم نسخ الرابط"
+ "public.events.calCopied": "تم نسخ الرابط",
+ "public.events.calRange": "نطاق التقويم",
+ "public.events.calMonth": "شهر",
+ "public.events.calWeek": "أسبوع",
+ "public.events.cal3Days": "3 أيام",
+ "public.events.calAllDay": "طوال اليوم",
+ "public.events.calPrevWeek": "الأسبوع السابق",
+ "public.events.calNextWeek": "الأسبوع التالي",
+ "public.events.calPrev3Days": "الأيام الثلاثة السابقة",
+ "public.events.calNext3Days": "الأيام الثلاثة التالية"
 }

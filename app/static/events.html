@@ -52,8 +52,14 @@
         <button type="button" id="calNextBtn" class="btn-plain"></button>
       </div>
       <h2 id="calMonthLabel" class="cal-title"></h2>
+      <div id="calMode" class="seg" role="group" aria-label="Calendar range" data-i18n-attr="aria-label:public.events.calRange">
+        <button type="button" data-mode="month" aria-pressed="true" data-i18n="public.events.calMonth">Month</button>
+        <button type="button" data-mode="week" aria-pressed="false" data-i18n="public.events.calWeek">Week</button>
+        <button type="button" data-mode="3day" aria-pressed="false" data-i18n="public.events.cal3Days">3 days</button>
+      </div>
     </div>
     <div id="calGrid" class="cal-grid"></div>
+    <div id="calTime" class="tg-scroll" role="region" tabindex="0" hidden></div>
   </section>
 
   <div id="schedule" aria-live="polite">

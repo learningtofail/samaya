@@ -207,5 +207,14 @@
  "public.feedback.contactHint": "联系方式仅用于跟进，绝不会公开显示。",
  "public.events.calCopy": "复制订阅链接",
  "public.events.calCopyHint": "粘贴到 Outlook 桌面版或任意应用的“通过网址订阅”中",
- "public.events.calCopied": "链接已复制"
+ "public.events.calCopied": "链接已复制",
+ "public.events.calRange": "日历范围",
+ "public.events.calMonth": "月",
+ "public.events.calWeek": "周",
+ "public.events.cal3Days": "3 天",
+ "public.events.calAllDay": "全天",
+ "public.events.calPrevWeek": "上一周",
+ "public.events.calNextWeek": "下一周",
+ "public.events.calPrev3Days": "前 3 天",
+ "public.events.calNext3Days": "后 3 天"
 }

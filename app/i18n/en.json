@@ -210,5 +210,14 @@
  "public.feedback.contactHint": "Contact is for follow-up only. It is never shown publicly.",
  "public.events.calCopy": "Copy feed link",
  "public.events.calCopyHint": "Paste into Outlook desktop or any app’s “subscribe by URL”",
- "public.events.calCopied": "Link copied"
+ "public.events.calCopied": "Link copied",
+ "public.events.calRange": "Calendar range",
+ "public.events.calMonth": "Month",
+ "public.events.calWeek": "Week",
+ "public.events.cal3Days": "3 days",
+ "public.events.calAllDay": "All day",
+ "public.events.calPrevWeek": "Previous week",
+ "public.events.calNextWeek": "Next week",
+ "public.events.calPrev3Days": "Previous 3 days",
+ "public.events.calNext3Days": "Next 3 days"
 }
