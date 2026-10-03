@@ -2274,6 +2274,45 @@ Built 2026-10-02 from the "multi-live hero" design handoff.
 - Countdowns and bars are found by class (`js-cd`, `js-bar`) instead of by id, so every card ticks.
 - Strings: `heroLiveCount` (plural, per language), `heroAlsoLive`, `heroMoreLive`, in all eight languages. The "more live" strings avoid verb agreement so they read correctly for any count.
 
+## 76. Ticket board (fixed columns)
+
+Requirement recorded 2026-10-03, adapted from the "Local-First Kanban" PRD and schema to this stack. The board is for developing Samaya only: it manages the feedback and issue tickets users submit (§66.10). It holds no personal data beyond the existing optional `submitter_contact`, which stays admin-only.
+
+### 76.1 Decisions
+
+- The board is a **view over `tickets`**. There are no `boards`, `cards` or `swimlanes` tables, no SQLite, and ids stay integers, so backups, CI, the audit log and the public API are unchanged.
+- **Columns are the statuses and are fixed:** Open, Planned, In progress, Done, Declined. `dismissed` is not a column; it stays an explicit action and stays visible in the List view.
+- A status is a public decision (§66.10): Open, Planned and In progress show on the public board, Done and Declined show in its read-only archive and close voting. Moving a ticket into Done or Declined therefore asks for confirmation.
+- **Order within a column** is `tickets.position`, a nullable integer. Positioned tickets sort first by `position`; the rest follow by upvotes, then newest. A move rewrites the positions of the whole destination column (0, 1, 2, ...), so there are no gaps or fractions to maintain. A status change made any other way (the status select, restore) clears `position`, so the ticket joins the unpositioned tail.
+- Concurrency is last write wins. Two admins moving cards at once can overwrite each other's order, which is acceptable for a handful of admins.
+
+### 76.2 Phases
+
+| Phase | Content | State |
+| --- | --- | --- |
+| 1 | `position`, `POST /admin/api/tickets/{id}/move`, Board view in the Feedback tab | Built 2026-10-03 |
+| 2 | Checklists (one level), internal notes, color tags, JSON and Markdown export | Not built |
+| 3 | WIP limit per column, enforced by the move endpoint (409 with an override flag) | Not built |
+
+### 76.3 Phase 1 as built
+
+- Migration `a1f0c0de0009`: nullable `tickets.position`. Additive; the downgrade drops the column.
+- `POST /admin/api/tickets/{id}/move` with `{status, index}`: `status` must be one of the five column statuses (`dismissed` is rejected with 422), and `index` is the 0-based place in the destination column, counted without the moved ticket and clamped to its length. A dismissed ticket answers 409 until restored. Viewers get 403. The move is written to the audit log with before and after `status` and `position`. The response holds the updated ticket and the new `positions` of the destination column.
+- `GET /admin/api/tickets` now includes `position`. The public endpoints never return it.
+- Ordering and placement are pure functions in `services/ticket_board.py` (`ordered`, `place`).
+- UI: a List / Board switch in the Feedback tab (stored in `localStorage` as `samaya_ticket_view`). Each card has a "Move" select (every other column, plus Move up and Move down) that works with keyboard and touch. Mouse users can also drag a card to a column or between cards; HTML5 drag-and-drop does not work on touch screens, which is why the select exists. The UI updates at once and rolls back with a toast if the server refuses.
+
+### 76.4 Not delivered from the PRD
+
+| PRD item | Why |
+| --- | --- |
+| Local-first sync (offline edits, merge) | Needs a sync engine with conflict resolution. The UI updates optimistically instead, and changes made offline are lost. |
+| React and Astro | The repo has no build step. The features are plain scripts. |
+| Custom columns (create, rename, reorder) | Decided against: statuses drive public visibility, so columns stay fixed. |
+| SQLite, UUID keys | The board uses the existing Postgres tables and integer ids. |
+| No-auth deployment behind Cloudflare Access | Samaya keeps Discord login and roles; the move endpoint uses `require_not_viewer`. |
+| CI webhooks on column moves, local-LLM helpers | Phase 2 of the PRD; no outbound webhook path exists. |
+
 # Archive
 
 Fully superseded designs, moved here unchanged except for position. Each begins with its own "Superseded" note. They stay for historical reasoning only and do not describe the current system.
