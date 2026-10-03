@@ -139,4 +139,5 @@ Run with `pip install -r app/requirements-dev.txt && cd app && pytest`.
 - Event types and kingdom-wide events need a `UserKingdom` grant; owning an alliance does not imply it
 - Leadership-only events never create Discord Scheduled Events and are never public. Anything public must read through `services/public_events.public_rows`
 - Jobs open their own sessions, so engine functions take an injectable `session_factory` and Discord client; a test must pass the test factory
+- Caddy on `lxc-taraka` (`/etc/caddy/Caddyfile`, outside this repo) is a path allowlist, not a catch-all. A new public route needs its own `reverse_proxy` line, or Caddy answers an empty 200 and the app never sees it. Test through `https://ks138.taraka.dev/<path>`, not `127.0.0.1:8000`; `admin off` means a change needs `systemctl restart caddy`. README "Adding a new public route" has the list and the check
 - Single uvicorn worker only; APScheduler runs in-process
