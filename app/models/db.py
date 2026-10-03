@@ -425,6 +425,18 @@ class TicketTagLink(Base):
     tag_id    = Column(Integer, ForeignKey("ticket_tags.id", ondelete="CASCADE"), primary_key=True)
 
 
+class TicketColumnLimit(Base):
+    """Work-in-progress limit for one ticket board column (spec §76.6). No row means no limit."""
+    __tablename__ = "ticket_column_limits"
+
+    status    = Column(Text, primary_key=True)
+    wip_limit = Column(Integer, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("wip_limit >= 1 AND wip_limit <= 999", name="ck_ticket_column_limit_range"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Events (spec §66): types, events, per-alliance overrides, reminders,
 # generated occurrences and the deliveries the engine sends.
