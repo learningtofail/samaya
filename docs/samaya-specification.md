@@ -2226,7 +2226,7 @@ Only the manual paths are documented by the vendors. The one-click deep links ar
 
 | Provider | What the vendor documents | What the menu does |
 | --- | --- | --- |
-| Google Calendar | "Add other calendars, From URL" (support.google.com/calendar/answer/37100). The `?cid=` deep link is not documented | `https://calendar.google.com/calendar/r?cid=` plus the **webcal://** feed, percent-encoded. An `https://` value in `cid` is rejected with "Unable to add calendar" (community reports; the previous link used https). Google fetches a webcal feed over http first, so the server must redirect to https (Cloudflare does) |
+| Google Calendar | "Add other calendars, From URL" (support.google.com/calendar/answer/37100). The `?cid=` deep link is not documented | `https://calendar.google.com/calendar/r?cid=` plus the **webcal://** feed, percent-encoded. An `https://` value in `cid` is rejected with "Unable to add calendar" (community reports; the previous link used https). Google fetches a webcal feed over http first. Production answers the feed directly on http (no redirect) and Google subscribes successfully, so an https redirect is not required |
 | Apple Calendar | "New Calendar Subscription"; clicking a link from a web page or email subscribes (support.apple.com/guide/calendar/icl1022/mac) | `webcal://` link |
 | Outlook.com | "Subscribe from web" (support.microsoft.com, "Import or subscribe to a calendar in Outlook.com or Outlook on the web"). `addfromweb` is not documented | `https://outlook.live.com/calendar/0/addfromweb?url=<https feed>&name=<title>`. Personal accounts only |
 | Outlook desktop | Account Settings, Internet Calendars. Microsoft documents that Outlook desktop can silently fail to add a feed when the server mishandles its modern-authentication probe (learn.microsoft.com, "Can't add an Internet calendar") | No one-click link; "Copy feed link" is the path. The Apple item no longer claims Outlook desktop |
@@ -2236,7 +2236,9 @@ Refresh is the provider's choice and cannot be forced: Google about 12 to 24 hou
 
 Feed changes: the invalid `CALNAME` property is no longer emitted (`X-WR-CALNAME` stays), and both feeds answer `HEAD`. `DTSTAMP` stays the generation time on purpose: a stale value could make Apple ignore a moved occurrence.
 
-Unverified from this environment (no route to production or to the vendors): that each deep link opens its provider's dialog today. The operator checks the four links once after deploy and, for Google, `curl -sI -A 'Google-Calendar-Importer' https://ks138.taraka.dev/ics/events.ics` to rule out a Cloudflare bot rule on the feed.
+Verified in production on 2026-10-02: the Google link subscribes and the events appear. Not yet checked: the Apple, Outlook.com and Outlook desktop paths. The vendors' deep links are conventions and can change without notice, so re-check them if a report comes in.
+
+Incident, 2026-10-02: the first production check returned `200` with `Content-Length: 0` for every `.ics` URL, whatever the user agent or query string, while the app served the full feed (87 events) on `127.0.0.1:8000`. Neither Cloudflare nor the tunnel was involved. The Caddyfile on `lxc-taraka` is a path allowlist and had no line for `/events.ics`, `/events/*`, `/theme/*` or `/theme-assets/*`, so Caddy answered them itself with an empty 200. Those four lines were added and Caddy was restarted. Rule for the future: a new public route is not finished until it returns its real body through `https://ks138.taraka.dev` (README "Adding a new public route").
 
 ### 73.3 Week and 3-day views
 
