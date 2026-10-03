@@ -124,6 +124,7 @@ def parse_cover_image_data(v, allow_none: bool = False):
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 MAX_REMINDERS = 10
 MAX_REMINDER_MINUTES = 28 * 24 * 60  # four weeks
+MAX_REMINDER_MESSAGE_CHARS = 2000  # Discord's own limit for a channel message
 
 
 def parse_hex_color(v, allow_none: bool = False):
@@ -201,6 +202,31 @@ def parse_reminder_minutes(v, allow_none: bool = False):
     if len(out) > MAX_REMINDERS:
         raise ValueError(f"At most {MAX_REMINDERS} reminders per event")
     return sorted(out, reverse=True)
+
+
+def parse_reminder_messages(v, allow_none: bool = False):
+    """{minutes: text} for the reminders that have their own message (spec §77).
+    Keys may arrive as JSON strings. A blank text drops the entry, so the
+    reminder falls back to the event's message."""
+    if v is None and allow_none:
+        return v
+    if not isinstance(v, dict):
+        raise ValueError("Reminder messages must be an object of minutes to text")
+    out: dict[int, str] = {}
+    for key, text in v.items():
+        try:
+            minutes = int(key)
+        except (TypeError, ValueError):
+            raise ValueError("Each reminder message must be keyed by a whole number of minutes")
+        if minutes < 0 or minutes > MAX_REMINDER_MINUTES:
+            raise ValueError("A reminder message is keyed by minutes from 0 to 4 weeks")
+        if not isinstance(text, str):
+            raise ValueError("A reminder message must be text")
+        if len(text) > MAX_REMINDER_MESSAGE_CHARS:
+            raise ValueError(f"A reminder message can be at most {MAX_REMINDER_MESSAGE_CHARS} characters")
+        if text.strip():
+            out[minutes] = text.strip()
+    return out
 
 
 def check_recurrence_shape(kind: str, interval_days, anchor, until):

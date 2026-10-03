@@ -91,6 +91,7 @@ def _event_dict(e: Event) -> dict:
         "active":            e.active,
         "cover_image_data":  e.cover_image_data or None,
         "reminder_minutes":  sorted((r.minutes_before for r in e.reminders), reverse=True),
+        "reminder_messages": {str(r.minutes_before): r.message for r in e.reminders if r.message},
         "alliances": [
             {
                 "tenant_id":        a.tenant_id,
@@ -121,6 +122,7 @@ def _event_audit_snapshot(e: Event) -> dict:
         "anchor_date": str(e.anchor_date), "until_date": str(e.until_date) if e.until_date else None,
         "mention_role": e.mention_role, "active": e.active,
         "reminder_minutes": sorted((r.minutes_before for r in e.reminders), reverse=True),
+        "reminder_messages": {str(r.minutes_before): r.message for r in e.reminders if r.message},
         "alliance_tenant_ids": sorted(a.tenant_id for a in e.alliances),
         "audience_changes": sorted((a.audience_id, a.included) for a in e.audience_links),
     }
@@ -293,11 +295,20 @@ async def _resolve_alliance_rows(
     return built
 
 
-def _reminder_rows(minutes: list[int]) -> list[EventReminder]:
-    return [EventReminder(minutes_before=m) for m in minutes]
+def _check_reminder_messages(minutes: list[int], messages: dict[int, str] | None) -> None:
+    """A message belongs to a reminder that exists (spec §77)."""
+    stray = sorted(set(messages or {}) - set(minutes), reverse=True)
+    if stray:
+        raise HTTPException(
+            status_code=422,
+            detail=f"There is no reminder at {', '.join(str(m) for m in stray)} minutes to carry that message")
 
 
-def _sync_reminders(event: Event, minutes: list[int]) -> None:
+def _reminder_rows(minutes: list[int], messages: dict[int, str] | None = None) -> list[EventReminder]:
+    return [EventReminder(minutes_before=m, message=(messages or {}).get(m)) for m in minutes]
+
+
+def _sync_reminders(event: Event, minutes: list[int], messages: dict[int, str] | None = None) -> None:
     """Edits an event's reminder list in place. Replacing the collection
     wholesale would insert the new rows before deleting the old ones in the
     same flush and trip the (event_id, minutes_before) unique constraint
@@ -308,6 +319,9 @@ def _sync_reminders(event: Event, minutes: list[int]) -> None:
         event.reminders.remove(row)
     for m in sorted(wanted - kept, reverse=True):
         event.reminders.append(EventReminder(minutes_before=m))
+    if messages is not None:  # a full replacement: offsets not in the map go back to the event message
+        for row in event.reminders:
+            row.message = messages.get(row.minutes_before)
 
 
 def _sync_alliances(event: Event, rows: list[EventAlliance]) -> None:
@@ -432,8 +446,11 @@ async def apply_event_patch(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    if payload.reminder_minutes is not None:
-        _sync_reminders(event, payload.reminder_minutes)
+    if payload.reminder_minutes is not None or payload.reminder_messages is not None:
+        minutes = (payload.reminder_minutes if payload.reminder_minutes is not None
+                   else [r.minutes_before for r in event.reminders])
+        _check_reminder_messages(minutes, payload.reminder_messages)
+        _sync_reminders(event, minutes, payload.reminder_messages)
     if payload.alliances is not None:
         _sync_alliances(event, await _resolve_alliance_rows(db, user, owner, new_scope, payload.alliances))
     elif payload.scope is not None and payload.scope != before_scope and new_scope == "alliance":
@@ -604,7 +621,8 @@ async def create_event(
         cover_image_data=cover_image_data,
     )
     event.alliances = await _resolve_alliance_rows(db, user, tenant, payload.scope, payload.alliances)
-    event.reminders = _reminder_rows(reminder_minutes)
+    _check_reminder_messages(reminder_minutes, payload.reminder_messages)
+    event.reminders = _reminder_rows(reminder_minutes, payload.reminder_messages)
     event.audience_links = []
     _sync_selection(event, payload.audience_changes)
     await _validate_destinations(db, tenant, event)

@@ -543,3 +543,7 @@ textarea.pf-v6-c-form-control { min-height: 5rem; resize: vertical; }
 /* Board WIP limits (spec §76.6) */
 .board__limit { font-size: var(--fs-xs); font-weight: 400; color: var(--muted); }
 .board__limit--over { color: var(--bad-ink); font-weight: 600; }
+
+/* Per-reminder messages (spec §77) */
+.reminders__messages { display: grid; gap: var(--space-3); }
+.reminders__message { display: grid; gap: var(--space-1); }

@@ -27,7 +27,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.db import (
-    Delivery, AudienceDestination, DiscordServer, Event, EventAlliance, EventOccurrence, Tenant,
+    Delivery, AudienceDestination, DiscordServer, Event, EventAlliance, EventOccurrence, EventReminder, Tenant,
 )
 from services.destinations import (
     MERGED_PREFIX, Target, alliance_overrides, find_conflicts, group_sends, merge_key, plan_destinations, resolve_for_event,
@@ -49,6 +49,16 @@ DISCORD_EVENT_LEAD = timedelta(days=7)
 DISCORD_EVENT_FLOOR = timedelta(minutes=15)
 #: A `sending` delivery older than this is declared lost (see module docstring).
 STALE_CLAIM_AFTER = timedelta(minutes=10)
+AT_START_GRACE = timedelta(minutes=5)
+
+
+def _reminder_expired(minutes: int, start: datetime, now: datetime) -> bool:
+    """An earlier reminder is pointless once the event has started. An "at the
+    start" reminder (0) comes due at that very moment, so it gets a short grace
+    period for the one-minute tick or a brief outage; before this it was always
+    cancelled as "already started"."""
+    return now - start > AT_START_GRACE if minutes == 0 else start <= now
+
 MAX_CONTENT_CHARS = 2000
 TICK_BATCH_SIZE = 200
 
@@ -466,6 +476,13 @@ async def _merged_targets(session: AsyncSession, delivery: Delivery) -> list[Tar
     return [Target(m.tenant, m.destination) for m in members if m.destination is not None]
 
 
+async def _reminder_message(session: AsyncSession, event: Event, minutes: int) -> str | None:
+    row = (await session.execute(
+        select(EventReminder).where(EventReminder.event_id == event.id, EventReminder.minutes_before == minutes)
+    )).scalar_one_or_none()
+    return row.message if row is not None and row.message else None
+
+
 async def _send_reminder(
     session: AsyncSession, discord, delivery: Delivery, event: Event, occ: EventOccurrence,
     tenant: Tenant, now: datetime,
@@ -488,8 +505,11 @@ async def _send_reminder(
     sends = group_sends(members)
     send = sends[0]
     note: str | None = None
+    reminder_message = await _reminder_message(session, event, delivery.reminder_minutes)
     if occ.message_override:
         message = occ.message_override
+    elif reminder_message:
+        message = reminder_message  # this reminder's own text beats alliance overrides (spec §77)
     else:
         overrides = alliance_overrides((await session.execute(
             select(EventAlliance).where(EventAlliance.event_id == event.id))).scalars().all())
@@ -555,7 +575,7 @@ async def process_delivery(session_factory, discord, delivery_id: int, now: date
 
             if not event.active or occ.status == "cancelled":
                 status, detail = "cancelled", "Event or occurrence no longer active"
-            elif delivery.kind == KIND_REMINDER and start <= now:
+            elif delivery.kind == KIND_REMINDER and _reminder_expired(delivery.reminder_minutes, start, now):
                 status, detail = "cancelled", "Event had already started"
             elif delivery.kind == KIND_DISCORD_EVENT and start - now < DISCORD_EVENT_FLOOR:
                 status, detail = "cancelled", "Starts within 15 minutes; no Discord event created"
