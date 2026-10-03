@@ -6,7 +6,7 @@
 // X-Tenant-Slug header names (the header only proves the caller has access).
 
 let TICKETS = [];
-const TICKETF = { editing: null };
+const TICKETF = { editing: null, dragId: null };
 
 const TICKET_KIND_META = {
   feedback:             { label: 'Feedback', color: 'pf-m-blue' },
@@ -29,6 +29,11 @@ const TICKET_FILTERS = [
   { value: 'all', label: 'Everything' },
   ...Object.keys(TICKET_STATUS_LABELS).map((s) => ({ value: s, label: 'Only ' + TICKET_STATUS_LABELS[s].toLowerCase() })),
 ];
+
+// Board (spec §76): one column per status, fixed. "dismissed" is not a column.
+const BOARD_COLUMNS = ['open', 'planned', 'in_progress', 'done', 'declined'];
+const TICKET_VIEW_KEY = 'samaya_ticket_view';
+let ticketView = 'list';
 
 function ticketsSlug() {
   return TENANTS[0] ? TENANTS[0].slug : '';
@@ -53,9 +58,10 @@ async function loadTickets() {
     sel.innerHTML = optionsHtml(TICKET_FILTERS, saved);
   }
   renderAuthorBanner();
+  try { ticketView = localStorage.getItem(TICKET_VIEW_KEY) === 'board' ? 'board' : 'list'; } catch { ticketView = 'list'; }
   try {
     TICKETS = await api('GET', '/api/tickets', null, false, ticketsSlug());
-    renderTickets();
+    applyTicketView();
   } catch (e) {
     toast(e.message, true);
     byId('ticketList').innerHTML = `<p class="samaya-empty">Could not load feedback: ${escapeHtml(e.message)}</p>`;
@@ -136,6 +142,11 @@ function buildTicketHtml(t) {
 }
 
 function renderTickets() {
+  if (ticketView === 'board') renderBoard();
+  else renderTicketList();
+}
+
+function renderTicketList() {
   const f = byId('ticketFilter').value;
   const openIds = new Set(Array.from(document.querySelectorAll('#ticketList details[open]')).map((d) => d.dataset.ticketId));
   const shown = TICKETS.filter((t) => ticketMatchesFilter(t, f));
@@ -284,6 +295,197 @@ byId('btnSaveTicket').addEventListener('click', async () => {
   if (kind !== t.kind) payload.kind = kind;
   if (!Object.keys(payload).length) { closeTicketModal(); return; }
   if (await patchTicket(t.id, payload, 'Ticket updated. The submitter is not told.')) closeTicketModal();
+});
+
+// ── Board view (spec §76) ────────────────────────────────────
+// State is TICKETS (status and position); the DOM is rebuilt from it. A move
+// updates TICKETS at once, asks the server, and restores a snapshot if the
+// server refuses (last write wins on the server, no offline queue).
+
+function setTicketView(view) {
+  ticketView = view;
+  try { localStorage.setItem(TICKET_VIEW_KEY, view); } catch { /* storage blocked */ }
+  applyTicketView();
+}
+
+function applyTicketView() {
+  const board = ticketView === 'board';
+  byId('ticketList').classList.toggle('hidden', board);
+  byId('ticketBoardWrap').classList.toggle('hidden', !board);
+  byId('ticketFilterItem').classList.toggle('hidden', board);
+  byId('ticketViewList').setAttribute('aria-pressed', String(!board));
+  byId('ticketViewBoard').setAttribute('aria-pressed', String(board));
+  renderTickets();
+}
+
+// Same order as services/ticket_board.py: placed tickets by position, then votes, newest, id.
+function boardCompare(a, b) {
+  if ((a.position === null) !== (b.position === null)) return a.position === null ? 1 : -1;
+  if (a.position !== null && a.position !== b.position) return a.position - b.position;
+  if (a.upvote_count !== b.upvote_count) return b.upvote_count - a.upvote_count;
+  const ta = Date.parse(a.created_at) || 0;
+  const tb = Date.parse(b.created_at) || 0;
+  if (ta !== tb) return tb - ta;
+  return b.id - a.id;
+}
+
+function boardColumn(status, exceptId) {
+  return TICKETS.filter((t) => t.status === status && t.id !== exceptId).sort(boardCompare);
+}
+
+function boardCardHtml(t, index, count) {
+  const kind = TICKET_KIND_META[t.kind] || { label: t.kind, color: 'pf-m-gray' };
+  const moderate = canModerateTickets();
+  const meta = [`${t.upvote_count} upvote${t.upvote_count === 1 ? '' : 's'}`];
+  if (t.tenant_name) meta.push(t.tenant_name);
+  let move = '';
+  if (moderate) {
+    const options = BOARD_COLUMNS.filter((s) => s !== t.status)
+      .map((s) => ({ value: 'to:' + s, label: 'Move to ' + TICKET_STATUS_LABELS[s] }));
+    if (index > 0) options.push({ value: 'up', label: 'Move up' });
+    if (index < count - 1) options.push({ value: 'down', label: 'Move down' });
+    move = `<label class="sr-only" for="boardMove${t.id}">Move ${escapeHtml(t.title)}</label>
+      <select class="pf-v6-c-form-control board-card__move" id="boardMove${t.id}" data-board-move="${t.id}">
+        <option value="">Move&hellip;</option>${optionsHtml(options, '')}
+      </select>`;
+  }
+  return `<li class="board-card" data-ticket-id="${t.id}"${moderate ? ' draggable="true"' : ''}>
+    <button type="button" class="board-card__title" data-action="board-open" data-id="${t.id}">${escapeHtml(t.title)}</button>
+    <div class="board-card__meta">${pfLabel(kind.label, kind.color)} <span class="samaya-muted">${escapeHtml(meta.join(', '))}</span></div>
+    ${move}
+  </li>`;
+}
+
+function renderBoard() {
+  byId('ticketBoard').innerHTML = BOARD_COLUMNS.map((status) => {
+    const column = boardColumn(status);
+    const cards = column.length
+      ? column.map((t, i) => boardCardHtml(t, i, column.length)).join('')
+      : '<li class="board__empty samaya-muted">No tickets</li>';
+    return `<section class="board__col" data-status="${status}" aria-labelledby="boardHead-${status}">
+      <h3 class="board__head" id="boardHead-${status}">${escapeHtml(TICKET_STATUS_LABELS[status])} <span class="samaya-muted">${column.length}</span></h3>
+      <ul class="board__cards">${cards}</ul>
+    </section>`;
+  }).join('');
+  const dismissed = TICKETS.filter((t) => t.status === 'dismissed').length;
+  const onBoard = TICKETS.length - dismissed;
+  byId('ticketCount').textContent = `${onBoard} ticket${onBoard === 1 ? '' : 's'} on the board`;
+  byId('ticketBoardNote').textContent = dismissed
+    ? `${dismissed} dismissed ticket${dismissed === 1 ? ' is' : 's are'} hidden from the board. Switch to List to see ${dismissed === 1 ? 'it' : 'them'}.`
+    : '';
+}
+
+// Mirrors services/ticket_board.place(): the whole destination column is renumbered.
+function placeLocal(ticket, status, index) {
+  const others = boardColumn(status, ticket.id);
+  others.splice(Math.max(0, Math.min(index, others.length)), 0, ticket);
+  ticket.status = status;
+  others.forEach((t, n) => { t.position = n; });
+}
+
+function focusBoardMove(id) {
+  const el = byId('boardMove' + id);
+  if (el) el.focus();
+}
+
+async function moveTicket(ticket, status, index) {
+  if (ticket.status === status && index === boardColumn(status).findIndex((t) => t.id === ticket.id)) return;
+  if (TICKET_ARCHIVED.includes(status) && !TICKET_ARCHIVED.includes(ticket.status)
+      && !confirm(`Move "${ticket.title}" to ${TICKET_STATUS_LABELS[status]}? It moves to the public archive and voting closes.`)) return;
+  const snapshot = TICKETS.map((t) => ({ ...t }));
+  placeLocal(ticket, status, index);
+  renderBoard();
+  focusBoardMove(ticket.id);
+  try {
+    const res = await api('POST', `/api/tickets/${ticket.id}/move`, { status, index }, false, ticketsSlug());
+    TICKETS = TICKETS.map((t) => {
+      if (t.id === res.ticket.id) return res.ticket;
+      return res.positions[t.id] === undefined ? t : { ...t, position: res.positions[t.id] };
+    });
+    renderBoard();
+    focusBoardMove(ticket.id);
+    toast(`Moved "${ticket.title}" to ${TICKET_STATUS_LABELS[status]}.`);
+  } catch (e) {
+    TICKETS = snapshot;
+    renderBoard();
+    toast(e.message, true);
+  }
+}
+
+function showTicketInList(id) {
+  byId('ticketFilter').value = 'all';
+  ticketView = 'list';
+  applyTicketView();
+  const details = document.querySelector(`#ticketList details[data-ticket-id="${id}"]`);
+  if (!details) return;
+  details.open = true;
+  details.scrollIntoView({ block: 'center' });
+  details.querySelector('summary').focus();
+}
+
+const ticketBoard = byId('ticketBoard');
+bindActions(ticketBoard, {
+  'board-open'(btn) { showTicketInList(parseInt(btn.dataset.id, 10)); },
+});
+byId('ticketViewList').addEventListener('click', () => setTicketView('list'));
+byId('ticketViewBoard').addEventListener('click', () => setTicketView('board'));
+
+ticketBoard.addEventListener('change', (e) => {
+  const select = e.target.closest('[data-board-move]');
+  if (!select || !select.value) return;
+  const ticket = ticketById(select.dataset.boardMove);
+  const choice = select.value;
+  select.value = '';
+  if (!ticket) return;
+  const current = boardColumn(ticket.status).findIndex((t) => t.id === ticket.id);
+  if (choice === 'up') moveTicket(ticket, ticket.status, current - 1);
+  else if (choice === 'down') moveTicket(ticket, ticket.status, current + 1);
+  else if (choice.startsWith('to:')) moveTicket(ticket, choice.slice(3), boardColumn(choice.slice(3)).length);
+});
+
+// Mouse drag and drop. Touch screens and keyboards use each card's Move menu.
+function clearBoardDrag() {
+  TICKETF.dragId = null;
+  ticketBoard.querySelectorAll('.board-card--dragging, .board__col--over').forEach((el) => {
+    el.classList.remove('board-card--dragging', 'board__col--over');
+  });
+}
+
+ticketBoard.addEventListener('dragstart', (e) => {
+  const card = e.target.closest('.board-card');
+  if (!card) return;
+  TICKETF.dragId = parseInt(card.dataset.ticketId, 10);
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', String(TICKETF.dragId));
+  card.classList.add('board-card--dragging');
+});
+ticketBoard.addEventListener('dragover', (e) => {
+  const column = e.target.closest('.board__col');
+  if (TICKETF.dragId === null || !column) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  ticketBoard.querySelectorAll('.board__col--over').forEach((el) => { if (el !== column) el.classList.remove('board__col--over'); });
+  column.classList.add('board__col--over');
+});
+ticketBoard.addEventListener('dragend', clearBoardDrag);
+ticketBoard.addEventListener('drop', (e) => {
+  const column = e.target.closest('.board__col');
+  const id = TICKETF.dragId;
+  clearBoardDrag();
+  const ticket = column && id !== null ? ticketById(id) : null;
+  if (!ticket) return;
+  e.preventDefault();
+  const status = column.dataset.status;
+  const ids = boardColumn(status, id).map((t) => t.id);
+  const over = e.target.closest('.board-card');
+  let index = ids.length;
+  if (over) {
+    const overId = parseInt(over.dataset.ticketId, 10);
+    if (overId === id) return;
+    const rect = over.getBoundingClientRect();
+    index = ids.indexOf(overId) + (e.clientY > rect.top + rect.height / 2 ? 1 : 0);
+  }
+  moveTicket(ticket, status, index);
 });
 
 VIEW_LOADERS.feedback = loadTickets;

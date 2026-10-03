@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 from models import get_db
 from models.db import Tenant, Ticket, TicketResponse, User
 from services.audit import log_change
+from services.ticket_board import BOARD_STATUSES, place
 from services.ticket_views import ALL_STATUSES, RESPONSE_MAX_CHARS, occurrence_names, response_dict
 
 from .deps import get_current_tenant, get_current_user, require_not_viewer, require_superadmin
@@ -38,6 +39,7 @@ def _ticket_admin_dict(t: Ticket, tenant_by_id: dict, occ_names: dict) -> dict:
         "title": t.title,
         "description": t.description,
         "status": t.status,
+        "position": t.position,
         "upvote_count": t.upvote_count,
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "updated_at": t.updated_at.isoformat() if t.updated_at else None,
@@ -129,12 +131,52 @@ async def update_ticket(
     before = _audit_snapshot(ticket)
     for field in payload.model_fields_set:
         setattr(ticket, field, getattr(payload, field))
+    if ticket.status != before["status"]:
+        ticket.position = None  # a status change outside the board rejoins the unplaced tail (spec §76.1)
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id, table_name="tickets", row_id=ticket.id,
         action="update", before=before, after=_audit_snapshot(ticket),
     )
     await db.commit()
     return await _ticket_json(db, await _load_ticket(db, ticket_id))
+
+
+class TicketMove(BaseModel):
+    """Drop a ticket into a board column at a place (spec §76)."""
+    status: str
+    index:  int = Field(ge=0, le=10_000)
+
+    @field_validator("status")
+    @classmethod
+    def _board_status(cls, v):
+        if v not in BOARD_STATUSES:
+            raise ValueError(f"status must be one of {BOARD_STATUSES}; use Dismiss to hide a ticket")
+        return v
+
+
+@router.post("/api/tickets/{ticket_id}/move")
+async def move_ticket(
+    ticket_id: int, payload: TicketMove,
+    tenant: Tenant = Depends(require_not_viewer), user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change a ticket's status and its place in that column in one audited
+    write. Renumbers the destination column. Last write wins."""
+    ticket = await _load_ticket(db, ticket_id)
+    if ticket.status == "dismissed":
+        raise HTTPException(status_code=409, detail="Restore a dismissed ticket before moving it")
+    before = {"status": ticket.status, "position": ticket.position}
+    column = (await db.execute(select(Ticket).where(Ticket.status == payload.status))).scalars().all()
+    ticket.status = payload.status
+    positions = place(column, ticket, payload.index)
+    for member in {*column, ticket}:
+        member.position = positions[member.id]
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id, table_name="tickets", row_id=ticket.id,
+        action="update", before=before, after={"status": ticket.status, "position": ticket.position},
+    )
+    await db.commit()
+    return {"ticket": await _ticket_json(db, await _load_ticket(db, ticket_id)), "positions": positions}
 
 
 @router.delete("/api/tickets/{ticket_id}", status_code=204)

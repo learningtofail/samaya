@@ -305,6 +305,10 @@ class Ticket(Base):
     submitter_contact        = Column(Text, nullable=True)
     status                   = Column(Text, nullable=False, default="open")
     upvote_count             = Column(Integer, nullable=False, default=1)
+    # Spec §76: order within its status column on the admin board. NULL means
+    # never placed by hand (sorts after placed tickets, by votes). Admin only;
+    # no public endpoint returns it.
+    position                 = Column(Integer, nullable=True)
     created_at               = Column(DateTime(timezone=True), server_default=func.now())
     updated_at               = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

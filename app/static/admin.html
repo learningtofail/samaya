@@ -230,12 +230,23 @@
   <p class="banner banner--info" id="ticketAuthor"></p>
   <div class="filters filters--panel" role="group" aria-label="Filter feedback">
     <div class="filters__item">
+      <span class="filters__label" id="ticketViewLabel">View</span>
+      <div class="seg" role="group" aria-labelledby="ticketViewLabel">
+        <button type="button" id="ticketViewList" aria-pressed="true">List</button>
+        <button type="button" id="ticketViewBoard" aria-pressed="false">Board</button>
+      </div>
+    </div>
+    <div class="filters__item" id="ticketFilterItem">
       <label class="filters__label" for="ticketFilter">Show</label>
       <select class="pf-v6-c-form-control" id="ticketFilter"></select>
     </div>
   </div>
   <p class="count" id="ticketCount" role="status"></p>
   <div id="ticketList"></div>
+  <div id="ticketBoardWrap" class="board-wrap hidden">
+    <div class="board" id="ticketBoard"></div>
+    <p class="samaya-muted" id="ticketBoardNote"></p>
+  </div>
   <details class="about-page">
     <summary>About this tab</summary>
     <div class="about-page__body">
@@ -245,6 +256,7 @@
         <li><strong>Dismiss</strong> hides a ticket from the public page without deleting it, and Restore brings it back. Only a superadmin can delete one for good.</li>
         <li><strong>Edit</strong> fixes the title, text or type, for example to remove personal details. The submitter is not told.</li>
         <li><strong>Done</strong> and <strong>declined</strong> tickets are grouped as Archived.</li>
+        <li><strong>Board</strong> shows one column per status. Use a card's Move menu (keyboard and touch), or drag it with a mouse. Moving a card changes its public status, and a move into Done or Declined asks first because it closes voting. Dismissed tickets are not on the board; use List to see them.</li>
       </ul>
     </div>
   </details>
