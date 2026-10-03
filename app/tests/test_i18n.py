@@ -234,7 +234,7 @@ class TestPages:
         assert "<title>Feedback &amp; Requests — Kingshot</title>" in r.text
 
     async def test_tenant_events_page(self, client_no_session, tenant):
-        r = await client_no_session.get(f"/t/{tenant['slug']}/events")
+        r = await client_no_session.get(f"/events/{tenant['slug']}")
         assert r.status_code == 200 and '<html lang="en"' in r.text
 
     async def test_lang_param_sets_cookie_only_for_enabled_locale(self, client_no_session):

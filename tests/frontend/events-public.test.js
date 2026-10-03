@@ -215,13 +215,13 @@ describe("brandInk matches the backend", () => {
 });
 
 describe("calendarLinks (vendor subscribe URL formats)", () => {
-  const abs = "https://ks138.taraka.dev/t/mod/ics/events.ics";
-  const web = "webcal://ks138.taraka.dev/t/mod/ics/events.ics";
+  const abs = "https://ks138.taraka.dev/events/mod.ics";
+  const web = "webcal://ks138.taraka.dev/events/mod.ics";
   let links;
   beforeAll(() => { links = fns.calendarLinks(abs, web, "Events & More"); });
 
   test("Google gets the webcal:// form inside cid; https:// there is rejected by Google", () => {
-    expect(links.google).toBe("https://calendar.google.com/calendar/r?cid=webcal%3A%2F%2Fks138.taraka.dev%2Ft%2Fmod%2Fics%2Fevents.ics");
+    expect(links.google).toBe("https://calendar.google.com/calendar/r?cid=webcal%3A%2F%2Fks138.taraka.dev%2Fevents%2Fmod.ics");
   });
   test("Apple opens the bare webcal:// address", () => {
     expect(links.apple).toBe(web);

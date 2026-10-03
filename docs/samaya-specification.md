@@ -45,9 +45,9 @@ A self-hosted, multi-tenant event scheduler for the Kingshot community on Kingdo
 ## CS.5 API surface
 
 Public, unauthenticated:
-- Pages: `/events`, `/t/{slug}/events`, `/feedback`.
-- Data: `/api/events`, `/t/{slug}/api/events`, `/api/alliances`, `/api/kingdom-branding`, `/api/last-activity`, `/t/{slug}/api/last-activity`, `GET/POST /api/tickets` (`GET` returns `{active, archived}`), `POST /api/tickets/{id}/vote`. All read through `services/public_events.public_rows`, the one place that excludes inactive and leadership-only events (§66.6).
-- Calendars: `/ics/events.ics` and `/t/{slug}/ics/events.ics`.
+- Pages: `/events`, `/events/{slug}`, `/feedback`.
+- Data: `/api/events`, `/api/events/{slug}`, `/api/alliances`, `/api/kingdom-branding`, `/api/last-activity`, `/api/last-activity/{slug}`, `GET/POST /api/tickets` (`GET` returns `{active, archived}`), `POST /api/tickets/{id}/vote`. All read through `services/public_events.public_rows`, the one place that excludes inactive and leadership-only events (§66.6).
+- Calendars: `/events.ics` and `/events/{slug}.ics`.
 - Other: `/health`, `POST /webhooks/discord` (signature verified).
 - The three ticket endpoints are rate limited per client IP (§65).
 
@@ -94,7 +94,7 @@ A Discord Scheduled Event is due 7 days before start and is skipped for leadersh
 ## CS.10 Conventions
 
 - UTC everywhere; normalize with `ensure_utc()`.
-- Admin routes scope by `X-Tenant-Slug`; public routes scope by `/t/{slug}`, because calendar apps cannot send headers.
+- Admin routes scope by `X-Tenant-Slug`; public routes scope by the URL path (`/events/{slug}`), because calendar apps cannot send headers.
 - Reuse `deps.py` checks and `services/db_errors.py` instead of writing inline lookups or substring-matching driver errors.
 - Update `CLAUDE.md` when files are added, removed or renamed, and this spec first for any functional change.
 
@@ -158,7 +158,7 @@ The app refuses to boot if `SECRET_KEY`, `DISCORD_OAUTH_CLIENT_ID`, or `DISCORD_
 
 ### 3.1 Tenant scoping conventions
 
-Public routes scope by URL path segment (`/t/{tenant_slug}/...`) because calendar apps consuming ICS feeds cannot send custom headers. Admin API routes scope by request header (`X-Tenant-Slug`) instead — a bridge-period choice from before real per-user access checks existed, kept so route paths didn't need to change again.
+Public routes scope by URL path segment (`/events/{tenant_slug}`, §74) because calendar apps consuming ICS feeds cannot send custom headers. Admin API routes scope by request header (`X-Tenant-Slug`) instead — a bridge-period choice from before real per-user access checks existed, kept so route paths didn't need to change again.
 
 ## 4. Data Model
 
@@ -193,12 +193,12 @@ Every timestamp is UTC. `services/time_utils.ensure_utc()` normalizes `tzinfo` b
 
 ### 5.1 Public (unauthenticated, path-scoped)
 
-- `GET /t/{tenant_slug}/api/events`
-- `GET /t/{tenant_slug}/events` — renders `static/events.html`
-- `GET /t/{tenant_slug}/ics/events.ics` — public ICS feed
+- `GET /api/events/{tenant_slug}`
+- `GET /events/{tenant_slug}` — renders `static/events.html`
+- `GET /events/{tenant_slug}.ics` — public ICS feed
 - `GET /health`
-- `GET /events`, `GET /api/events`, `GET /ics/events.ics` — the combined, all-alliance versions of the three per-tenant routes above
-- `GET /api/alliances`, `GET /api/kingdom-branding`, `GET /api/last-activity` (and `/t/{tenant_slug}/api/last-activity`) — public page support
+- `GET /events`, `GET /api/events`, `GET /events.ics` — the combined, all-alliance versions of the three per-tenant routes above
+- `GET /api/alliances`, `GET /api/kingdom-branding`, `GET /api/last-activity` (and `/api/last-activity/{tenant_slug}`) — public page support
 - `GET /feedback`, `GET/POST /api/tickets`, `POST /api/tickets/{id}/vote` — the public feedback board (§40 to §43)
 
 ### 5.2 Auth
@@ -2014,7 +2014,7 @@ Pillow is added now (decided 2026-10-02), not only for banners. One module, `ser
 
 ### 71.6 Delivery to the pages
 
-- `/events`, `/t/{slug}/events` and `/feedback` resolve the theme and copy per request (one small query, with a short in-process cache of the result; the app has one worker) and replace marker comments in the static HTML. This removes the hard-coded Google Fonts `<link>` from both pages.
+- `/events`, `/events/{slug}` and `/feedback` resolve the theme and copy per request (one small query, with a short in-process cache of the result; the app has one worker) and replace marker comments in the static HTML. This removes the hard-coded Google Fonts `<link>` from both pages.
 - Generated stylesheet: `GET /theme/{theme_id}.css?v={updated_at}.{STATIC_ASSET_VERSION}` (`/theme/default.css` when no theme is active). It contains only `:root { --variable: value; }` declarations from validated values, so there is nothing to escape beyond hex colors, catalogue font strings, a hash-based banner URL and two numbers. It is cached for a year because the URL changes whenever the theme or the code changes.
 - The HTML itself must not be cached at the edge for longer than a theme change should take to appear. Cloudflare does not cache `/events`, `/feedback` or `/api/kingdom-branding` today (checked 2026-10-02, §71.14); any future cache rule for them must bypass or vary (§72.3).
 - `GET /events?preview_theme={id}` renders that theme for a signed-in superadmin; for anyone else the parameter is ignored. Previews send `Cache-Control: no-store` and `X-Robots-Tag: noindex`. The admin editor shows the real page in an iframe from this URL, so the preview cannot drift from the page. No `X-Frame-Options` or CSP header was seen on these pages (§71.14), so the iframe is expected to work; confirm with a `GET` on the first build.
@@ -2108,7 +2108,7 @@ Added after reviewing `THEME-SPEC.md` from the design handoff. Its file-based th
 
 ### 72.1 Scope
 
-1. **Public pages** (`/events`, `/t/{slug}/events`, `/feedback`): in the first release.
+1. **Public pages** (`/events`, `/events/{slug}`, `/feedback`): in the first release.
 2. **Admin console:** second, with the same mechanism (§72.10).
 3. **Discord slash command replies and command names** (§70): last, handled later (decided 2026-10-02). Until then Discord replies stay English. The `t()` catalogue is shared, so the `discord.*` keys are added when this phase starts, not before.
 
@@ -2218,7 +2218,7 @@ Built 2026-10-02 (revision: no schema change).
 
 ### 73.1 Alliance chips
 
-The chips on `/events` and `/t/{slug}/events` are ordinary links (`/events`, `/t/{slug}/events`). A plain click navigates. The earlier in-place filter on the combined page is removed: the alliance pages already show that alliance plus Kingdom-wide events, and the URL is what a visitor needs to subscribe to one alliance's feed.
+The chips on `/events` and `/events/{slug}` are ordinary links (`/events`, `/events/{slug}`). A plain click navigates. The earlier in-place filter on the combined page is removed: the alliance pages already show that alliance plus Kingdom-wide events, and the URL is what a visitor needs to subscribe to one alliance's feed.
 
 ### 73.2 Subscribe links, checked against vendor documentation
 
@@ -2245,6 +2245,23 @@ The Calendar tab has a Month / Week / 3 days switcher (stored in `samaya_cal_mod
 Implementation rules that differ from the design handoff: geometry is passed as custom properties through `data-vars` (no inline `style=`), CSS uses logical properties so Arabic mirrors, time ranges are wrapped in `<bdi dir="ltr">`, and the pure geometry (`dayBlocks`, `weekStartOf`, `addDays`, `minsOf`) is unit tested.
 
 Known limit: a day is always 24 rows, so on a daylight-saving change day the hour rows are off by one after the change.
+
+## 74. Canonical public URLs
+
+Built 2026-10-02. The previous scheme put alliance pages under `/t/{slug}/...` and the all-alliance versions at the root, so the two looked unrelated. This was changed during the testing phase, before adoption, with no redirects: the `/t/...` and `/ics/events.ics` paths now return 404.
+
+| What | All alliances | One alliance |
+| --- | --- | --- |
+| Page | `/events` | `/events/{slug}` |
+| Data | `/api/events` | `/api/events/{slug}` |
+| Last activity | `/api/last-activity` | `/api/last-activity/{slug}` |
+| Calendar feed | `/events.ics` | `/events/{slug}.ics` |
+
+Part II sections written before this change still name the old paths; they record the design at the time.
+
+Rules: the feed is the page URL plus `.ics`; an unknown slug is a 404 on every path; the ICS router is registered before the events router so `/events/{slug}.ics` is never read as a page for a slug ending in `.ics`; an alliance slug is validated on create and edit to one path segment (lowercase letters, digits and hyphens, 1 to 32 characters, no dot or slash), so it can never break either route. Existing slugs are not rewritten.
+
+Consequences for operators: anything outside the repository that names the old paths must change (Cloudflare WAF, cache or Access rules written for `/t/*`, bookmarks, Discord messages, calendar subscriptions). ICS event UIDs are unchanged, but a calendar app that subscribed to the old feed URL gets a 404 and must re-subscribe.
 
 # Archive
 

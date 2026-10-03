@@ -135,6 +135,20 @@ def parse_hex_color(v, allow_none: bool = False):
     return v.upper()
 
 
+_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$")
+
+
+def parse_slug(v, allow_none: bool = False):
+    """An alliance slug appears in public URLs (/events/{slug} and /events/{slug}.ics), so it
+    must be one path segment with no dot: lowercase letters, digits and hyphens, 1 to 32 characters."""
+    if v is None and allow_none:
+        return v
+    v = str(v).strip()
+    if not _SLUG_RE.match(v):
+        raise ValueError("Slug must be 1 to 32 characters: lowercase letters, digits and hyphens, not starting or ending with a hyphen")
+    return v
+
+
 def parse_clearable_hex_color(v):
     """PATCH semantics for a nullable color: omitted/null leaves it alone, an
     empty string resets it to the built-in default, anything else must be hex."""

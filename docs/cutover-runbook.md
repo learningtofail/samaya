@@ -115,7 +115,7 @@ create the others you want in the Event types tab first.
    show `posted` and the message must appear in the alliance channel. Rows
    stuck in `pending` after 5 minutes mean the tick is not running: check
    `docker compose logs app`.
-3. Open `https://ks138.taraka.dev/t/mod/events`: the event is listed.
+3. Open `https://ks138.taraka.dev/events/mod`: the event is listed.
 4. Delete the test event (this removes anything it posted).
 
 Cutover is done when step 10 passes.
