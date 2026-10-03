@@ -309,10 +309,17 @@ class Ticket(Base):
     # never placed by hand (sorts after placed tickets, by votes). Admin only;
     # no public endpoint returns it.
     position                 = Column(Integer, nullable=True)
+    # Spec §76.5: private Markdown notes for the team. Admin only; never in a public payload.
+    internal_notes           = Column(Text, nullable=True)
     created_at               = Column(DateTime(timezone=True), server_default=func.now())
     updated_at               = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     votes = relationship("TicketVote", back_populates="ticket", cascade="all, delete-orphan")
+    checklist = relationship(
+        "TicketChecklistItem", back_populates="ticket", cascade="all, delete-orphan",
+        order_by="TicketChecklistItem.position, TicketChecklistItem.id",
+    )
+    tags = relationship("TicketTag", secondary="ticket_tag_links", order_by="TicketTag.name")
     responses = relationship(
         "TicketResponse", back_populates="ticket", cascade="all, delete-orphan",
         order_by="TicketResponse.created_at, TicketResponse.id",
@@ -374,6 +381,48 @@ class TicketResponse(Base):
     __table_args__ = (
         CheckConstraint("length(body) > 0 AND length(body) <= 2000", name="ck_ticket_response_length"),
     )
+
+
+class TicketChecklistItem(Base):
+    """One line of a ticket's checklist (spec §76.5). One level only, no
+    nesting. Admin only: no public endpoint returns these."""
+    __tablename__ = "ticket_checklist_items"
+
+    id        = Column(Integer, primary_key=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    body      = Column(Text, nullable=False)
+    done      = Column(Boolean, nullable=False, default=False)
+    position  = Column(Integer, nullable=False, default=0)
+
+    ticket = relationship("Ticket", back_populates="checklist")
+
+    __table_args__ = (
+        CheckConstraint("length(body) > 0 AND length(body) <= 200", name="ck_ticket_checklist_length"),
+    )
+
+
+class TicketTag(Base):
+    """An internal, color-coded label shared by every admin (spec §76.5).
+    Tickets are Kingdom-wide, so tags are too. Not the public `kind`."""
+    __tablename__ = "ticket_tags"
+
+    id         = Column(Integer, primary_key=True)
+    name       = Column(Text, nullable=False)
+    color      = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_ticket_tag_name"),
+        CheckConstraint("length(name) > 0 AND length(name) <= 24", name="ck_ticket_tag_name_length"),
+    )
+
+
+class TicketTagLink(Base):
+    """Which tags a ticket carries (many to many)."""
+    __tablename__ = "ticket_tag_links"
+
+    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), primary_key=True)
+    tag_id    = Column(Integer, ForeignKey("ticket_tags.id", ondelete="CASCADE"), primary_key=True)
 
 
 # ---------------------------------------------------------------------------
