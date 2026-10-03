@@ -421,41 +421,59 @@ function renderHero() {
     return s !== 'cancelled' && s !== 'failed' && s !== 'completed' && e._end > now;
   }).sort((a, b) => a._start - b._start);
   const evList = list.filter((e) => e.kind === 'event');
-  const h = evList.find((e) => displayStatus(e, now) === 'live') || evList[0];
-  let html = '';
-  if (h) {
-    const live = displayStatus(h, now) === 'live';
-    const a = evAlliances(h)[0];
-    html += `<div class="hero${live ? ' is-live' : ''}" data-vars="--c:${safeColor(a.color, KINGDOM_COLOR)}">
+  const lives = evList.filter((e) => displayStatus(e, now) === 'live');
+  const h = lives[0] || evList[0];
+  const card = (e, label) => {
+    const live = displayStatus(e, now) === 'live';
+    const a = evAlliances(e)[0];
+    return `<div class="hero${live ? ' is-live' : ''}" data-vars="--c:${safeColor(a.color, KINGDOM_COLOR)}">
       <div class="hero-main">
-        <div class="hero-label">${live ? '<span class="dot"></span>' : ''}${escapeHtml(t(EVENTS_KEY + (live ? 'heroLive' : 'heroNext')))}</div>
-        <div class="hero-name">${bdi(h.event_name)}</div>
-        <div class="hero-meta">${escapeHtml(heroMeta(h, live, tz))}</div>
+        <div class="hero-label">${live ? '<span class="dot"></span>' : ''}${escapeHtml(label)}</div>
+        <div class="hero-name">${bdi(e.event_name)}</div>
+        <div class="hero-meta">${heroMetaParts(e, live, tz).map(bdi).join(' · ')}</div>
       </div>
-      <div class="hero-cd"><small>${escapeHtml(t(EVENTS_KEY + (live ? 'endsIn' : 'startsIn')))}</small><b id="heroCd" data-target="${live ? h._end : h._start}">${cd((live ? h._end : h._start) - now)}</b></div>
-      ${live ? `<span class="hero-bar" id="heroBar" data-start="${h._start}" data-end="${h._end}" data-vars="--p:${progressPct(h._start, h._end, now)}%"></span>` : ''}
+      <div class="hero-cd"><small>${escapeHtml(t(EVENTS_KEY + (live ? 'endsIn' : 'startsIn')))}</small><b class="js-cd" data-target="${live ? e._end : e._start}">${cd((live ? e._end : e._start) - now)}</b></div>
+      ${live ? `<span class="hero-bar js-bar" data-start="${e._start}" data-end="${e._end}" data-vars="--p:${progressPct(e._start, e._end, now)}%"></span>` : ''}
     </div>`;
+  };
+  let html = '';
+  if (lives.length > 1) {
+    // Two or more live events: a stacked block with the first two, and a link to the full list for the rest.
+    const shown = lives.slice(0, 2), more = lives.length - shown.length;
+    html += `<div class="hero-stack">${shown.map((e, i) => card(e, i === 0 ? t(EVENTS_KEY + 'heroLiveCount', { count: lives.length }) : t(EVENTS_KEY + 'heroAlsoLive'))).join('')}${more ? `<button type="button" class="hero-more" data-action="show-live">${escapeHtml(t(EVENTS_KEY + 'heroMoreLive', { count: more }))}</button>` : ''}</div>`;
+  } else if (h) {
+    html += card(h, t(EVENTS_KEY + (displayStatus(h, now) === 'live' ? 'heroLive' : 'heroNext')));
   } else {
     html += `<div class="hero"><div class="hero-main"><div class="hero-label">${escapeHtml(t(EVENTS_KEY + 'heroNone'))}</div><div class="hero-name">${escapeHtml(t(EVENTS_KEY + 'heroNothing'))}</div></div></div>`;
   }
-  const then = list.filter((e) => e !== h && displayStatus(e, now) !== 'live').slice(0, 3);
+  const then = list.filter((e) => displayStatus(e, now) !== 'live' && e !== h).slice(0, 3);
   html += `<aside class="then"><h2>${escapeHtml(t(EVENTS_KEY + 'then'))}</h2>${then.length ? then.map((e) =>
     `<div class="then-item"><span class="then-time">${hm(e._start, tz)}</span><span class="then-name">${bdi(e.event_name)}</span><span class="then-when">${escapeHtml(fmtDay(e._start, tz, { weekday: 'short' }))} · ${escapeHtml(rel(e._start - now))}</span></div>`).join('') : `<p class="muted">${escapeHtml(t(EVENTS_KEY + 'thenNone'))}</p>`}</aside>`;
   $('hero').innerHTML = html;
 }
-function heroMeta(h, live, tz) {
+/**
+ * The hero's detail line as separate parts, each wrapped in its own <bdi> by the caller so a part in
+ * the other direction (the Arabic hour unit, "UTC") cannot reorder its neighbours. The UTC time is
+ * left out when the display zone is already UTC, where it would repeat the local time.
+ */
+function heroMetaParts(h, live, tz) {
   const local = `${hm(h._start, tz)} ${tzShort(tz)}`;
-  const parts = [evAlliances(h).map((x) => iso(x.name)).join(', '), live ? t(EVENTS_KEY + 'heroStarted', { time: local }) : local, `${hm(h._start, 'UTC')} UTC`];
+  const parts = [evAlliances(h).map((x) => iso(x.name)).join(', '), live ? t(EVENTS_KEY + 'heroStarted', { time: local }) : local];
+  if (tz !== 'UTC') parts.push(`${hm(h._start, 'UTC')} UTC`);
   if (h.duration_hours) parts.push(formatDuration(h.duration_hours));
-  return parts.join(' · ');
+  return parts;
 }
 function progressPct(start, end, now) { return Math.max(0, Math.min(100, Math.round(((now - start) / (end - start)) * 100))); }
 function tickCountdown() {
-  const el = $('heroCd');
-  if (el) el.textContent = cd(Number(el.dataset.target) - Date.now());
-  const bar = $('heroBar');
-  if (bar) bar.style.setProperty('--p', progressPct(Number(bar.dataset.start), Number(bar.dataset.end), Date.now()) + '%');
+  const n = Date.now();
+  document.querySelectorAll('#hero .js-cd').forEach((el) => { el.textContent = cd(Number(el.dataset.target) - n); });
+  document.querySelectorAll('#hero .js-bar').forEach((bar) => bar.style.setProperty('--p', progressPct(Number(bar.dataset.start), Number(bar.dataset.end), n) + '%'));
 }
+$('hero').addEventListener('click', (e) => {
+  if (!e.target.closest('[data-action="show-live"]')) return;
+  setView('list');
+  window.scrollTo({ top: $('schedule').getBoundingClientRect().top + window.scrollY - 80, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+});
 
 // ── Rows and days ───────────────────────────────────────────────
 function notifyText(ev) {

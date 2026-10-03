@@ -216,5 +216,10 @@
  "public.events.calPrevWeek": "上一周",
  "public.events.calNextWeek": "下一周",
  "public.events.calPrev3Days": "前 3 天",
- "public.events.calNext3Days": "后 3 天"
+ "public.events.calNext3Days": "后 3 天",
+ "public.events.heroLiveCount": {
+  "other": "进行中 · {count} 个活动"
+ },
+ "public.events.heroAlsoLive": "同时进行",
+ "public.events.heroMoreLive": "还有 {count} 个进行中 · 查看全部"
 }

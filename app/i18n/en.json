@@ -219,5 +219,11 @@
  "public.events.calPrevWeek": "Previous week",
  "public.events.calNextWeek": "Next week",
  "public.events.calPrev3Days": "Previous 3 days",
- "public.events.calNext3Days": "Next 3 days"
+ "public.events.calNext3Days": "Next 3 days",
+ "public.events.heroLiveCount": {
+  "one": "Live now · {count} event",
+  "other": "Live now · {count} events"
+ },
+ "public.events.heroAlsoLive": "Also live",
+ "public.events.heroMoreLive": "+{count} more live · see all"
 }
