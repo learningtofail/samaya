@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from models import get_db
-from models.db import Tenant, Ticket, TicketResponse, User
+from models.db import Tenant, Ticket, TicketColumnLimit, TicketResponse, User
 from services.audit import log_change
 from services.ticket_board import BOARD_STATUSES, place
 from services.ticket_views import (
@@ -158,6 +158,7 @@ class TicketMove(BaseModel):
     """Drop a ticket into a board column at a place (spec §76)."""
     status: str
     index:  int = Field(ge=0, le=10_000)
+    override: bool = False  # move past a full column's WIP limit (spec §76.6)
 
     @field_validator("status")
     @classmethod
@@ -180,13 +181,24 @@ async def move_ticket(
         raise HTTPException(status_code=409, detail="Restore a dismissed ticket before moving it")
     before = {"status": ticket.status, "position": ticket.position}
     column = (await db.execute(select(Ticket).where(Ticket.status == payload.status))).scalars().all()
+    overrode = False
+    if ticket.status != payload.status:
+        limit = await db.get(TicketColumnLimit, payload.status)
+        full = limit is not None and len(column) >= limit.wip_limit
+        if full and not payload.override:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{payload.status.replace('_', ' ').capitalize()} is at its limit of {limit.wip_limit} "
+                       "tickets. Reload if the limit changed, or move it anyway to override.")
+        overrode = full
     ticket.status = payload.status
     positions = place(column, ticket, payload.index)
     for member in {*column, ticket}:
         member.position = positions[member.id]
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id, table_name="tickets", row_id=ticket.id,
-        action="update", before=before, after={"status": ticket.status, "position": ticket.position},
+        action="update", before=before,
+        after={"status": ticket.status, "position": ticket.position, **({"wip_override": True} if overrode else {})},
     )
     await db.commit()
     return {"ticket": await _ticket_json(db, await _load_ticket(db, ticket_id)), "positions": positions}
@@ -280,3 +292,56 @@ async def delete_response(
     )
     await db.delete(response)
     await db.commit()
+
+
+class LimitsIn(BaseModel):
+    """status -> limit, or null to remove the limit. Only the statuses present change."""
+    limits: dict[str, Optional[int]]
+
+    @field_validator("limits")
+    @classmethod
+    def _valid(cls, v):
+        for status, limit in v.items():
+            if status not in BOARD_STATUSES:
+                raise ValueError(f"{status!r} is not a board column; use one of {BOARD_STATUSES}")
+            if limit is not None and not 1 <= limit <= 999:
+                raise ValueError("A limit must be between 1 and 999, or empty for no limit")
+        return v
+
+
+async def _limits(db: AsyncSession) -> dict:
+    rows = (await db.execute(select(TicketColumnLimit))).scalars().all()
+    by_status = {r.status: r.wip_limit for r in rows}
+    return {status: by_status.get(status) for status in BOARD_STATUSES}
+
+
+@router.get("/api/ticket-board/limits")
+async def get_limits(tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)):
+    return await _limits(db)
+
+
+@router.put("/api/ticket-board/limits")
+async def set_limits(
+    payload: LimitsIn,
+    tenant: Tenant = Depends(get_current_tenant), user: User = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Superadmin only: a limit is team policy. Limits apply to board moves, not to the status select."""
+    before = await _limits(db)
+    for status, limit in payload.limits.items():
+        row = await db.get(TicketColumnLimit, status)
+        if limit is None:
+            if row is not None:
+                await db.delete(row)
+        elif row is None:
+            db.add(TicketColumnLimit(status=status, wip_limit=limit))
+        else:
+            row.wip_limit = limit
+    await db.flush()
+    after = await _limits(db)
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id, table_name="ticket_column_limits", row_id=None,
+        action="update", before=before, after=after,
+    )
+    await db.commit()
+    return after

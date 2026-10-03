@@ -247,6 +247,7 @@
   </div>
   <div class="ticket-tools" role="group" aria-label="Tags and export">
     <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnManageTags">Manage tags</button>
+    <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small hidden" id="btnBoardLimits">Column limits</button>
     <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnExportJson">Export JSON</button>
     <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnExportMarkdown">Export Markdown</button>
     <label class="ticket-tools__check"><input type="checkbox" id="exportContact"> Include submitter contact (private data)</label>
@@ -268,6 +269,7 @@
         <li><strong>Done</strong> and <strong>declined</strong> tickets are grouped as Archived.</li>
         <li><strong>Tags, checklists and internal notes</strong> are for the team only and never reach the public page. A ticket can carry up to 8 tags, 50 checklist items and notes written in Markdown. The Tag filter applies to both List and Board.</li>
         <li><strong>Export</strong> downloads every ticket, dismissed ones included, as one JSON file or as a zip of Markdown files. Submitter contact details are left out unless you tick the box. Each export is recorded in the audit log.</li>
+        <li><strong>Column limits</strong> (superadmin, Board view) cap how many tickets a column should hold. Moving a card into a full column asks you to confirm, and the override is recorded in the audit log. The status menu in List view is not limited.</li>
         <li><strong>Board</strong> shows one column per status. Use a card's Move menu (keyboard and touch), or drag it with a mouse. Moving a card changes its public status, and a move into Done or Declined asks first because it closes voting. Dismissed tickets are not on the board; use List to see them.</li>
       </ul>
     </div>
@@ -766,6 +768,47 @@
       </div>
       <footer class="pf-v6-c-modal-box__footer">
         <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSaveTicket">Save</button>
+        <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<div class="pf-v6-c-backdrop" id="limitsModal" data-close-fn="closeLimitsModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="limitsModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="limitsModalTitle">Column limits</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <p class="samaya-muted">The most tickets a column should hold. Moving a card into a full column asks first. Reordering inside a column, and the status menu in List view, are not limited. Leave a field empty for no limit.</p>
+        <div class="form-errors hidden" id="limitsErrors" role="alert"></div>
+        <form class="pf-v6-c-form" novalidate>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="limit-open"><span class="pf-v6-c-form__label-text">Open</span></label>
+            <input class="pf-v6-c-form-control" type="number" id="limit-open" min="1" max="999" inputmode="numeric" placeholder="No limit">
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="limit-planned"><span class="pf-v6-c-form__label-text">Planned</span></label>
+            <input class="pf-v6-c-form-control" type="number" id="limit-planned" min="1" max="999" inputmode="numeric" placeholder="No limit">
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="limit-in_progress"><span class="pf-v6-c-form__label-text">In progress</span></label>
+            <input class="pf-v6-c-form-control" type="number" id="limit-in_progress" min="1" max="999" inputmode="numeric" placeholder="No limit">
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="limit-done"><span class="pf-v6-c-form__label-text">Done</span></label>
+            <input class="pf-v6-c-form-control" type="number" id="limit-done" min="1" max="999" inputmode="numeric" placeholder="No limit">
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="limit-declined"><span class="pf-v6-c-form__label-text">Declined</span></label>
+            <input class="pf-v6-c-form-control" type="number" id="limit-declined" min="1" max="999" inputmode="numeric" placeholder="No limit">
+          </div>
+        </form>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSaveLimits">Save</button>
         <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
       </footer>
     </div>

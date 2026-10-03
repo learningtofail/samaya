@@ -7,6 +7,7 @@
 
 let TICKETS = [];
 let TAGS = [];
+let LIMITS = {}; // WIP limit per board column, null for none (spec §76.6)
 const TICKETF = { editing: null, dragId: null };
 const MAX_TAGS_PER_TICKET = 8;
 let ticketTagFilter = '';
@@ -64,9 +65,10 @@ async function loadTickets() {
   renderAuthorBanner();
   try { ticketView = localStorage.getItem(TICKET_VIEW_KEY) === 'board' ? 'board' : 'list'; } catch { ticketView = 'list'; }
   try {
-    [TICKETS, TAGS] = await Promise.all([
+    [TICKETS, TAGS, LIMITS] = await Promise.all([
       api('GET', '/api/tickets', null, false, ticketsSlug()),
       api('GET', '/api/ticket-tags', null, false, ticketsSlug()),
+      api('GET', '/api/ticket-board/limits', null, false, ticketsSlug()),
     ]);
     populateTagFilter();
     renderTagManager();
@@ -491,6 +493,36 @@ byId('tagCreateForm').addEventListener('submit', async (e) => {
   } catch (err) { showTagError(err.message); }
 });
 
+// ── WIP limits (spec §76.6) ──────────────────────────────────
+
+function closeLimitsModal() {
+  closeModalById('limitsModal');
+}
+
+byId('btnBoardLimits').addEventListener('click', () => {
+  BOARD_COLUMNS.forEach((status) => { byId('limit-' + status).value = LIMITS[status] || ''; });
+  byId('limitsErrors').classList.add('hidden');
+  openModalById('limitsModal');
+});
+
+byId('btnSaveLimits').addEventListener('click', async () => {
+  const limits = {};
+  BOARD_COLUMNS.forEach((status) => {
+    const raw = byId('limit-' + status).value.trim();
+    limits[status] = raw === '' ? null : Number(raw);
+  });
+  const box = byId('limitsErrors');
+  try {
+    LIMITS = await api('PUT', '/api/ticket-board/limits', { limits }, false, ticketsSlug());
+    closeLimitsModal();
+    renderTickets();
+    toast('Limits saved. They apply to board moves.');
+  } catch (e) {
+    box.textContent = e.message;
+    box.classList.remove('hidden');
+  }
+});
+
 // ── Export (spec §76.5) ──────────────────────────────────────
 // A fetch rather than a link: the download needs the X-Tenant-Slug header.
 
@@ -573,6 +605,7 @@ function applyTicketView() {
   byId('ticketList').classList.toggle('hidden', board);
   byId('ticketBoardWrap').classList.toggle('hidden', !board);
   byId('ticketFilterItem').classList.toggle('hidden', board);
+  byId('btnBoardLimits').classList.toggle('hidden', !board || !isSuperadmin());
   byId('ticketViewList').setAttribute('aria-pressed', String(!board));
   byId('ticketViewBoard').setAttribute('aria-pressed', String(board));
   renderTickets();
@@ -620,12 +653,17 @@ function boardCardHtml(t, index, count) {
 
 function renderBoard() {
   byId('ticketBoard').innerHTML = BOARD_COLUMNS.map((status) => {
-    const column = boardColumn(status).filter(ticketMatchesTag);
+    const whole = boardColumn(status);
+    const column = whole.filter(ticketMatchesTag);
+    const limit = LIMITS[status];
+    const limitNote = limit
+      ? ` <span class="board__limit${whole.length > limit ? ' board__limit--over' : ''}">${whole.length} of ${limit} allowed${whole.length > limit ? ', over the limit' : whole.length === limit ? ', full' : ''}</span>`
+      : '';
     const cards = column.length
       ? column.map((t, i) => boardCardHtml(t, i, column.length)).join('')
       : '<li class="board__empty samaya-muted">No tickets</li>';
     return `<section class="board__col" data-status="${status}" aria-labelledby="boardHead-${status}">
-      <h3 class="board__head" id="boardHead-${status}">${escapeHtml(TICKET_STATUS_LABELS[status])} <span class="samaya-muted">${column.length}</span></h3>
+      <h3 class="board__head" id="boardHead-${status}">${escapeHtml(TICKET_STATUS_LABELS[status])} <span class="samaya-muted">${column.length}</span>${limitNote}</h3>
       <ul class="board__cards">${cards}</ul>
     </section>`;
   }).join('');
@@ -664,12 +702,15 @@ async function moveTicket(ticket, status, index) {
   if (ticket.status === status && index === boardColumn(status).findIndex((t) => t.id === ticket.id)) return;
   if (TICKET_ARCHIVED.includes(status) && !TICKET_ARCHIVED.includes(ticket.status)
       && !confirm(`Move "${ticket.title}" to ${TICKET_STATUS_LABELS[status]}? It moves to the public archive and voting closes.`)) return;
+  const limit = LIMITS[status];
+  const full = ticket.status !== status && Boolean(limit) && boardColumn(status).length >= limit;
+  if (full && !confirm(`${TICKET_STATUS_LABELS[status]} is at its limit of ${limit} tickets. Move "${ticket.title}" there anyway?`)) return;
   const snapshot = TICKETS.map((t) => ({ ...t }));
   placeLocal(ticket, status, index);
   renderBoard();
   focusBoardMove(ticket.id);
   try {
-    const res = await api('POST', `/api/tickets/${ticket.id}/move`, { status, index }, false, ticketsSlug());
+    const res = await api('POST', `/api/tickets/${ticket.id}/move`, { status, index, override: full }, false, ticketsSlug());
     TICKETS = TICKETS.map((t) => {
       if (t.id === res.ticket.id) return res.ticket;
       return res.positions[t.id] === undefined ? t : { ...t, position: res.positions[t.id] };

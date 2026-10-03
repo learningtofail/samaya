@@ -2294,7 +2294,7 @@ Requirement recorded 2026-10-03, adapted from the "Local-First Kanban" PRD and s
 | --- | --- | --- |
 | 1 | `position`, `POST /admin/api/tickets/{id}/move`, Board view in the Feedback tab | Built 2026-10-03 |
 | 2 | Checklists (one level), internal notes, color tags with a tag filter, JSON and Markdown export | Built 2026-10-03 (§76.5) |
-| 3 | WIP limit per column, enforced by the move endpoint (409 with an override flag) | Not built |
+| 3 | WIP limit per column, enforced by the move endpoint (409 with an override flag) | Built 2026-10-03 (§76.6) |
 
 ### 76.3 Phase 1 as built
 
@@ -2366,3 +2366,12 @@ Fully superseded designs, moved here unchanged except for position. Each begins 
 ## 58. Removed the "Today" Card's Blue Outline
 
 **Superseded by §62.** This was a fix to PatternFly's `.pf-m-selected` modifier on the old `events.html`'s cards, replaced with a `.samaya-today-card` tint class. §62's redesign dropped PatternFly and that card markup entirely in favor of its own styling (the calendar view's current-day cell uses an `is-today` class); today's items are simply no longer marked up the way this section's fix touched.
+
+### 76.6 Phase 3 as built
+
+- Migration `a1f0c0de0011`: table `ticket_column_limits` (`status` primary key, `wip_limit` 1 to 999). No row means no limit. Additive; the downgrade drops the table.
+- `GET /admin/api/ticket-board/limits` returns `{status: limit|null}` for the five columns (any admin). `PUT` sets or clears limits (`{limits: {status: int|null}}`, only the statuses present change; superadmin only, because a limit is team policy; audited as `update` on `ticket_column_limits` with the full before and after map).
+- `POST /api/tickets/{id}/move` takes an optional `override` flag. A move into a different column that already holds its limit or more answers 409 unless `override` is true. A move inside the same column is never limited. An override that was actually needed is recorded as `wip_override: true` in the move's audit row.
+- **Not enforced:** the status select in List view (`PATCH`) and Restore. The limit guards board moves only, as decided in §76.2. A column can also exceed its limit by other routes, such as a new ticket arriving as Open, so the header shows "N of L allowed, full" or "over the limit" in text, not only color.
+- The board asks for confirmation before sending an override. The server stays the authority: a stale limit gives a 409 toast that says to reload.
+- Admin UI: column headers show the count against the limit, and a superadmin gets a Column limits button in Board view. Limits never reach the public board or API.
