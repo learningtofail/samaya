@@ -46,8 +46,26 @@ catch-all proxy rule; each public path is listed individually. **Any new
 top-level public route added to the app (a new page, a new unauthenticated
 API prefix) needs a matching `reverse_proxy /that-path 127.0.0.1:8000` line
 added there too**, or it 404s/blanks out in the browser even though the app
-itself serves it fine on `127.0.0.1:8000` — this bit us once with `/feedback`
-(spec §40-43) shipping in the app before Caddy knew about it.
+itself serves it fine on `127.0.0.1:8000` — this bit us with `/feedback`
+(spec §40-43) and again on 2026-10-02 with `/events.ics`, `/events/*`,
+`/theme/*` and `/theme-assets/*`.
+
+**An unlisted path does not 404.** Caddy answers it itself with an empty
+`200`, `Content-Length: 0` and the `X-Robots-Tag` header, so the app never
+sees the request and its logs show nothing. Calendar clients then report a
+feed that "works" but has no events. Test a new route through the public
+hostname, not only on `127.0.0.1:8000`:
+
+    curl -s -o /dev/null -w '%{http_code} %{size_download}B %{content_type}\n' https://ks138.taraka.dev/<new-path>
+
+A size of `0B` means the Caddyfile is missing the route.
+
+The routes listed today: `/health`, `/webhooks/*`, `/auth/*`, `/invite/*`,
+`/invite-invalid`, `/events`, `/events.ics`, `/events/*`, `/feedback`,
+`/theme/*`, `/theme-assets/*`, `/api/*`, `/admin`, `/admin/*`, `/static/*`;
+`/` redirects to `/admin/`. The cloudflared ingress on Vinayaki is a plain
+route to `192.168.2.112:80` with no path rules, so only this file needs
+changing.
 
 That Caddyfile also sets `admin off`, which disables Caddy's local admin API.
 That means `systemctl reload caddy` (and `caddy reload --force`) **always
