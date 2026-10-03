@@ -240,6 +240,16 @@
       <label class="filters__label" for="ticketFilter">Show</label>
       <select class="pf-v6-c-form-control" id="ticketFilter"></select>
     </div>
+    <div class="filters__item">
+      <label class="filters__label" for="ticketTagFilter">Tag</label>
+      <select class="pf-v6-c-form-control" id="ticketTagFilter"></select>
+    </div>
+  </div>
+  <div class="ticket-tools" role="group" aria-label="Tags and export">
+    <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnManageTags">Manage tags</button>
+    <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnExportJson">Export JSON</button>
+    <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnExportMarkdown">Export Markdown</button>
+    <label class="ticket-tools__check"><input type="checkbox" id="exportContact"> Include submitter contact (private data)</label>
   </div>
   <p class="count" id="ticketCount" role="status"></p>
   <div id="ticketList"></div>
@@ -256,6 +266,8 @@
         <li><strong>Dismiss</strong> hides a ticket from the public page without deleting it, and Restore brings it back. Only a superadmin can delete one for good.</li>
         <li><strong>Edit</strong> fixes the title, text or type, for example to remove personal details. The submitter is not told.</li>
         <li><strong>Done</strong> and <strong>declined</strong> tickets are grouped as Archived.</li>
+        <li><strong>Tags, checklists and internal notes</strong> are for the team only and never reach the public page. A ticket can carry up to 8 tags, 50 checklist items and notes written in Markdown. The Tag filter applies to both List and Board.</li>
+        <li><strong>Export</strong> downloads every ticket, dismissed ones included, as one JSON file or as a zip of Markdown files. Submitter contact details are left out unless you tick the box. Each export is recorded in the audit log.</li>
         <li><strong>Board</strong> shows one column per status. Use a card's Move menu (keyboard and touch), or drag it with a mouse. Moving a card changes its public status, and a move into Done or Declined asks first because it closes voting. Dismissed tickets are not on the board; use List to see them.</li>
       </ul>
     </div>
@@ -760,6 +772,32 @@
   </div>
 </div>
 
+<div class="pf-v6-c-backdrop" id="tagModal" data-close-fn="closeTagModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="tagModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="tagModalTitle">Manage tags</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <p class="samaya-muted">Tags are private labels for the team. Names are up to 24 characters and unique ignoring case. Deleting a tag removes it from every ticket.</p>
+        <div class="form-errors hidden" id="tagErrors" role="alert"></div>
+        <ul class="tag-manager" id="tagManagerList"></ul>
+        <form class="tag-manager__row tag-manager__row--new" id="tagCreateForm" novalidate>
+          <label class="sr-only" for="tagNewName">New tag name</label>
+          <input class="pf-v6-c-form-control" type="text" id="tagNewName" maxlength="24" placeholder="New tag">
+          <label class="sr-only" for="tagNewColor">New tag color</label>
+          <input class="tag-manager__color" type="color" id="tagNewColor" value="#3b82f6">
+          <button type="submit" class="pf-v6-c-button pf-m-primary pf-m-small">Add tag</button>
+        </form>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Close</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
 <div class="pf-v6-c-backdrop" id="audienceModal" data-close-fn="closeAudienceModal">
   <div class="pf-v6-l-bullseye">
     <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="audienceModalTitle">
@@ -1086,6 +1124,7 @@
 <script src="/static/js/schedule.js"></script>
 <script src="/static/js/deliveries.js"></script>
 <script src="/static/js/types.js"></script>
+<script src="/static/js/markdown.js"></script>
 <script src="/static/js/tickets.js"></script>
 <script src="/static/js/access.js"></script>
 <script src="/static/js/platform.js"></script>

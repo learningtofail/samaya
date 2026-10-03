@@ -2291,7 +2291,7 @@ Requirement recorded 2026-10-03, adapted from the "Local-First Kanban" PRD and s
 | Phase | Content | State |
 | --- | --- | --- |
 | 1 | `position`, `POST /admin/api/tickets/{id}/move`, Board view in the Feedback tab | Built 2026-10-03 |
-| 2 | Checklists (one level), internal notes, color tags, JSON and Markdown export | Not built |
+| 2 | Checklists (one level), internal notes, color tags with a tag filter, JSON and Markdown export | Built 2026-10-03 (§76.5) |
 | 3 | WIP limit per column, enforced by the move endpoint (409 with an override flag) | Not built |
 
 ### 76.3 Phase 1 as built
@@ -2312,6 +2312,17 @@ Requirement recorded 2026-10-03, adapted from the "Local-First Kanban" PRD and s
 | SQLite, UUID keys | The board uses the existing Postgres tables and integer ids. |
 | No-auth deployment behind Cloudflare Access | Samaya keeps Discord login and roles; the move endpoint uses `require_not_viewer`. |
 | CI webhooks on column moves, local-LLM helpers | Phase 2 of the PRD; no outbound webhook path exists. |
+
+### 76.5 Phase 2: checklists, internal notes, tags, export
+
+Everything here is admin-only. No public endpoint returns a checklist, a note, a tag or `position`; `test_ticket_work.py` asserts it.
+
+- **Checklist (one level).** `ticket_checklist_items` (`ticket_id`, `body` 1 to 200 characters, `done`, `position`). At most 50 items per ticket, listed in the order they were added. Add, edit the text, tick and delete; there is no nesting and no reordering. The ticket shows "done of total" on its board card.
+- **Internal notes.** `tickets.internal_notes`, text up to 5,000 characters, saved through the existing `PATCH /admin/api/tickets/{id}` and included in its audit snapshot. Notes are Markdown. The admin renders them with a small in-house renderer that escapes all HTML first and then applies a fixed subset (headings, bold, italic, inline and fenced code, bullet and numbered lists, `http(s)` links), so there is no vendored library and no way to inject markup. Public ticket text and team replies stay plain text.
+- **Tags.** `ticket_tags` (`name` up to 24 characters, unique ignoring case, `color` hex) and `ticket_tag_links`. Tags are shared by every admin because tickets are Kingdom-wide, and they are internal labels: `kind` stays the public category. At most 8 tags per ticket. The label text color comes from `services/contrast.pick_ink`. Any admin who is not a viewer can create, rename, recolor and delete tags; every write is audited, and deleting a tag records how many tickets it was on. `PUT /admin/api/tickets/{id}/tags` replaces a ticket's tag set. A tag filter in the Feedback tab applies to both List and Board.
+- **Export.** `GET /admin/api/tickets/export?format=json|markdown&include_contact=0|1`. JSON is one file with every ticket, its notes, checklist, tags and public responses. Markdown is a zip with one `NNNN-slug.md` per ticket (front matter written with JSON-quoted values, so a hostile title cannot break the file). `submitter_contact` is left out unless `include_contact=1`. Dismissed tickets are included, marked by their status. Every export is written to the audit log as a `create` on the pseudo-table `ticket_exports` (format, whether contact was included, ticket count), because the audit table only allows create, update and delete.
+- **Endpoints.** Checklist: `POST /tickets/{id}/checklist`, `PATCH` and `DELETE /tickets/{id}/checklist/{item_id}`. Tags: `GET/POST /ticket-tags`, `PATCH/DELETE /ticket-tags/{id}`. Viewers can read everything and change nothing. The admin ticket list now carries `internal_notes`, `checklist` and `tags` for each ticket.
+- **Migration** `a1f0c0de0010`: the three tables and `tickets.internal_notes`. Additive; the downgrade drops them.
 
 # Archive
 

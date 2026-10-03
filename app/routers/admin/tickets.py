@@ -19,7 +19,9 @@ from models import get_db
 from models.db import Tenant, Ticket, TicketResponse, User
 from services.audit import log_change
 from services.ticket_board import BOARD_STATUSES, place
-from services.ticket_views import ALL_STATUSES, RESPONSE_MAX_CHARS, occurrence_names, response_dict
+from services.ticket_views import (
+    ALL_STATUSES, RESPONSE_MAX_CHARS, checklist_dict, occurrence_names, response_dict, tag_dict,
+)
 
 from .deps import get_current_tenant, get_current_user, require_not_viewer, require_superadmin
 
@@ -28,6 +30,7 @@ router = APIRouter()
 _KINDS = ("feedback", "event_request", "announcement_request", "error")
 _TITLE_MAX = 120
 _DESCRIPTION_MAX = 2000
+_NOTES_MAX = 5000
 
 
 def _ticket_admin_dict(t: Ticket, tenant_by_id: dict, occ_names: dict) -> dict:
@@ -40,6 +43,9 @@ def _ticket_admin_dict(t: Ticket, tenant_by_id: dict, occ_names: dict) -> dict:
         "description": t.description,
         "status": t.status,
         "position": t.position,
+        "internal_notes": t.internal_notes,
+        "checklist": [checklist_dict(i) for i in t.checklist],
+        "tags": [tag_dict(g) for g in t.tags],
         "upvote_count": t.upvote_count,
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "updated_at": t.updated_at.isoformat() if t.updated_at else None,
@@ -56,12 +62,13 @@ def _ticket_admin_dict(t: Ticket, tenant_by_id: dict, occ_names: dict) -> dict:
 
 def _audit_snapshot(t: Ticket) -> dict:
     return {"kind": t.kind, "error_type": t.error_type, "title": t.title,
-            "description": t.description, "status": t.status}
+            "description": t.description, "status": t.status, "internal_notes": t.internal_notes}
 
 
 async def _load_ticket(db: AsyncSession, ticket_id: int) -> Ticket:
     ticket = (await db.execute(
-        select(Ticket).options(selectinload(Ticket.responses)).where(Ticket.id == ticket_id)
+        select(Ticket).options(selectinload(Ticket.responses), selectinload(Ticket.checklist), selectinload(Ticket.tags))
+        .where(Ticket.id == ticket_id)
         .execution_options(populate_existing=True)
     )).scalar_one_or_none()
     if ticket is None:
@@ -78,7 +85,7 @@ async def _ticket_json(db: AsyncSession, ticket: Ticket) -> dict:
 async def list_tickets_admin(tenant: Tenant = Depends(get_current_tenant), db: AsyncSession = Depends(get_db)):
     """Every ticket including dismissed ones, with its responses."""
     tickets = (await db.execute(
-        select(Ticket).options(selectinload(Ticket.responses))
+        select(Ticket).options(selectinload(Ticket.responses), selectinload(Ticket.checklist), selectinload(Ticket.tags))
         .order_by(Ticket.upvote_count.desc(), Ticket.created_at.desc(), Ticket.id.desc())
     )).scalars().unique().all()
     tenant_ids = {t.tenant_id for t in tickets if t.tenant_id}
@@ -98,6 +105,12 @@ class TicketPatch(BaseModel):
     description: Optional[str] = Field(default=None, max_length=_DESCRIPTION_MAX)
     kind:        Optional[str] = None
     error_type:  Optional[str] = None
+    internal_notes: Optional[str] = Field(default=None, max_length=_NOTES_MAX)
+
+    @field_validator("internal_notes")
+    @classmethod
+    def _blank_notes_clear(cls, v):
+        return (v.strip() or None) if v is not None else v
 
     @field_validator("status")
     @classmethod

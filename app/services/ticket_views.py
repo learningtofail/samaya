@@ -1,7 +1,8 @@
 """Shared shaping of tickets and their public responses (spec §66.10) for the
 public board and the admin Feedback tab, so both read the same author name
 and the same status groups."""
-from models.db import Event, EventOccurrence, Ticket, TicketResponse
+from models.db import Event, EventOccurrence, Ticket, TicketChecklistItem, TicketResponse, TicketTag
+from services.contrast import pick_ink
 from sqlalchemy import select
 
 ACTIVE_STATUSES = ("open", "planned", "in_progress")
@@ -26,6 +27,16 @@ def response_dict(response: TicketResponse) -> dict:
         "created_at": response.created_at.isoformat() if response.created_at else None,
         "updated_at": response.updated_at.isoformat() if response.updated_at else None,
     }
+
+
+def checklist_dict(item: TicketChecklistItem) -> dict:
+    """Admin only (spec §76.5): never part of a public payload."""
+    return {"id": item.id, "body": item.body, "done": bool(item.done), "position": item.position}
+
+
+def tag_dict(tag: TicketTag) -> dict:
+    """Admin only (spec §76.5). `ink` is the readable label text color on the tag color."""
+    return {"id": tag.id, "name": tag.name, "color": tag.color, "ink": pick_ink(tag.color)}
 
 
 async def occurrence_names(db, tickets: list[Ticket]) -> dict[int, str]:

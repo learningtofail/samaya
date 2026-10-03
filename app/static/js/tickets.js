@@ -6,7 +6,11 @@
 // X-Tenant-Slug header names (the header only proves the caller has access).
 
 let TICKETS = [];
+let TAGS = [];
 const TICKETF = { editing: null, dragId: null };
+const MAX_TAGS_PER_TICKET = 8;
+let ticketTagFilter = '';
+const NOTE_DRAFTS = {}; // unsaved internal notes by ticket id, so a re-render does not lose typing
 
 const TICKET_KIND_META = {
   feedback:             { label: 'Feedback', color: 'pf-m-blue' },
@@ -60,7 +64,13 @@ async function loadTickets() {
   renderAuthorBanner();
   try { ticketView = localStorage.getItem(TICKET_VIEW_KEY) === 'board' ? 'board' : 'list'; } catch { ticketView = 'list'; }
   try {
-    TICKETS = await api('GET', '/api/tickets', null, false, ticketsSlug());
+    [TICKETS, TAGS] = await Promise.all([
+      api('GET', '/api/tickets', null, false, ticketsSlug()),
+      api('GET', '/api/ticket-tags', null, false, ticketsSlug()),
+    ]);
+    populateTagFilter();
+    renderTagManager();
+    byId('btnManageTags').classList.toggle('hidden', !canModerateTickets());
     applyTicketView();
   } catch (e) {
     toast(e.message, true);
@@ -99,6 +109,72 @@ function buildResponseHtml(t, r) {
   </li>`;
 }
 
+// ── Tags, checklist and internal notes (spec §76.5) ──────────
+// Everything here is admin only; none of it reaches the public board.
+
+function tagChip(tag) {
+  return `<span class="tag-chip" data-color="${escapeHtml(tag.color)}" data-ink="${escapeHtml(tag.ink)}">${escapeHtml(tag.name)}</span>`;
+}
+
+function ticketMatchesTag(t) {
+  return !ticketTagFilter || t.tags.some((g) => String(g.id) === ticketTagFilter);
+}
+
+function populateTagFilter() {
+  if (!TAGS.some((g) => String(g.id) === ticketTagFilter)) ticketTagFilter = '';
+  byId('ticketTagFilter').innerHTML = optionsHtml(
+    [{ value: '', label: 'All tags' }, ...TAGS.map((g) => ({ value: String(g.id), label: g.name }))], ticketTagFilter);
+}
+
+function ticketSection(title, inner) {
+  return `<section class="ticket__section" aria-label="${escapeHtml(title)}"><h4 class="ticket__section-title">${escapeHtml(title)}</h4>${inner}</section>`;
+}
+
+function tagsHtml(t, moderate) {
+  if (!moderate) return ticketSection('Tags', t.tags.length ? `<div class="tag-row">${t.tags.map(tagChip).join('')}</div>` : '<p class="samaya-muted">No tags.</p>');
+  if (!TAGS.length) return ticketSection('Tags', '<p class="samaya-muted">No tags exist yet. Use Manage tags above to create one.</p>');
+  const attached = new Set(t.tags.map((g) => g.id));
+  const options = TAGS.map((g) => {
+    const on = attached.has(g.id);
+    const locked = !on && attached.size >= MAX_TAGS_PER_TICKET;
+    return `<label class="tag-picker__option"><input type="checkbox" data-action-change="tag" data-id="${t.id}" value="${g.id}"${on ? ' checked' : ''}${locked ? ' disabled' : ''}> ${tagChip(g)}</label>`;
+  }).join('');
+  return ticketSection('Tags', `<fieldset class="tag-picker"><legend class="sr-only">Tags on ${escapeHtml(t.title)} (at most ${MAX_TAGS_PER_TICKET})</legend>${options}</fieldset>`);
+}
+
+function checklistHtml(t, moderate) {
+  const done = t.checklist.filter((i) => i.done).length;
+  const items = t.checklist.map((i) => `<li class="checklist__item">
+      <label class="checklist__label"><input type="checkbox" id="ckItem${i.id}" data-action-change="check" data-ticket="${t.id}" data-id="${i.id}"${i.done ? ' checked' : ''}${moderate ? '' : ' disabled'}> <span class="checklist__text${i.done ? ' checklist__text--done' : ''}">${escapeHtml(i.body)}</span></label>
+      ${moderate ? `<span class="row-actions">
+        <button type="button" class="pf-v6-c-button pf-m-link pf-m-small" data-action="edit-item" data-ticket="${t.id}" data-id="${i.id}">Edit</button>
+        <button type="button" class="pf-v6-c-button pf-m-link pf-m-danger pf-m-small" data-action="delete-item" data-ticket="${t.id}" data-id="${i.id}">Delete</button>
+      </span>` : ''}
+    </li>`).join('');
+  const add = moderate
+    ? `<form class="checklist-form" data-ticket="${t.id}">
+        <label class="sr-only" for="ckNew${t.id}">New checklist item</label>
+        <input class="pf-v6-c-form-control" type="text" id="ckNew${t.id}" maxlength="200" placeholder="Add an item">
+        <button type="submit" class="pf-v6-c-button pf-m-secondary pf-m-small">Add</button>
+      </form>` : '';
+  const title = t.checklist.length ? `Checklist (${done}/${t.checklist.length} done)` : 'Checklist';
+  return ticketSection(title, `${t.checklist.length ? `<ul class="checklist">${items}</ul>` : '<p class="samaya-muted">No items.</p>'}${add}`);
+}
+
+function notesHtml(t, moderate) {
+  const note = Object.prototype.hasOwnProperty.call(NOTE_DRAFTS, t.id) ? NOTE_DRAFTS[t.id] : (t.internal_notes || '');
+  const intro = '<p class="ticket__private-note">Private to the team. Never shown on the public page.</p>';
+  if (!moderate) {
+    return ticketSection('Internal notes', intro + (t.internal_notes ? `<div class="notes__rendered">${renderMarkdownSafe(t.internal_notes)}</div>` : '<p class="samaya-muted">No notes.</p>'));
+  }
+  return ticketSection('Internal notes', `${intro}<form class="notes-form" data-ticket="${t.id}">
+      <label class="pf-v6-c-form__label" for="notes${t.id}"><span class="pf-v6-c-form__label-text">Notes (Markdown)</span></label>
+      <textarea class="pf-v6-c-form-control" id="notes${t.id}" rows="5" maxlength="5000">${escapeHtml(note)}</textarea>
+      <div class="notes__rendered" id="notesPreview${t.id}">${note.trim() ? renderMarkdownSafe(note) : ''}</div>
+      <button type="submit" class="pf-v6-c-button pf-m-secondary pf-m-small">Save notes</button>
+    </form>`);
+}
+
 function buildTicketHtml(t) {
   const moderate = canModerateTickets();
   const statusSelect = moderate
@@ -131,6 +207,9 @@ function buildTicketHtml(t) {
       <p class="ticket__contact"><strong>Submitter contact:</strong> ${t.submitter_contact ? escapeHtml(t.submitter_contact) : '<span class="samaya-muted">None given</span>'} <span class="samaya-muted">(private, never shown publicly)</span></p>
       ${statusSelect}
       ${buttons}
+      ${tagsHtml(t, moderate)}
+      ${checklistHtml(t, moderate)}
+      ${notesHtml(t, moderate)}
       <section class="ticket__thread" aria-label="Public responses to ${escapeHtml(t.title)}">
         <h4 class="ticket__thread-title">Public responses (${responses.length})</h4>
         <p class="ticket__public-note">Everything written here is shown on the public feedback page, with the author name below.</p>
@@ -149,7 +228,7 @@ function renderTickets() {
 function renderTicketList() {
   const f = byId('ticketFilter').value;
   const openIds = new Set(Array.from(document.querySelectorAll('#ticketList details[open]')).map((d) => d.dataset.ticketId));
-  const shown = TICKETS.filter((t) => ticketMatchesFilter(t, f));
+  const shown = TICKETS.filter((t) => ticketMatchesFilter(t, f) && ticketMatchesTag(t));
   byId('ticketCount').textContent = `${shown.length} of ${TICKETS.length} ticket${TICKETS.length === 1 ? '' : 's'}`;
   const host = byId('ticketList');
   if (!shown.length) {
@@ -167,6 +246,7 @@ function renderTicketList() {
     return `<section class="ticket-group"><h3 class="ticket-group__title">${g.title} <span class="samaya-muted">${rows.length}</span></h3>${rows.map(buildTicketHtml).join('')}</section>`;
   }).join('');
   host.querySelectorAll('details.ticket').forEach((d) => { if (openIds.has(d.dataset.ticketId)) d.open = true; });
+  applyTypeColors(host);
 }
 
 function replaceTicket(updated) {
@@ -184,6 +264,21 @@ async function patchTicket(id, payload, done) {
     toast(done);
     return true;
   } catch (e) { toast(e.message, true); return false; }
+}
+
+// One write that returns the whole ticket; a failure redraws from state so a
+// toggled checkbox does not stay out of step with the server.
+async function ticketMutate(method, path, body, done) {
+  try {
+    const updated = await api(method, path, body, false, ticketsSlug());
+    replaceTicket(updated);
+    if (done) toast(done);
+    return updated;
+  } catch (e) {
+    toast(e.message, true);
+    renderTickets();
+    return null;
+  }
 }
 
 function ticketById(id) {
@@ -204,6 +299,19 @@ const TICKET_ACTIONS = {
       renderTickets();
       toast('Ticket deleted.');
     } catch (e) { toast(e.message, true); }
+  },
+  async 'edit-item'(btn) {
+    const t = ticketById(btn.dataset.ticket);
+    const item = t && t.checklist.find((i) => i.id === parseInt(btn.dataset.id, 10));
+    if (!item) return;
+    const body = prompt('Edit this checklist item:', item.body);
+    if (body === null || !body.trim() || body.trim() === item.body) return;
+    await ticketMutate('PATCH', `/api/tickets/${t.id}/checklist/${item.id}`, { body });
+  },
+  async 'delete-item'(btn) {
+    const t = ticketById(btn.dataset.ticket);
+    if (!t) return;
+    await ticketMutate('DELETE', `/api/tickets/${t.id}/checklist/${btn.dataset.id}`);
   },
   async 'edit-response'(btn) {
     const t = ticketById(btn.dataset.ticket);
@@ -232,11 +340,48 @@ const TICKET_ACTIONS = {
 
 const ticketList = byId('ticketList');
 bindActions(ticketList, TICKET_ACTIONS);
-ticketList.addEventListener('change', (e) => {
-  const sel = e.target.closest('[data-action-change="status"]');
-  if (sel) patchTicket(parseInt(sel.dataset.id, 10), { status: sel.value }, 'Status updated.');
+ticketList.addEventListener('change', async (e) => {
+  const el = e.target.closest('[data-action-change]');
+  if (!el) return;
+  const kind = el.dataset.actionChange;
+  if (kind === 'status') {
+    patchTicket(parseInt(el.dataset.id, 10), { status: el.value }, 'Status updated.');
+  } else if (kind === 'check') {
+    const updated = await ticketMutate('PATCH', `/api/tickets/${el.dataset.ticket}/checklist/${el.dataset.id}`, { done: el.checked });
+    if (updated) { const box = byId('ckItem' + el.dataset.id); if (box) box.focus(); }
+  } else if (kind === 'tag') {
+    const t = ticketById(el.dataset.id);
+    if (!t) return;
+    const id = parseInt(el.value, 10);
+    const ids = t.tags.map((g) => g.id).filter((x) => x !== id);
+    if (el.checked) ids.push(id);
+    await ticketMutate('PUT', `/api/tickets/${t.id}/tags`, { tag_ids: ids });
+  }
+});
+ticketList.addEventListener('input', (e) => {
+  const ta = e.target.closest('.notes-form textarea');
+  if (!ta) return;
+  const id = ta.closest('.notes-form').dataset.ticket;
+  NOTE_DRAFTS[id] = ta.value;
+  byId('notesPreview' + id).innerHTML = ta.value.trim() ? renderMarkdownSafe(ta.value) : '';
 });
 ticketList.addEventListener('submit', async (e) => {
+  const checklistForm = e.target.closest('.checklist-form');
+  const notesForm = e.target.closest('.notes-form');
+  if (checklistForm || notesForm) {
+    e.preventDefault();
+    const id = (checklistForm || notesForm).dataset.ticket;
+    if (checklistForm) {
+      const input = checklistForm.querySelector('input');
+      const body = input.value.trim();
+      if (!body) { toast('Write the item first.', true); input.focus(); return; }
+      if (await ticketMutate('POST', `/api/tickets/${id}/checklist`, { body })) byId('ckNew' + id).focus();
+    } else if (await ticketMutate('PATCH', `/api/tickets/${id}`, { internal_notes: notesForm.querySelector('textarea').value }, 'Notes saved. They stay private.')) {
+      delete NOTE_DRAFTS[id];
+      renderTickets();
+    }
+    return;
+  }
   const form = e.target.closest('.response-form');
   if (!form) return;
   e.preventDefault();
@@ -261,6 +406,121 @@ byId('ticketFilter').addEventListener('change', (e) => {
   try { localStorage.setItem('samaya_ticket_filter', e.target.value); } catch { /* storage blocked */ }
   renderTickets();
 });
+
+byId('ticketTagFilter').addEventListener('change', (e) => {
+  ticketTagFilter = e.target.value;
+  renderTickets();
+});
+
+// ── Manage tags modal ────────────────────────────────────────
+
+async function refreshTicketData() {
+  [TICKETS, TAGS] = await Promise.all([
+    api('GET', '/api/tickets', null, false, ticketsSlug()),
+    api('GET', '/api/ticket-tags', null, false, ticketsSlug()),
+  ]);
+  populateTagFilter();
+  renderTagManager();
+  renderTickets();
+}
+
+function renderTagManager() {
+  byId('tagManagerList').innerHTML = TAGS.length ? TAGS.map((g) => `<li class="tag-manager__row">
+      <label class="sr-only" for="tagName${g.id}">Name of tag ${escapeHtml(g.name)}</label>
+      <input class="pf-v6-c-form-control" type="text" id="tagName${g.id}" value="${escapeHtml(g.name)}" maxlength="24">
+      <label class="sr-only" for="tagColor${g.id}">Color of tag ${escapeHtml(g.name)}</label>
+      <input class="tag-manager__color" type="color" id="tagColor${g.id}" value="${escapeHtml(g.color)}">
+      <span class="samaya-muted tag-manager__count">${g.ticket_count} ticket${g.ticket_count === 1 ? '' : 's'}</span>
+      <span class="row-actions">
+        <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="tag-save" data-id="${g.id}">Save</button>
+        <button type="button" class="pf-v6-c-button pf-m-link pf-m-danger pf-m-small" data-action="tag-delete" data-id="${g.id}">Delete</button>
+      </span>
+    </li>`).join('') : '<li class="samaya-muted">No tags yet.</li>';
+}
+
+function showTagError(message) {
+  const box = byId('tagErrors');
+  box.textContent = message || '';
+  box.classList.toggle('hidden', !message);
+}
+
+function closeTagModal() {
+  closeModalById('tagModal');
+}
+
+byId('btnManageTags').addEventListener('click', () => {
+  showTagError('');
+  renderTagManager();
+  openModalById('tagModal');
+});
+
+bindActions(byId('tagManagerList'), {
+  async 'tag-save'(btn) {
+    const id = btn.dataset.id;
+    showTagError('');
+    try {
+      await api('PATCH', `/api/ticket-tags/${id}`, { name: byId('tagName' + id).value, color: byId('tagColor' + id).value }, false, ticketsSlug());
+      await refreshTicketData();
+      toast('Tag saved.');
+    } catch (e) { showTagError(e.message); }
+  },
+  async 'tag-delete'(btn) {
+    const g = TAGS.find((x) => x.id === parseInt(btn.dataset.id, 10));
+    if (!g) return;
+    const used = g.ticket_count ? ` It is on ${g.ticket_count} ticket${g.ticket_count === 1 ? '' : 's'} and will be removed from ${g.ticket_count === 1 ? 'it' : 'them'}.` : '';
+    if (!confirm(`Delete the tag "${g.name}"?${used}`)) return;
+    showTagError('');
+    try {
+      await api('DELETE', `/api/ticket-tags/${g.id}`, null, false, ticketsSlug());
+      await refreshTicketData();
+      toast('Tag deleted.');
+    } catch (e) { showTagError(e.message); }
+  },
+});
+
+byId('tagCreateForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = byId('tagNewName');
+  showTagError('');
+  try {
+    await api('POST', '/api/ticket-tags', { name: name.value, color: byId('tagNewColor').value }, false, ticketsSlug());
+    name.value = '';
+    await refreshTicketData();
+    toast('Tag created.');
+    name.focus();
+  } catch (err) { showTagError(err.message); }
+});
+
+// ── Export (spec §76.5) ──────────────────────────────────────
+// A fetch rather than a link: the download needs the X-Tenant-Slug header.
+
+async function exportTickets(format) {
+  const withContact = byId('exportContact').checked ? 1 : 0;
+  try {
+    const res = await fetch(`/admin/api/tickets/export?format=${format}&include_contact=${withContact}`, {
+      credentials: 'same-origin', headers: { 'X-Tenant-Slug': ticketsSlug() },
+    });
+    if (res.status === 401) { window.location.href = '/auth/login'; return; }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(describeApiError(err, res.statusText));
+    }
+    const blob = await res.blob();
+    const named = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') || '');
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = named ? named[1] : `samaya-tickets.${format === 'json' ? 'json' : 'zip'}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(withContact ? 'Exported with submitter contact details. Keep the file private.' : 'Export downloaded.');
+  } catch (e) { toast(e.message, true); }
+}
+
+byId('btnExportJson').addEventListener('click', () => exportTickets('json'));
+byId('btnExportMarkdown').addEventListener('click', () => exportTickets('markdown'));
 
 // ── Edit modal ───────────────────────────────────────────────
 
@@ -338,6 +598,7 @@ function boardCardHtml(t, index, count) {
   const moderate = canModerateTickets();
   const meta = [`${t.upvote_count} upvote${t.upvote_count === 1 ? '' : 's'}`];
   if (t.tenant_name) meta.push(t.tenant_name);
+  if (t.checklist.length) meta.push(`checklist ${t.checklist.filter((i) => i.done).length}/${t.checklist.length}`);
   let move = '';
   if (moderate) {
     const options = BOARD_COLUMNS.filter((s) => s !== t.status)
@@ -352,13 +613,14 @@ function boardCardHtml(t, index, count) {
   return `<li class="board-card" data-ticket-id="${t.id}"${moderate ? ' draggable="true"' : ''}>
     <button type="button" class="board-card__title" data-action="board-open" data-id="${t.id}">${escapeHtml(t.title)}</button>
     <div class="board-card__meta">${pfLabel(kind.label, kind.color)} <span class="samaya-muted">${escapeHtml(meta.join(', '))}</span></div>
+    ${t.tags.length ? `<div class="tag-row">${t.tags.map(tagChip).join('')}</div>` : ''}
     ${move}
   </li>`;
 }
 
 function renderBoard() {
   byId('ticketBoard').innerHTML = BOARD_COLUMNS.map((status) => {
-    const column = boardColumn(status);
+    const column = boardColumn(status).filter(ticketMatchesTag);
     const cards = column.length
       ? column.map((t, i) => boardCardHtml(t, i, column.length)).join('')
       : '<li class="board__empty samaya-muted">No tickets</li>';
@@ -367,8 +629,9 @@ function renderBoard() {
       <ul class="board__cards">${cards}</ul>
     </section>`;
   }).join('');
+  applyTypeColors(byId('ticketBoard'));
   const dismissed = TICKETS.filter((t) => t.status === 'dismissed').length;
-  const onBoard = TICKETS.length - dismissed;
+  const onBoard = TICKETS.filter((t) => t.status !== 'dismissed' && ticketMatchesTag(t)).length;
   byId('ticketCount').textContent = `${onBoard} ticket${onBoard === 1 ? '' : 's'} on the board`;
   byId('ticketBoardNote').textContent = dismissed
     ? `${dismissed} dismissed ticket${dismissed === 1 ? ' is' : 's are'} hidden from the board. Switch to List to see ${dismissed === 1 ? 'it' : 'them'}.`
@@ -381,6 +644,15 @@ function placeLocal(ticket, status, index) {
   others.splice(Math.max(0, Math.min(index, others.length)), 0, ticket);
   ticket.status = status;
   others.forEach((t, n) => { t.position = n; });
+}
+
+// Where "Move up" or "Move down" puts a card, counted in the whole column even when a
+// tag filter hides some neighbours: it jumps over the next card that is on screen.
+function shiftIndex(ticket, direction) {
+  const visible = boardColumn(ticket.status).filter(ticketMatchesTag);
+  const neighbour = visible[visible.findIndex((t) => t.id === ticket.id) + direction];
+  if (!neighbour) return null;
+  return boardColumn(ticket.status, ticket.id).findIndex((t) => t.id === neighbour.id) + (direction > 0 ? 1 : 0);
 }
 
 function focusBoardMove(id) {
@@ -437,10 +709,10 @@ ticketBoard.addEventListener('change', (e) => {
   const choice = select.value;
   select.value = '';
   if (!ticket) return;
-  const current = boardColumn(ticket.status).findIndex((t) => t.id === ticket.id);
-  if (choice === 'up') moveTicket(ticket, ticket.status, current - 1);
-  else if (choice === 'down') moveTicket(ticket, ticket.status, current + 1);
-  else if (choice.startsWith('to:')) moveTicket(ticket, choice.slice(3), boardColumn(choice.slice(3)).length);
+  if (choice === 'up' || choice === 'down') {
+    const index = shiftIndex(ticket, choice === 'up' ? -1 : 1);
+    if (index !== null) moveTicket(ticket, ticket.status, index);
+  } else if (choice.startsWith('to:')) moveTicket(ticket, choice.slice(3), boardColumn(choice.slice(3)).length);
 });
 
 // Mouse drag and drop. Touch screens and keyboards use each card's Move menu.

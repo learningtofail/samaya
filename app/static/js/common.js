@@ -194,6 +194,9 @@ function applyTypeColors(root) {
   scope.querySelectorAll('[data-color]').forEach((node) => {
     if (/^#[0-9a-fA-F]{6}$/.test(node.dataset.color)) node.style.backgroundColor = node.dataset.color;
   });
+  scope.querySelectorAll('[data-ink]').forEach((node) => {
+    if (/^#[0-9a-fA-F]{6}$/.test(node.dataset.ink)) node.style.color = node.dataset.ink;
+  });
   scope.querySelectorAll('[data-accent]').forEach((node) => {
     if (/^#[0-9a-fA-F]{6}$/.test(node.dataset.accent)) node.style.borderLeftColor = node.dataset.accent;
   });
