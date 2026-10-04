@@ -132,11 +132,11 @@ class TestReminders:
         await run_delivery_tick(sf, fake, datetime(2026, 10, 2, 18, 0, 30, tzinfo=UTC))
         assert next(c for c in fake.calls if c[0] == "send")[2] == "Hi"
 
-    async def test_empty_message_falls_back_to_name_and_time(self, sf, fake, configured):
+    async def test_empty_message_falls_back_to_time_until_the_event(self, sf, fake, configured):
         event_id = await make_event(sf, configured)
         await sync(sf, event_id)
         await run_delivery_tick(sf, fake, datetime(2026, 10, 2, 18, 0, 30, tzinfo=UTC))
-        assert next(c for c in fake.calls if c[0] == "send")[2].startswith("Bear Hunt starts <t:")
+        assert next(c for c in fake.calls if c[0] == "send")[2] == "1 hour until Bear Hunt"
 
     async def test_message_precedence(self, sf, fake, configured):
         event_id = await make_event(sf, configured, message="event message", interval=None)

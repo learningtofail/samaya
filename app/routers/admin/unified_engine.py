@@ -287,7 +287,7 @@ async def split_event(
         anchor_date=payload.from_date, until_date=event.until_date, mention_role=event.mention_role,
         active=event.active, cover_image_data=event.cover_image_data,
     )
-    new_event.reminders = [EventReminder(minutes_before=r.minutes_before) for r in event.reminders]
+    new_event.reminders = [EventReminder(minutes_before=r.minutes_before, message=r.message) for r in event.reminders]
     new_event.alliances = [
         EventAlliance(tenant_id=a.tenant_id, message_override=a.message_override) for a in event.alliances
     ]

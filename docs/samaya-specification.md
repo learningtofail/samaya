@@ -1525,7 +1525,7 @@ Replaced: `event_definitions`, `announcements`, `announcement_targets`, `announc
 | `event_types` | Reusable template. `kingdom_id`, `name` (unique per Kingdom), `color` (6-digit hex), `default_duration_hours` (nullable), `default_interval_days` (nullable, empty means one-off), `default_message`, `default_reminder_minutes` (JSON list of integers), `default_mention_role` (bool), `sort_order`. A seeded "General" type exists |
 | `events` | The definition. `owning_tenant_id`, `type_id` (required), `name`, `scope` (`alliance` or `kingdom-wide`), `leadership_only`, `message` (default message, supports the six placeholders of §27), `location` (free text), `start_time_utc`, `duration_hours` (nullable and positive when set), `recurrence_kind` (`none` or `interval_days`), `interval_days`, `anchor_date` (date of the first or only occurrence), `until_date` (nullable; last date an occurrence may fall on, set when a series is split, §66.4a), `series_id` (shared by every part of a split series, so the admin list can show them as one), `mention_role`, `active`, `cover_image_data` (§35), timestamps |
 | `event_alliances` | Audience. For an `alliance` event, one row per participating alliance (the owner included). For a `kingdom-wide` event every alliance in the Kingdom takes part and rows exist only to carry an override. Columns: `event_id`, `tenant_id`, `message_override` (nullable), `notification_channel_id` and `notification_role_id` (nullable overrides of the alliance default) |
-| `event_reminders` | Delivery rules. `event_id`, `minutes_before` (0 or more; 0 means at the start). Copied from the type's defaults when the event is created, so editing a type later does not silently change existing events |
+| `event_reminders` | Delivery rules. `event_id`, `minutes_before` (0 or more; 0 means at the start), `message` (nullable, this reminder's own text, §77). Copied from the type's defaults when the event is created, so editing a type later does not silently change existing events |
 | `event_occurrences` | One dated instance. `event_id`, `occurrence_date`, `start_datetime_utc`, `end_datetime_utc` (nullable when the event has no duration), `status` (`scheduled` or `cancelled`), per-occurrence overrides that are all nullable (`start_datetime_utc_override`, `message_override`), unique on `(event_id, occurrence_date)`. Regeneration never overwrites an occurrence that has an override or is `cancelled` |
 | `deliveries` | Replaces `post_log`, announcement target status and `reminder_sent`. `occurrence_id` (references `event_occurrences`), `tenant_id`, `kind` (`discord_event` or `reminder`), `reminder_minutes` (the offset that produced the row, a snapshot rather than a foreign key; `-1` for `discord_event`), `due_at_utc`, `status` (`pending`, `sending`, `posted`, `error`, `cancelled`), `claimed_at_utc` (set when the tick claims the row, used to flag a stuck `sending` row), `discord_event_id`, `discord_message_id`, `detail`, `posted_at_utc`; unique on `(occurrence_id, tenant_id, kind, reminder_minutes)`. An index on `(status, due_at_utc)` serves the tick |
 | `tickets`, `ticket_votes` | Same board as §40 to §43. An error report references `related_occurrence_id`; `related_announcement_id` is removed. Tickets gain the moderation fields and the `ticket_responses` table of §66.10 |
@@ -1547,7 +1547,7 @@ Rules:
 ### 66.3 Publishing and notifying
 
 - **Publishing** creates the Discord Scheduled Event and makes the occurrence visible on the public page and feeds. It needs no channel and sends no message. Automatic publishing keeps the semantics of §51: seven days ahead, skipped inside 15 minutes, a same-named Discord event with a different time is flagged and never overwritten, and a same-named same-time event is recorded without a second API call.
-- **Notifying** is the `reminder` deliveries, sent to the alliance's Notifications destination, or the event's override. The text is the effective message (the alliance override, else the default). If that is empty the system sends "{name} starts {event_time_relative}".
+- **Notifying** is the `reminder` deliveries, sent to the alliance's Notifications destination, or the event's override. The text is the effective message (the alliance override, else the default). If that is empty the system sends the default reminder text (§77.4).
 - **Shared Discord servers** still produce one Scheduled Event per guild (§52); each alliance keeps its own delivery rows and its own reminder.
 - There is no creation notice. Publishing never sends a channel message by itself.
 
@@ -2375,3 +2375,40 @@ Fully superseded designs, moved here unchanged except for position. Each begins 
 - **Not enforced:** the status select in List view (`PATCH`) and Restore. The limit guards board moves only, as decided in §76.2. A column can also exceed its limit by other routes, such as a new ticket arriving as Open, so the header shows "N of L allowed, full" or "over the limit" in text, not only color.
 - The board asks for confirmation before sending an override. The server stays the authority: a stale limit gives a 409 toast that says to reload.
 - Admin UI: column headers show the count against the limit, and a superadmin gets a Column limits button in Board view. Limits never reach the public board or API.
+
+## 77. A message per reminder
+
+Requirement recorded 2026-10-03. An event's reminders can each carry their own text, for example "One hour left" at 60 minutes and "Starting now!" at 0.
+
+### 77.1 Decisions
+
+- `event_reminders.message` is a nullable column (migration `a1f0c0de0012`, additive; the downgrade drops it and reminders then use the event message again). NULL or blank means "use the event's message", so every existing event behaves as before.
+- **Precedence when a reminder is sent:** the occurrence's `message_override`, then the reminder's own message, then the alliance's `message_override`, then the event's message, then the default reminder text (§77.4). A reminder's own message therefore applies to every alliance and replaces an alliance's own message for that reminder; an alliance override still applies to reminders without a message of their own.
+- Placeholders (`{event_time_relative}` and the rest of §66.5) render in a reminder message like in any other message. Limit 2,000 characters, as for the event message.
+- The Discord Scheduled Event description does not use reminder messages; it still follows occurrence override, alliance override, event message.
+- Not built: event types' default reminders stay a plain list of minute offsets, so a new event does not inherit per-reminder messages from its type. Also not built: the composer toolbar and live preview per reminder (each reminder has a plain text box).
+- Reminder messages are never part of a public payload.
+
+### 77.2 As built
+
+- API: `reminder_messages` is `{minutes: text}` on `POST /api/events` and `PATCH /api/events/{id}` (and the `changes` of the split endpoint), and in every event response (only reminders that have a message appear, keys are strings). On create and on patch a message must belong to a reminder in the resulting list (422 otherwise). On patch the map is a full replacement. Sending only `reminder_minutes` keeps the messages of the offsets that stay. Blank text drops the entry. Changes are audited in the event's `reminder_messages` snapshot. The split copies the messages to the new part of the series.
+- Engine: `_send_reminder` looks up the delivery's own reminder row by `minutes_before`. Because deliveries merge by guild, channel and offset, one reminder message never conflicts with another.
+- Admin: the Events form shows a text box under the reminder chips for each reminder (`createReminderEditor` with `withMessages`); the event type form is unchanged. Typed text survives adding other reminders and is dropped with a removed reminder.
+
+### 77.4 Default reminder text
+
+When a reminder has no message of its own and the event has none either, the text is built from the reminder's offset (changed 2026-10-03; it used to be "{name} starts {event_time_relative}"):
+
+| Offset | Text |
+| --- | --- |
+| 0 | `Bear Hunt is starting now` |
+| 1 | `1 minute until Bear Hunt` |
+| 60 | `1 hour until Bear Hunt` |
+| 90 | `90 minutes until Bear Hunt` |
+| 2880 | `2 days until Bear Hunt` |
+
+The largest whole unit is used (days, then hours, then minutes). The text has no Discord timestamp, so it reads correctly wherever the reminder is shown. `services/templates.default_reminder_text`; it is English only, like the rest of the posted messages. The event name is inserted as written and is not rendered as a template. A role mention is still added in front when the event asks for one.
+
+### 77.3 Fix found on the way
+
+An "at the start" (0 minute) reminder was always cancelled as "Event had already started": it comes due at the start time and the check was `start <= now`. It now gets a 5 minute grace period (`AT_START_GRACE`) so the one-minute tick, or a short outage, still posts it. Reminders before the start behave as before.

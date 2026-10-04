@@ -709,7 +709,7 @@ async function openEventForm({ mode, event, splitFrom, duplicate }) {
 
   EVF.composer = createComposer(byId('evMessageHost'), {
     idPrefix: 'evMsg', label: 'Message', value: event ? event.message : '', rows: 6,
-    helper: 'Posted at each reminder. If empty, reminders say "{name} starts {event_time_relative}".',
+    helper: 'Posted at each reminder that has no message of its own (set those under Reminders). If empty, a reminder says "1 hour until Event Name" (and "Event Name is starting now" at the start).',
     previewSlug: ownerSlugValue,
     eventStart: eventStartDate,
   });
@@ -718,6 +718,7 @@ async function openEventForm({ mode, event, splitFrom, duplicate }) {
 
   EVF.reminders = createReminderEditor(byId('evReminderHost'), {
     idPrefix: 'evRem', value: event ? event.reminder_minutes : [],
+    withMessages: true, messages: event ? event.reminder_messages : {},
     onChange: () => EVF.touched.add('reminders'),
   });
 
@@ -857,7 +858,7 @@ function collectEventForm() {
     message: EVF.composer.value(), anchor_date: anchor, start_time_utc: start,
     duration_hours: duration, recurrence_kind: repeats ? 'interval_days' : 'none',
     interval_days: interval, until_date: until, reminder_minutes: EVF.reminders.value(),
-    alliances: audience, audience_changes: collectAudienceChanges(),
+    reminder_messages: EVF.reminders.messages(), alliances: audience, audience_changes: collectAudienceChanges(),
     ownerSlug: ownerSlugValue(),
   };
 }
@@ -899,6 +900,7 @@ function buildEventChanges(orig, f, skipAnchor) {
   }
   if ((f.until_date || null) !== (orig.until_date || null)) c.until_date = f.until_date;
   if (JSON.stringify(f.reminder_minutes) !== JSON.stringify(orig.reminder_minutes)) c.reminder_minutes = f.reminder_minutes;
+  if (JSON.stringify(f.reminder_messages) !== JSON.stringify(orig.reminder_messages || {})) c.reminder_messages = f.reminder_messages;
   if (formAudienceKey(f) !== origAudienceKey(orig, f.scope)) c.alliances = f.alliances;
   if (JSON.stringify(f.audience_changes) !== JSON.stringify(orig.audience_changes)) c.audience_changes = f.audience_changes;
   if (EVF.cover.current !== (orig.cover_image_data || '')) c.cover_image_data = EVF.cover.current;
@@ -919,8 +921,8 @@ async function saveEventForm() {
         start_time_utc: f.start_time_utc, anchor_date: f.anchor_date, location: f.location,
         message: f.message, duration_hours: f.duration_hours, recurrence_kind: f.recurrence_kind,
         interval_days: f.interval_days, until_date: f.until_date, mention_role: f.mention_role,
-        reminder_minutes: f.reminder_minutes, alliances: f.alliances,
-        audience_changes: f.audience_changes,
+        reminder_minutes: f.reminder_minutes, reminder_messages: f.reminder_messages,
+        alliances: f.alliances, audience_changes: f.audience_changes,
       };
       if (EVF.cover.current) payload.cover_image_data = EVF.cover.current;
       await api('POST', '/api/events', payload, false, f.ownerSlug);

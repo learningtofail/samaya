@@ -10,11 +10,15 @@ const REMINDER_MAX_MINUTES = 28 * 24 * 60;
 
 const REMINDER_PRESETS = [0, 5, 15, 30, 60, 120, 1440];
 
-// host gets the whole editor. opts: { idPrefix, value: [minutes], onChange }
-// Returns { value(), setValue(minutes[]) }; value() is sorted largest first.
+// host gets the whole editor. opts: { idPrefix, value: [minutes], onChange,
+// withMessages, messages: {minutes: text} }. With withMessages each reminder also
+// gets its own message box (spec §77); the type form leaves that off.
+// Returns { value(), setValue(minutes[]), messages(), setMessages({}) };
+// value() is sorted largest first and messages() holds only the non-blank texts.
 function createReminderEditor(host, opts) {
   const p = opts.idPrefix;
   let minutes = [];
+  let texts = {};
 
   host.innerHTML = `
     <div class="reminders">
@@ -36,9 +40,30 @@ function createReminderEditor(host, opts) {
         </div>
       </div>
       <p class="reminders__help">Each reminder posts to each selected destination that many minutes before the start. 0 means at the start. Up to ${REMINDER_MAX_COUNT}, at most 4 weeks ahead.</p>
+      ${opts.withMessages ? `<div class="reminders__messages" id="${p}Messages"></div>` : ''}
     </div>`;
 
   const chips = document.getElementById(p + 'Chips');
+  const messagesHost = opts.withMessages ? document.getElementById(p + 'Messages') : null;
+
+  function renderMessages() {
+    if (!messagesHost) return;
+    messagesHost.innerHTML = minutes.length
+      ? `<p class="reminders__help">Give a reminder its own text, for example "Starting now!" at 0. A reminder left empty posts the event message, or "1 hour until Event Name" if that is empty too. A reminder's own text is used for every alliance, in place of an alliance's own message.</p>`
+        + minutes.map((m) => `<div class="reminders__message">
+          <label class="pf-v6-c-form__label" for="${p}Msg${m}"><span class="pf-v6-c-form__label-text">Message: ${escapeHtml(describeReminder(m))}</span></label>
+          <textarea class="pf-v6-c-form-control" id="${p}Msg${m}" rows="2" maxlength="${COMPOSER_MAX_CHARS}" data-minutes="${m}" placeholder="Uses the event message">${escapeHtml(texts[m] || '')}</textarea>
+        </div>`).join('')
+      : '';
+  }
+  if (messagesHost) {
+    messagesHost.addEventListener('input', (e) => {
+      const box = e.target.closest('textarea[data-minutes]');
+      if (!box) return;
+      texts[parseInt(box.dataset.minutes, 10)] = box.value;
+      if (opts.onChange) opts.onChange();
+    });
+  }
 
   function render() {
     chips.innerHTML = minutes.length
@@ -48,6 +73,11 @@ function createReminderEditor(host, opts) {
           + `<button type="button" class="chips__remove" data-remove="${m}" aria-label="Remove reminder: ${escapeHtml(label)}">&times;</button></li>`;
       }).join('')
       : '<li class="chips__empty">No reminders. Nothing is posted to the channel for this event.</li>';
+    renderMessages();
+  }
+
+  function pruneTexts() {
+    texts = Object.fromEntries(Object.entries(texts).filter(([m]) => minutes.includes(parseInt(m, 10))));
   }
 
   function add(m) {
@@ -70,6 +100,7 @@ function createReminderEditor(host, opts) {
     if (!btn) return;
     const m = parseInt(btn.dataset.remove, 10);
     minutes = minutes.filter((x) => x !== m);
+    pruneTexts();
     render();
     if (opts.onChange) opts.onChange();
     document.getElementById(p + 'Custom').focus();
@@ -87,10 +118,22 @@ function createReminderEditor(host, opts) {
   });
 
   minutes = (opts.value || []).slice().sort((a, b) => b - a);
+  texts = Object.fromEntries(Object.entries(opts.messages || {}).map(([m, t]) => [parseInt(m, 10), t]));
+  pruneTexts();
   render();
 
   return {
     value() { return minutes.slice(); },
-    setValue(list) { minutes = (list || []).slice().sort((a, b) => b - a); render(); },
+    setValue(list) { minutes = (list || []).slice().sort((a, b) => b - a); pruneTexts(); render(); },
+    messages() {
+      const out = {};
+      minutes.forEach((m) => { const t = (texts[m] || '').trim(); if (t) out[m] = t; });
+      return out;
+    },
+    setMessages(map) {
+      texts = Object.fromEntries(Object.entries(map || {}).map(([m, t]) => [parseInt(m, 10), t]));
+      pruneTexts();
+      render();
+    },
   };
 }

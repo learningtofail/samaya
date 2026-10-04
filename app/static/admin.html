@@ -89,6 +89,7 @@
       <ul>
         <li><strong>Repeating events</strong> ask what you are editing: just one date, this date and every later one, or all of them.</li>
         <li><strong>Reminders</strong> post to the audiences each alliance uses by default. Untick an audience on the event to skip it, or tick another to add it. Alliances and audiences that share a channel get one combined message.</li>
+        <li><strong>Reminder messages.</strong> Each reminder can have its own text, such as "Starting now!" for the reminder at the start. A reminder with no text posts the event message. A reminder's own text goes to every alliance and replaces an alliance's own message for that reminder.</li>
         <li><strong>Leadership only</strong> events never create a Discord Scheduled Event and never appear on public pages.</li>
         <li><strong>Deleting</strong> an event also removes its Discord events. Deactivating stops all posting but keeps the event.</li>
       </ul>
@@ -562,7 +563,7 @@
             </div>
           </section>
           <section class="fsec">
-            <div><div class="fsec__title">Message</div><div class="fsec__hint">Posted at each reminder.</div></div>
+            <div><div class="fsec__title">Message</div><div class="fsec__hint">Posted at each reminder that has no message of its own.</div></div>
             <div class="form-grid"><div class="form-grid__full" id="evMessageHost"></div></div>
           </section>
           <section class="fsec">

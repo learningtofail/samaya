@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from services.validators import (
     parse_anchor_date, parse_cover_image_data, parse_hex_color,
     parse_optional_duration_hours, parse_optional_interval_days,
-    parse_recurrence_kind, parse_reminder_minutes, parse_scope, parse_start_time_utc,
+    parse_recurrence_kind, parse_reminder_messages, parse_reminder_minutes, parse_scope, parse_start_time_utc,
 )
 
 MAX_MESSAGE_CHARS = 2000  # Discord's own limit for a channel message
@@ -97,6 +97,7 @@ class EventIn(BaseModel):
     until_date:       Optional[str] = None
     mention_role:     Optional[bool] = None
     reminder_minutes: Optional[list[int]] = None
+    reminder_messages: Optional[dict[int, str]] = None
 
     _validate_scope = field_validator("scope", mode="before")(parse_scope)
     _validate_time = field_validator("start_time_utc", mode="before")(parse_start_time_utc)
@@ -110,6 +111,8 @@ class EventIn(BaseModel):
         lambda cls, v: parse_anchor_date(v, allow_none=True))
     _validate_reminders = field_validator("reminder_minutes", mode="before")(
         lambda cls, v: parse_reminder_minutes(v, allow_none=True))
+    _validate_reminder_messages = field_validator("reminder_messages", mode="before")(
+        lambda cls, v: parse_reminder_messages(v, allow_none=True))
 
     @field_validator("name", mode="after")
     @classmethod
@@ -140,6 +143,7 @@ class EventPatch(BaseModel):
     until_date:       Optional[str] = None
     mention_role:     Optional[bool] = None
     reminder_minutes: Optional[list[int]] = None
+    reminder_messages: Optional[dict[int, str]] = None
     alliances:        Optional[list[EventAllianceIn]] = None
     audience_changes: Optional[list[AudienceChangeIn]] = None
 
@@ -159,6 +163,8 @@ class EventPatch(BaseModel):
         lambda cls, v: parse_anchor_date(v, allow_none=True))
     _validate_reminders = field_validator("reminder_minutes", mode="before")(
         lambda cls, v: parse_reminder_minutes(v, allow_none=True))
+    _validate_reminder_messages = field_validator("reminder_messages", mode="before")(
+        lambda cls, v: parse_reminder_messages(v, allow_none=True))
 
 
 class EventPreviewIn(BaseModel):

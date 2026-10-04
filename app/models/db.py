@@ -558,6 +558,8 @@ class EventReminder(Base):
     id             = Column(Integer, primary_key=True)
     event_id       = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     minutes_before = Column(Integer, nullable=False)
+    # This reminder's own text (spec §77). NULL means "use the event's message".
+    message        = Column(Text, nullable=True)
 
     event = relationship("Event", back_populates="reminders")
 
