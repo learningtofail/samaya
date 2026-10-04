@@ -2415,7 +2415,7 @@ An "at the start" (0 minute) reminder was always cancelled as "Event had already
 
 ## 78. Installable app and push notifications
 
-Requirement recorded 2026-10-04. Status: design only, nothing is built. Reviewed twice by independent reviewers before any code (78.18). The public events and feedback pages become an installable web app, and players can get push notifications for the events they choose, at lead times they choose, without an account.
+Requirement recorded 2026-10-04. Status: design only, nothing is built. Reviewed by independent reviewers before any code: twice on the technical design (78.18) and once from the players' side (78.19). The players' review found no evidence yet that players want push, so phases 2 and 3 are gated on measurement (78.4). The public events and feedback pages become an installable web app, and players can get push notifications for the events they choose, at lead times they choose, without an account.
 
 ### 78.1 Goal and non-goals
 
@@ -2430,15 +2430,19 @@ Non-goals for this section: accounts or sync across devices, email or SMS, nativ
 3. **Push follows the public schedule, not Discord.** What a subscriber can receive is exactly what the public query returns (`services/public_events`). Leadership-only, inactive and cancelled occurrences are never pushed. Discord Audiences, channels and roles do not apply.
 4. **Players set their own lead times.** Push does not depend on an event's Discord reminder offsets, though "use each event's reminders" is the default mode (78.8).
 5. **No quiet hours in v1.** Phones already have Do Not Disturb and Focus, and server-side quiet hours would need time zone handling (`tzdata` is not in the image) for a feature the OS does better (78.16).
-6. **At most once, never late, never stale.** The engine claims a send before calling the push service, like Discord deliveries (§66.4). A push more than 15 minutes past its due time is skipped. A push whose due time is earlier than the moment the subscriber, the event or the occurrence last changed is skipped too (78.8). Discord reminders still send late.
+6. **At most once, never late, never stale.** The engine claims a send before calling the push service, like Discord deliveries (§66.4). A push more than its late limit past its due time (15 minutes, or 30 for offsets of 60 minutes or more) is skipped. A push whose due time is earlier than the moment the subscriber, the event or the occurrence last changed is skipped too (78.8). Discord reminders still send late.
 7. **Standard Web Push through a service worker**, not Declarative Web Push, because it works across Chrome, Firefox and Safari (78.16).
-8. **Wording is built on the device** from structured data and the current time with `Intl.RelativeTimeFormat` in the subscriber's language, so no per-language catalogue is needed for notification text. The §77.4 default reminder text stays English and Discord only.
+8. **Wording is built on the device** from structured data and the current time. Reminder text uses `Intl.RelativeTimeFormat` in the subscriber's language and needs no catalogue. The change pushes (decision 15) need a few short phrases, which `/sw.js` inlines from the `public.push.sw.*` keys of the enabled languages, so they follow the same review flags as the rest of the interface. The §77.4 default reminder text stays English and Discord only.
 9. **Management proof is the subscription's own auth secret.** The browser can always re-read it from its push subscription (78.11).
 10. **Endpoint allowlist.** The server only sends to known push-service hosts (78.13). Without it, any visitor could make the server call any URL.
 11. **A recurring event is followed by `series_id`, and sends are de-duplicated by `series_id` and date.** Occurrence ids are not stable: the engine deletes and recreates occurrences when an event is split, deactivated and reactivated or rescheduled (`_retire_occurrence`, `event_engine.py`). `series_id` survives all of these and is copied by a split.
 12. **Off unless configured.** Push needs VAPID keys and `SAMAYA_PUSH_ENABLED=1`, read at call time. Otherwise the bell is hidden, the jobs are not registered and the API answers `enabled: false`.
 13. **A separate scheduler job**, so a stall in Discord delivery cannot block push and the reverse.
 14. **An async sender that the app controls.** `httpx` for transport, with `follow_redirects=False` and `trust_env=False`, and `http-ece` plus `py-vapid` (the libraries `pywebpush` itself builds on) for RFC 8291 encryption and the VAPID token. `pywebpush` is not used: it is synchronous (it would freeze the single event loop, which also runs the Discord tick and every web request) and its transport follows redirects and proxy environment variables by default (inference; check at build). The maintenance state and `cryptography` compatibility of `http-ece` and `py-vapid` are not verified and must be checked first (78.17 O5), with the RFC 8291 test vectors in the tests.
+15. **Change pushes are part of the core.** A player who follows an event needs to hear that it moved or was cancelled, not only reminders (78.9a). Today a move or cancel updates or removes the Discord Scheduled Event and sends no channel message (§66.3), so this is new behaviour.
+16. **Gated on evidence.** Phases 2 and 3 are built only after the measurements in 78.4 show that players want push. Phase 0 stands on its own.
+17. **Silent failure is not acceptable.** The player always sees whether notifications are working on this device, and every case the page cannot support (in-app browser, iPhone outside the Home Screen, blocked permission) says so and offers a fallback instead of hiding the control (78.12).
+18. **The coordinator's reminders are the only control over what is pushed.** An event with no reminders sends no push in the default mode. There is no per-event push switch and no urgent override in v1 (78.16).
 
 ### 78.3 Facts the design relies on
 
@@ -2455,16 +2459,24 @@ Non-goals for this section: accounts or sync across devices, email or SMS, nativ
 | The `/api/events` response was about 23 MB | Observed 2026-10-03. The cause in 78.5 is established by reading the code (every occurrence row carries the cover data URI), not yet by measuring a response |
 | Behind Cloudflare, a client can send its own `X-Forwarded-For` and Cloudflare appends to it, so the leftmost entry that `rate_limit._client_ip` trusts is client-controlled. Whether Caddy overwrites the header, which would put every visitor in one bucket, is unknown | Plausible, unverified for this deployment (78.11, O9) |
 
-### 78.4 Phases
+### 78.4 Gate and phases
+
+**Gate.** The players' review (78.19) found no evidence that players want push, and found cheaper routes to the same job (calendar alarms and Discord DMs). Before phase 2, in this order:
+
+1. **Measure** (about half a session, no feature): the schedule page's device, browser and referrer split from Cloudflare's analytics or the edge logs, a count of taps on the Add to Calendar menu by vendor, and a one-question poll in Discord (poll text in 78.19).
+2. **Test calendar alarms** (one hour): subscribe a test feed that carries `VALARM` in Google Calendar, Apple Calendar and Outlook and note what fires. Adding `VALARM` to the feed is about 30 lines. The outcome decides whether it is worth its own small section.
+3. **Decide on a Discord `/remind` DM command** as an alternative or a first step (78.19). It needs no install and no permission prompt.
+
+Decision rule the reviewers propose, which is a judgement and not a fact: proceed to phase 2 when at least 40 percent of schedule visits are on Android or desktop outside Discord's in-app browser and at least 25 percent of at least 30 poll respondents prefer a phone notification over a DM or a calendar alarm; stop when 15 percent or fewer want any notification outside Discord, or more than 60 percent of visits are iPhones inside Discord's in-app browser. The owner decides (O10). Phase 0 is independent of the gate.
 
 | Phase | Delivers | Needs |
 |---|---|---|
-| 0 | Public payload diet: covers served by URL (78.5) | Owner decision (O2), migration `a1f0c0de0013`, Caddy line `/event-covers/*` |
-| 1 | Installable app shell: manifest, icons, service worker, offline fallback (78.6) | Icons (O1), Caddy lines `/manifest.webmanifest` and `/sw.js` |
-| 2 | Push core: subscribe, follow alliances and the Kingdom, the engine, the test button (78.7 to 78.11) | VAPID keys, migration `a1f0c0de0014`, the client IP fix (O9). No Caddy line: `/api/*` is already routed |
-| 3 | Preferences: own lead times, type mutes, per-event follow and mute (78.8, 78.12) | Phase 2 |
+| 0 | Public payload diet: covers served by URL (78.5). Page weight alone justifies it | Migration `a1f0c0de0013`, Caddy line `/event-covers/*` |
+| 1 | Installable app shell: manifest, icons, service worker, offline fallback (78.6). Needs phase 0 | Icons (O1), Caddy lines `/manifest.webmanifest` and `/sw.js` |
+| 2 | Push core: subscribe, follow alliances and the Kingdom, reminders, change pushes, status and fallbacks, the test button (78.7 to 78.12) | The gate, VAPID keys, migration `a1f0c0de0014`, the client IP fix (O9). No Caddy line: `/api/*` is already routed |
+| 3 | Preferences: own lead times, type mutes, per-event follow and mute, pause (78.8, 78.12) | Phase 2 |
 
-Each phase ships and works alone. Rough effort in working sessions: phase 0 about 1 to 1.5, phase 1 about 1, phase 2 about 4, phase 3 about 1 to 2, so 7 to 8 in all, or 6 to 7 without phase 0.
+Each phase ships and works alone. Rough effort in working sessions: measurement and calendar test about 1, phase 0 about 1 to 1.5, phase 1 about 1, phase 2 about 5 (it now includes change pushes and the status and fallback work), phase 3 about 1 to 2, so about 9 to 10 end to end, or about 8 without phase 0. The owner asked for custom lead times and per-event control, so phase 3 stays in the plan, last.
 
 ### 78.5 Phase 0: public payload diet
 
@@ -2496,6 +2508,8 @@ The worker is served from `/sw.js`, not `/static/sw.js`, because a worker contro
 
 **Pages.** `public_pages.render_public_page` adds `<link rel="manifest">`, `<meta name="theme-color">` and an `apple-touch-icon` link. A new classic script `static/pwa.js` (one IIFE, no globals, pure section exported under `__SAMAYA_TEST__`) registers the worker when `navigator.serviceWorker` exists and the URL has no `preview_theme`. It also holds the install prompt: on Chromium it keeps the `beforeinstallprompt` event for an "Install app" button; on iOS Safari it shows "Share, then Add to Home Screen" when the page is not already in standalone mode (`matchMedia('(display-mode: standalone)')` or `navigator.standalone`).
 
+**Install flow.** On iOS the order is: install from Safari, open the Home Screen app, then subscribe there. Safari and the Home Screen app keep separate state, and one tap in a Safari tab cannot subscribe. The install screen says so, and it offers the calendar menu and the Discord `/schedule` command at the same time, so an iPhone player who stops there still has a way to get the schedule. The page also detects an in-app browser (78.12) and says to open it in Chrome or Safari instead of showing install steps that cannot work.
+
 **Fetch handler.**
 
 | Request | Strategy |
@@ -2526,13 +2540,15 @@ Additive. The downgrade drops the three tables and the column, which loses subsc
 | `lead_mode` | `event_defaults` (default) or `custom` |
 | `custom_offsets` | JSON list of minutes; CHECK `lead_mode = 'event_defaults' OR custom_offsets IS NOT NULL` |
 | `kingdom_wide`, `announcements` | booleans, both default true |
+| `tz` | the player's display time zone: an IANA name or `UTC`, at most 64 characters, matching a simple pattern. The server never interprets it; the service worker falls back to UTC if the name is unknown. Pre-filled from the page's own display time zone (`samaya_display_tz`), because the worker cannot read the page's storage |
+| `paused_until` | nullable; no push is sent while it is in the future (78.12) |
 | `created_at`, `prefs_updated_at`, `last_seen_at`, `last_success_at`, `last_failure_at`, `failure_count`, `disabled_at` | housekeeping. `prefs_updated_at` is set on every write to the preferences or rules |
 
 **`push_rules`**: `id`, `subscription_id` (cascade), `kind` (`alliance`, `type`, `series`), `ref` (Text, not null: a tenant id, an event type id or a `series_id`), `label` (Text, the event name shown in the panel, at most 120 characters), `action` (`follow` or `mute`), `offsets` (JSON, nullable). Unique on (`subscription_id`, `kind`, `ref`). CHECKs: `alliance` is only `follow`, `type` is only `mute`, `offsets` only on `series`. `ref` carries no foreign key, so a deleted alliance or type leaves a harmless rule that goes away with the subscription. One text column instead of a nullable id and a nullable text keeps the unique constraint honest, since a UNIQUE over NULLs does not stop duplicates on Postgres.
 
-**`push_sends`**: `id`, `subscription_id` (cascade), `series_id`, `occurrence_date`, `offset_minutes`, `occurrence_id` (nullable, no foreign key, informational only), `due_at_utc`, `status` (`sending`, `sent`, `failed`, `expired`), `detail`, `claimed_at_utc`. Unique on (`subscription_id`, `series_id`, `occurrence_date`, `offset_minutes`), which is the at-most-once guarantee. It does not use the occurrence id, so recreating an occurrence cannot repeat a push (decision 11). Index on (`status`, `claimed_at_utc`).
+**`push_sends`**: `id`, `subscription_id` (cascade), `series_id`, `occurrence_date`, `kind` (`reminder`, `moved`, `cancelled`), `token` (an integer: the offset in minutes for a reminder, the new start in minutes since the epoch for `moved`, 0 for `cancelled`), `occurrence_id` (nullable, no foreign key, informational only), `due_at_utc`, `status` (`sending`, `sent`, `failed`, `expired`), `detail`, `claimed_at_utc`. Unique on (`subscription_id`, `series_id`, `occurrence_date`, `kind`, `token`), which is the at-most-once guarantee. It does not use the occurrence id, so recreating an occurrence cannot repeat a push (decision 11). Index on (`status`, `claimed_at_utc`).
 
-**`event_occurrences.changed_at`**: nullable, set by `PATCH /api/occurrences/{id}` (cancel, restore, move, message) and by generation when it changes a start time. Needed by the stale rule in 78.8, since a moved occurrence changes the occurrence row and not `events.updated_at`.
+**`event_occurrences` columns**: `changed_at` (nullable), set by `PATCH /api/occurrences/{id}` (cancel, restore, move, message) and by generation when it changes a start time; it feeds the stale rule in 78.8, since a moved occurrence changes the occurrence row and not `events.updated_at`. `change_kind` (nullable, `moved` or `cancelled`) and `change_from_utc` (nullable, the start subscribers were last told) are set by the same two places and cleared once the change push has been processed (78.9a).
 
 **Cascade.** The test database does not enable SQLite foreign keys (no `PRAGMA foreign_keys` in `conftest.py`), so the service deletes a subscription's rules and sends explicitly in code, and `ON DELETE CASCADE` is only the Postgres backstop. Tests cover both.
 
@@ -2544,7 +2560,7 @@ Additive. The downgrade drops the three tables and the column, which loses subsc
 
 For one public occurrence and one subscriber, in order:
 
-0. The occurrence is not cancelled and the event is public and active (guaranteed by the public query).
+0. The occurrence is not cancelled and the event is public and active (guaranteed by the public query), and the subscriber is not paused (`paused_until`).
 1. A `series` rule with `mute` for the event's `series_id`: no push.
 2. A `series` rule with `follow`: push, skipping steps 3 to 5.
 3. A `type` rule with `mute` for the event's type: no push.
@@ -2553,7 +2569,7 @@ For one public occurrence and one subscriber, in order:
 
 Precedence is series, then type, then alliance. New events and new event types match automatically when they fit the rules, with no re-subscribe. A series follow cannot reach a leadership-only or inactive event, because step 0 comes first.
 
-**Lead times for a match**, first that applies: the series rule's `offsets`; else the subscriber's `custom_offsets` when `lead_mode` is `custom`; else the event's own reminder minutes. Offsets above 10,080 are ignored for push. An event with no reminders and no custom times sends nothing in the default mode.
+**Lead times for a match**, first that applies: the series rule's `offsets`; else the subscriber's `custom_offsets` when `lead_mode` is `custom`; else the event's own reminder minutes. Offsets above 10,080 are ignored for push. An event with no reminders and no custom times sends nothing in the default mode. This is deliberate: the coordinator's reminders are the control over what is pushed (decision 18). The seeded event type has no default reminders (migration 0001), so a coordinator who never set any on an event sends no push for it. To keep that from looking like a broken app, the panel tells a new subscriber how many reminders fall in the next 7 days ("You will get about 6 notifications in the next 7 days", or "No upcoming event has reminders yet"), and the event form tells the coordinator that its reminders are also sent to subscribers of the app.
 
 **Not stale.** A (subscriber, occurrence, offset) is eligible only when its `due` time is later than the latest of the subscriber's `created_at` and `prefs_updated_at`, the event's `updated_at`, and the occurrence's `generated_at` and `changed_at`. Without this, a player who subscribes at 19:10 would receive the 19:00 push, adding a new lead time would fire the ones already past, and moving or creating an event would fire "30 minutes until" with 20 minutes left. The Discord engine has the same guard (`_new_delivery_state` cancels a reminder whose time had already passed when it was generated).
 
@@ -2583,13 +2599,13 @@ New `services/push_engine.py` with an injectable async sender (`get_pusher()`, l
 
 1. **Exit early** when there are no enabled subscribers.
 2. **Offsets in use.** The union of every enabled subscriber's offsets and every event's reminder minutes, computed once.
-3. **Candidates.** Occurrences for UTC dates `today - 1` to `today + 7`, kept when `effective_start` is within `[now - AT_START_GRACE, now + 10,080 minutes]` and some offset in use puts a due time in `(now - 15 minutes, now]`. The date window keys on `occurrence_date`, so an occurrence moved by more than a day from its original date can fall outside it, the same limit the public page has.
-4. **Matching and eligibility.** For each candidate, each enabled subscriber is evaluated with 78.8, including the not-stale rule. Subscribers and rules are loaded into memory once per tick. A pair is due when `due = start - offset` satisfies `now - 15 minutes < due <= now` and the reminder has not expired under the Discord engine's rule (`_reminder_expired`, made public: an at-the-start push has the 5 minute grace and every other offset is dropped once the event has started). A pair whose due time is older than 15 minutes is counted as `late` and logged at WARNING.
+3. **Candidates.** Occurrences for UTC dates `today - 1` to `today + 7`, kept when `effective_start` is within `[now - AT_START_GRACE, now + 10,080 minutes]` and some offset in use puts a due time in `(now - late_limit, now]`. The date window keys on `occurrence_date`, so an occurrence moved by more than a day from its original date can fall outside it, the same limit the public page has.
+4. **Matching and eligibility.** For each candidate, each enabled subscriber is evaluated with 78.8, including the not-stale rule. Subscribers and rules are loaded into memory once per tick. A pair is due when `due = start - offset` satisfies `now - late_limit < due <= now` and the reminder has not expired under the Discord engine's rule (`_reminder_expired`, made public: an at-the-start push has the 5 minute grace and every other offset is dropped once the event has started). `late_limit` is 15 minutes for offsets under 60 minutes and 30 minutes for offsets of 60 minutes or more, because a 1 hour reminder that arrives 20 minutes late on a phone with aggressive battery settings is still useful, and never after the event has started. A pair whose due time is older than that is counted as `late` and logged at WARNING.
 5. **Claim.** Insert the `push_sends` row as `sending` and commit before any network call. A unique violation means the pair was already claimed and it is skipped. The insert is done as try, catch `IntegrityError`, so it runs on SQLite in tests and on Postgres. One commit per claim; the claim cost is measured in phase 2 against a target of 500 claims in under 2 seconds on `lxc-taraka`.
 6. **Send.** At most 500 sends per tick, ordered by due time, with 20 in flight, a 5 second timeout each and a 45 second deadline for the whole tick. At the deadline no new send starts and the unstarted pairs are counted as `deferred`; they are picked up by the next tick while still inside their 15 minute window. The sender never blocks the event loop.
 7. **Record.** `sent`, `failed` or `expired`, then update the subscriber.
 
-`TTL` is the seconds until the push would be skipped as late (15 minutes after its due time, 5 for an at-the-start push), at least 60 and at most 900. `Urgency` is `high` at 15 minutes or less and `normal` otherwise. `Topic` is the first 32 characters of the base64url sha256 of `series:date:offset`, so a duplicate replaces rather than stacks. `VAPID_SUBJECT` supplies the subject.
+`TTL` is the seconds until the push would be skipped as late (`late_limit` after its due time, 5 minutes for an at-the-start push), at least 60 and at most 1,800. `Urgency` is `high` at 15 minutes or less and `normal` otherwise. `Topic` is the first 32 characters of the base64url sha256 of `series:date:offset`, so a duplicate replaces rather than stacks. `VAPID_SUBJECT` supplies the subject.
 
 **Responses.**
 
@@ -2602,22 +2618,36 @@ New `services/push_engine.py` with an injectable async sender (`get_pusher()`, l
 
 A subscriber is disabled (`disabled_at` set) when `failure_count` is 10 or more and `last_success_at` is null or older than 3 days, so a push-service outage cannot disable healthy subscribers. A `sending` row older than 10 minutes becomes `failed` with "interrupted; it may or may not have been delivered", as for Discord. If the process dies between the claim and the send, that push is lost and never repeated.
 
-Cancelled, moved and deactivated occurrences behave correctly because eligibility is recomputed from the current start every tick. A push already sent for an offset is not repeated when the event is later moved, which matches a posted Discord delivery (§66.4a).
+Cancelled, moved and deactivated occurrences behave correctly because eligibility is recomputed from the current start every tick, and a change the subscriber should hear about is sent as a change push (78.9a). A push already sent for an offset is not repeated when the event is later moved, which matches a posted Discord delivery (§66.4a).
 
 Cost: one query for subscribers and rules, one push query over nine UTC dates, and at most 500 outbound requests per tick. At 5,000 subscribers and a handful of candidate occurrences per tick this is well inside a minute.
+
+### 78.9a Change pushes
+
+A follower must hear that an event moved or was cancelled. Without it the not-stale rule (78.8) silently drops the old reminder after a move, and a player who already received the 60 minute push is left expecting an event that is off.
+
+- **Recording.** `PATCH /api/occurrences/{id}` (move, cancel) and `sync_event_occurrences` (when it changes a start time) set `change_kind` and `changed_at`, and set `change_from_utc` to the effective start before the change only when it is empty. A later edit before the push is processed therefore keeps the first "was" time.
+- **Processing.** Each tick handles occurrences whose `change_kind` is set and whose `changed_at` is at least 2 minutes old, so a coordinator who edits twice in a row sends one push, then clears `change_kind` and `change_from_utc`. It reads through the shared public predicate (78.9) without its cancelled-occurrence filter.
+- **Scope.** Only the next occurrence of each series, and only when its old or new start is within the next 48 hours. Editing the time of a whole recurring event therefore sends one push per followed series, not one per occurrence in the 28 day window.
+- **Moved.** Sent when the start shifts by 30 minutes or more, or crosses the UTC date, and only while the original start is still in the future. If the event is moved back to where it was, nothing is sent. Title "Bear Hunt moved", body "Now 21:00 EDT, was 20:00 EDT".
+- **Cancelled.** Sent only when a reminder push for that occurrence has already gone out, or the start is within 24 hours; otherwise no one has anything to retract. Title "Bear Hunt cancelled", body "20:00 EDT will not take place". A restored occurrence sends nothing in v1; its normal reminders resume.
+- **Who.** Matching is 78.8 steps 0 to 5 without lead times. The not-stale rule does not apply, because the change is the reason. Paused subscribers get nothing.
+- **At most once.** The `push_sends` key carries `kind` and `token`, so a change push is claimed like a reminder and does not use up any reminder offset.
+- **Not built:** pushes for new events (a discovery feature and a spam risk when a series is bulk-created) and urgent announcement pushes (78.16).
 
 ### 78.10 Payload and notification
 
 Plaintext JSON, version 1, at most 1,536 bytes (the encrypted body must stay under 4,096):
 
-    {"v":1,"occurrence_id":123,"series":"<32 hex>","name":"Bear Hunt","minutes":30,
-     "start":"2026-10-04T20:00:00+00:00","url":"/events?occ=123","title":"Bear Hunt","body":"30 minutes until Bear Hunt"}
+    {"v":1,"kind":"reminder","occurrence_id":123,"series":"<32 hex>","name":"Bear Hunt","minutes":30,
+     "start":"2026-10-04T20:00:00+00:00","was":null,"tz":"America/Toronto","locale":"en",
+     "url":"/events?occ=123&from=push","title":"Bear Hunt","body":"16:00 EDT, in 30 minutes"}
 
-`name` and `title` are cut at 120 characters. `title` and `body` are the English fallback. The service worker builds the shown text itself. Title is the event name. For the body it computes `remaining = round((start - now) / 60 s)` and uses `minutes` when `abs(remaining - minutes) <= 2` and `remaining` otherwise, so a late delivery does not claim the wrong time; a result of 0 or less, or `minutes` of 0, reads as "now". The largest whole unit is used (days, then hours, then minutes, as §77.4) with `numeric: 'always'`, and "now" is `format(0, 'second')` with `numeric: 'auto'` (78.3). If `Intl` throws for the locale the English fallback is shown.
+`kind` is `reminder`, `moved` or `cancelled`; `was` is the previous start for `moved`. `name` and `title` are cut at 120 characters, `title` and `body` are the English fallback, and the worker shows the name cut to about 40 characters so the time stays on the visible line. The service worker builds the shown text itself. Title is the event name, wrapped in first-strong isolates (U+2068 and U+2069) so a Latin name inside an Arabic or Chinese notification keeps its order. The body starts with the start time in the subscriber's `tz` as `HH:MM` with a short zone name, 24 hour like the page and with Western digits (the locale is built with `-u-nu-latn`, as `I18N.latnLocale` does on the page), then a comma and the relative time. For a reminder it computes `remaining = round((start - now) / 60 s)` and uses `minutes` when `abs(remaining - minutes) <= 2` and `remaining` otherwise, so a late delivery does not claim the wrong time; a result of 0 or less, or `minutes` of 0, reads as "now". The largest whole unit is used (days, then hours, then minutes, as §77.4) with `numeric: 'always'`, and "now" is `format(0, 'second')` with `numeric: 'auto'` (78.3). If `Intl` throws for the locale or the time zone, the English fallback and UTC are used. The notification options carry `lang` and `dir` for the subscriber's locale. Change pushes use the `public.push.sw.*` phrases inlined into `/sw.js` (decision 8).
 
 The notification always shows (78.3). It uses `tag` `occ-{id}` with `renotify: true`, so the 5 minute push replaces the 60 minute one for the same occurrence and still alerts; this is a deliberate choice. It has a 192 px icon and a monochrome badge and no action buttons (iOS ignores them).
 
-**Click.** `notificationclick` focuses an open window of the app or opens one, and navigates only to a same-origin path from the allowlist (`/events`, `/events/*`, `/feedback`). Anything else opens `/events`. `?occ=` is a hint: when the page has that occurrence it scrolls to it and highlights it, and otherwise ignores it.
+**Click.** `notificationclick` focuses an open window of the app or opens one, and navigates only to a same-origin path from the allowlist (`/events`, `/events/*`, `/feedback`). Anything else opens `/events`. `?occ=` is a hint: when the page has that occurrence it scrolls to it and highlights it, and otherwise ignores it. `from=push` makes the page show a dismissible banner, "Notifications are on for this device, because you follow MOD" (the alliance, event or Kingdom rule that matched is not known to the page, so it says "because of your settings" when it cannot name one), with a Manage button that opens the panel. This is the way to turn a notification off, since the notification itself has no buttons.
 
 **Keeping a subscription alive.** A browser can replace its subscription (expiry, a key change). The worker does not rely on `pushsubscriptionchange`, which Safari does not fire reliably and which has no storage to read the old credentials from. Instead the page reconciles on every load: it keeps the subscription's `hash` and `auth` in `localStorage`, and when `getSubscription()` yields a different endpoint, or the key from `/api/push/config` differs from the subscription's `applicationServerKey`, it reads the old preferences with the old credentials, registers the new subscription with them and deletes the old one. If the old one is gone the person starts again from defaults. A subscriber who never opens the page after a browser-side change is lost until they do; the `last_success_at` age shows it in the health card.
 
@@ -2629,8 +2659,8 @@ All under `/api/push`. `/api/*` is already routed by Caddy, so there is no new C
 |---|---|
 | `GET /config` | `{enabled, public_key}`. `Cache-Control: max-age=300` |
 | `POST /subscriptions` | Body: the browser's `PushSubscription` JSON, `locale`, and the preferences. Validates the endpoint (78.13). 201 on create. If the hash already exists, 200 and an update only when the body's `auth` equals the stored one; otherwise 409 and no change. A different `auth` for a known endpoint cannot overwrite it |
-| `GET /subscriptions/{hash}` | The stored preferences and rules; updates `last_seen_at` at most once a day |
-| `PUT /subscriptions/{hash}` | Replaces the preferences and rules in one call (the panel sends the whole state), validated against the caps in 78.7 |
+| `GET /subscriptions/{hash}` | The stored preferences and rules, `last_success_at` (when a push service last accepted a message), `last_failure_at` and whether the subscription is disabled; updates `last_seen_at` at most once a day. The panel's status line (78.12) uses these |
+| `PUT /subscriptions/{hash}` | Replaces the preferences and rules in one call (the panel sends the whole state, including `locale`, `tz` and `paused_until`), validated against the caps in 78.7 |
 | `PATCH /subscriptions/{hash}/series` | Adds, changes or clears one series rule (the per-row bell) |
 | `POST /subscriptions/{hash}/test` | Sends a test push. 3 per subscription per hour |
 | `DELETE /subscriptions/{hash}` | Deletes the subscription and everything under it (the erasure path) |
@@ -2641,19 +2671,39 @@ Superadmin: `GET /admin/api/push/health` returns subscriber counts, sends in the
 
 ### 78.12 Public page UI
 
-A new classic script `static/push.js` (one IIFE, no globals, pure section exported under `__SAMAYA_TEST__`), loaded on both pages. Strings live in `app/i18n/en.json` under `public.push.*` and in the seven machine-drafted catalogues. The i18n work includes the page prefixes in `render_public_page`, the file list in `test_i18n.py` (`PAGES`, which now covers only `events-public.js` and `feedback.js`; otherwise `test_no_unused_keys` fails), and the markup fallbacks. The ESLint config (`eslint.config.mjs`) uses an explicit globals list that lacks `navigator`, `Notification`, `self`, `caches` and `clients`, so those are added for `pwa.js`, `push.js` and `sw.js`.
+A new classic script `static/push.js` (one IIFE, no globals, pure section exported under `__SAMAYA_TEST__`), loaded on both pages. Strings live in `app/i18n/en.json` under `public.push.*` and in the seven machine-drafted catalogues. The i18n work includes the page prefixes in `render_public_page`, the file list in `test_i18n.py` (`PAGES`, which now covers only `events-public.js` and `feedback.js`; otherwise `test_no_unused_keys` fails), and the markup fallbacks. The ESLint config (`eslint.config.mjs`) uses an explicit globals list that lacks `navigator`, `Notification`, `self`, `caches` and `clients`, so those are added for `pwa.js`, `push.js` and `sw.js`. `STATIC_ASSET_VERSION` is bumped with each static change.
 
-- **Header button** "Notifications", hidden when the browser lacks support or the server says `enabled: false`. On iOS Safari outside the Home Screen it shows the install steps instead of a subscribe control.
-- **Panel** (a `.modal` with Escape and focus return, as in `feedback.js`):
-  - Status and a subscribe or unsubscribe control. The permission prompt appears only from this tap.
-  - *What*: a checkbox per alliance (the current alliance is pre-ticked on `/events/{slug}`), "Kingdom-wide events", "Announcements", and a checkbox per event type (all ticked; unticking mutes the type).
-  - *When*: "Use each event's reminders" or "My own times", with chips (at the start, 5 minutes, 15 minutes, 30 minutes, 1 hour, 3 hours, 1 day) and a custom entry, at most 5.
-  - *Followed and muted events*: the list of series rules with their `label`, each clearable.
-  - A "Send me a test notification" button and a privacy note (78.13) that names the browser vendors' push services.
-- **Per-row bell** on schedule and list rows: a toggle with `aria-pressed` and a small menu (Follow, Mute, Use my defaults). It acts on the row's `series_id`, so the public row payload gains an opaque `series_id`.
-- **Permission denied** shows how to re-enable it in the browser's site settings, since the page cannot ask again.
-- **State** is one object; the DOM reacts to it and never reads state from the DOM. Saves are optimistic, debounced 500 ms, and roll back with a toast on failure.
-- **Accessibility and style:** WCAG 2.0 AA contrast checked for every new token pair, visible focus, full keyboard use, labels on every input, BEM classes, tokens from the page's `:root`, no inline styles or handlers, `prefers-reduced-motion` respected. `STATIC_ASSET_VERSION` is bumped with each static change.
+**First screen: one decision.** The header button "Notifications" opens a panel whose first screen is the choice "Notify me about: my alliance, Kingdom-wide events" (the current alliance is pre-ticked on `/events/{slug}`), a sample notification ("Bear Hunt, 16:00 EDT, in 1 hour"), one sentence on what to expect and who delivers it (the browser's push service), and a "Turn on notifications" button. Everything else is under a "Customize" `details` element (phase 3). The permission prompt appears only from that button, never on page load and never automatically after installing.
+
+**Status is always visible.** A status line beside the header button and in the panel reads one of: Active (with "last sent" from the server), Paused until a time, Blocked in browser settings, Needs to be set up again on this device, or Not set up. It is computed on every page load from the permission state, the local subscription and the server's `GET` (78.11). A "Send me a test notification" button lets a player check on demand. A standing "Not getting notifications?" section explains battery settings on Android phones, iOS Focus and Low Power Mode, and the calendar menu and Discord `/schedule` as the fallback. It says plainly that notifications can arrive late on some phones.
+
+**Cases the page cannot support are never hidden.**
+- *In-app browsers* (Discord, Reddit, Instagram, WeChat, LINE and similar, detected by a missing `serviceWorker` or `PushManager` or a known user agent token): the button stays and shows "Open this page in Chrome or Safari to get notifications", with a copy-link button and the calendar and Discord fallbacks. Whether install and push work in Discord's own in-app browser on iOS and Android is not known; test it in the device matrix (78.15) and write the result here.
+- *iPhone outside the Home Screen:* the install steps (78.6) with the fallbacks beside them.
+- *Permission blocked:* steps for the player's own browser (Chrome on Android, Samsung Internet, Firefox, iOS Settings, desktop) or one link to them, plus the fallbacks.
+- *Unsupported browser:* a short message and the fallbacks, never an absent control.
+- *A new device or cleared site data:* the panel says "This device is starting fresh". Settings stay on the device that set them; a restore link or QR code is not built (78.16).
+
+**Customize (phase 3).**
+- *What*: a checkbox per event type (all ticked; unticking mutes the type) and "Announcements".
+- *When*: "Use each event's reminders" or "My own times". Presets are real checkboxes in a `fieldset` with a `legend` (at the start, 1 hour, 1 day, then 5 minutes, 15 minutes, 30 minutes, 3 hours), plus a number input with a visible label and a unit select (minutes, hours, days) that says "Enter 0 to 10,080 minutes" on error and shows "3 of 5 used".
+- *Language and zone*: a language select and a time zone select, pre-filled from the page; saving updates `locale` and `tz`, and the panel says which language the notification will use.
+- *Pause*: "Pause all for 1 day" and "for 1 week", stored as an absolute `paused_until`, with a visible "Resume".
+- *Expected volume*: a line such as "About 3 notifications a day with these settings", computed in the browser from the loaded schedule and the chosen lead times.
+- *Followed and muted events*: the list of series rules with their `label`, each clearable.
+- *Privacy*: one plain-language note, written for a young reader, with a link to the full notice (78.13).
+
+**Per-event control.** The bell cannot sit inside `.row-head`, which is a `<button>` in `events-public.js`, because a button inside a button is invalid. It sits beside the row head, or inside the expanded row detail as a "Notify me" button. It is a menu button (`aria-haspopup="menu"`, `aria-expanded`), labelled with the event name and its state, for example "Bear Hunt notifications: following", and its menu is a radio group (Always, Never, Use my settings), not an `aria-pressed` toggle. The wording says "Every Bear Hunt", not "series". It acts on the row's `series_id`, so the public row payload gains an opaque `series_id`. A "just this one" option is not built (78.16).
+
+**Accessibility.**
+- The panel reuses one shared modal helper with a real focus trap, `inert` on the background, focus moved to the dialog heading on open (so a screen reader reads the title first), a Done button, and a scroll region that is not clipped at 200 percent zoom. The existing `openModal` in `events-public.js` restores focus on close but has no trap.
+- Save results are announced: one persistent `role="status"` region ("Saved") and `role="alert"` for failures ("Could not save, your change was undone"). The page has no toast live region today, so a toast alone is not acceptable. Saves are optimistic and debounced 500 ms, and each outcome is announced.
+- Every new control is at least 44 px tall and wide, and the panel is checked at 200 percent text and 320 px width. WCAG 2.0 AA contrast is checked for every new token pair, including the disabled, blocked and error states, which are added to the theme contrast rules (`theme_rules.py`) so a theme cannot make them unreadable. State is never colour alone: "following" and "muted" carry an icon and text. Reduced motion is respected as on the rest of the page.
+- The offline banner is a translated string with `role="status"`.
+
+**Languages.** The seven non-English catalogues are machine-drafted (`_meta.reviewed: false`). `public.push.*` ships in English first. Where a catalogue is not reviewed, the panel falls back per key to English with a visible "This text is not yet reviewed" note. The permission explanation, the privacy note and the `public.push.sw.*` phrases must be read by a native speaker per language before that language's text is shown (O11).
+
+**State.** One object; the DOM reacts to it and never reads state from the DOM.
 
 ### 78.13 Security, abuse and privacy
 
@@ -2663,7 +2713,7 @@ A new classic script `static/push.js` (one IIFE, no globals, pure section export
 - **Tampering.** Changing a subscription needs its `auth` secret, which only that browser and this server know, and a known endpoint cannot be overwritten without it (78.11). There is no cookie auth, so no CSRF surface; requests must be `application/json`. No CORS headers are sent. The secret is stored as is because encryption needs it, so a database or backup leak lets someone change the preferences of those subscriptions. It does not let them send a push, which needs the VAPID private key.
 - **Content.** Notifications are plain text, never HTML. Event names come from coordinators and are truncated.
 - **Service worker.** It is served from a fixed same-origin route, does not touch the paths listed in 78.6, never stores a `no-store` or preview response, and navigates only to allowlisted same-origin paths on click.
-- **Privacy.** The application database stores the endpoint and keys, locale, preferences and timestamps, and no IP address or user agent. The rate limiter keeps IPs in memory only. Server, Caddy and Cloudflare logs outside the app can hold IP and user agent, and the endpoint's host reveals the browser family. The app's logs never contain an endpoint or key; the access log does contain the subscription hash in the URL, which on its own grants nothing without the `auth` secret. An endpoint is a stable pseudonymous identifier, so treat it as personal information under GDPR, PIPEDA and Quebec Law 25: the panel's privacy note says what is stored and that the browser's push service (Google, Apple or Mozilla) delivers the notification, `DELETE` is the erasure path, and idle subscriptions are pruned after 120 days.
+- **Privacy.** The application database stores the endpoint and keys, locale, preferences and timestamps, and no IP address or user agent. The rate limiter keeps IPs in memory only. Server, Caddy and Cloudflare logs outside the app can hold IP and user agent, and the endpoint's host reveals the browser family. The app's logs never contain an endpoint or key; the access log does contain the subscription hash in the URL, which on its own grants nothing without the `auth` secret. An endpoint is a stable pseudonymous identifier, so treat it as personal information under GDPR, PIPEDA and Quebec Law 25: the panel's privacy note says what is stored and that the browser's push service (Google, Apple or Mozilla) delivers the notification, `DELETE` is the erasure path (a "Delete my data" button in the panel), and idle subscriptions are pruned after 120 days. The notice names a contact address (the same one as `VAPID_SUBJECT`) for deletion requests. For a Quebec audience the notice states the purpose, the recipients (Google, Apple, Mozilla and Microsoft push services as applicable), the retention period and that contact. The game is reported to carry an App Store rating of 9+ with chat, so some players are children (reported by a reviewer, not verified here): the note is written at a young reader's level, says that no name, email or location is collected, and the identifier is not used for anything but delivery. This is a statement of what the notice should say, not legal advice.
 - **VAPID private key** only in `.env`, never in git, logs or any API response.
 
 ### 78.14 Operations
@@ -2684,15 +2734,19 @@ A new classic script `static/push.js` (one IIFE, no globals, pure section export
 - `tests/test_push_rules.py`: the 78.8 matrix including every row of the table, precedence, announcements, kingdom-wide, leadership-only and cancelled never, offsets precedence, offsets above 10,080, and the not-stale rule (new subscriber, new offset, event edit, occurrence move).
 - `tests/test_push_engine.py` with `FakePush` and an injected clock: due window, 15 minute late limit and the `late` count, at-the-start grace, at-most-once across two ticks and a simulated crash, no repeat after the occurrence is deleted and recreated (split, deactivate then reactivate), cancel, move and deactivate, one push for several matching alliances, the 500 per tick cap and the 45 second deadline with `deferred`, response handling (201, 404 and 410 delete, 429, 5xx counting and the disable rule), stale `sending` recovery, retention including finished one-off series rules, explicit child deletion with SQLite foreign keys off, and a slow `FakePush` that must not block another coroutine.
 - `tests/test_push_security.py`: endpoint allowlist cases (IP literal, userinfo, backslash, trailing dot, uppercase, port, lookalike suffix, `http`, non-ASCII), payload size under 1,536 bytes for a 120 character name with multibyte text, no endpoint or key in any app log line or admin response, nothing but `series_id` added to the public payload, a client-sent forwarded header not changing the limiter key.
+- `tests/test_push_changes.py`: the 78.9a rules (move threshold, date crossing, move back to the original, coalescing two edits into one, 48 hour scope, one push per series after a whole-event time edit, cancel only after a reminder or inside 24 hours, restore sends nothing, paused subscribers, at-most-once with `kind` and `token`).
 - `tests/test_push_jobs.py`: `register_push_jobs` adds nothing when disabled and both jobs when enabled.
 - `tests/test_migration_0013.py` and `test_migration_0014.py`: upgrade, `alembic check`, downgrade, re-upgrade on Postgres 16 (opt-in, like the 0004 and 0005 tests), plus the backfill of `cover_sha256`.
-- vitest: `push.js` pure functions (state derivation, preference diffing, offset validation, page-load reconciliation), `sw.js` notification builder over all eight locales including "now" at the start, a late delivery and the English fallback, and the fetch-handler routing table.
+- vitest: `push.js` pure functions (status line states, in-app browser and iPhone detection, expected-volume line, preference diffing, offset validation, page-load reconciliation), the body text with a time zone and Western digits in all eight locales, `sw.js` notification builder over all eight locales including "now" at the start, a late delivery and the English fallback, and the fetch-handler routing table.
+- **Players' acceptance checklist, by hand before release:** (1) Chrome Android with TalkBack: open the panel, turn on, change an option, hear "Saved", close and see focus return to the header button. (2) iPhone with VoiceOver from the Home Screen, and the same page in a Safari tab, where install steps and fallbacks must appear and nothing is silently missing. (3) Keyboard only on desktop: every control reachable, the focus trap works, Escape closes, the bell menu closes on Escape. (4) 200 percent zoom and 320 px width, no horizontal scroll and no clipped panel. (5) Arabic: the panel mirrors, a Latin event name reads in the right order, digits are Western. (6) Block the permission, reload: a clear status and steps. (7) Open the page from Discord's in-app browser on Android and on iOS: a clear message, not a missing button; record what works. (8) A Xiaomi or Samsung phone on default battery settings with the screen off: a test push scheduled 5 minutes ahead; record the delay. (9) iOS Focus on: record what the player sees. (10) Clear site data and reopen: the panel says it is starting fresh and the old row does not stay as a duplicate. (11) Slow 3G in DevTools: the installed app shows the schedule within a few seconds and covers load later; `/api/events` stays under about 200 KB gzipped for a typical Kingdom (a CI check after phase 0). (12) Unsubscribe and confirm the server row is gone and nothing more is sent.
 - **Device matrix, by hand before release:** Android Chrome in a tab and installed, iOS 16.4 or later from the Home Screen, desktop Chrome, desktop Firefox, desktop Safari. For each: subscribe, test push, a scheduled push five minutes ahead, click opens the right page, unsubscribe, permission denied path, and an offline load. Also record each browser's real endpoint host for the allowlist.
 - **After each deploy:** `curl -s -o /dev/null -w '%{http_code} %{size_download}B %{content_type}\n' https://ks138.taraka.dev/manifest.webmanifest` (a size of 0B means the Caddy line is missing), the same for `/sw.js` and `/event-covers/<id>.jpg?v=...`, `curl -sI https://ks138.taraka.dev/sw.js | grep -i cf-cache-status`, and `curl -s https://ks138.taraka.dev/api/push/config`.
 
 ### 78.16 Not built
 
-Quiet hours (the OS does it), accounts and cross-device sync, email and SMS, Declarative Web Push (a later option once iOS 18.4 and later is the norm), `pushsubscriptionchange` handling and any worker-side storage (the page reconciles instead), notification action buttons, badge counts, a digest, linking a Discord identity, notifications for coordinators or about feedback tickets, a localised offline page, and a server-side message catalogue for push text.
+Quiet hours (the OS does it), accounts and cross-device sync, a restore link or QR code for a lost device, email and SMS, Declarative Web Push (a later option once iOS 18.4 and later is the norm), `pushsubscriptionchange` handling and any worker-side storage (the page reconciles instead), notification action buttons, badge counts, a digest, linking a Discord identity, notifications for coordinators or about feedback tickets, a localised offline page, and a server-side message catalogue for push text.
+
+From the players' review (78.19), considered and deferred: a coordinator-written push note (the reminder text of §77 stays private to Discord); `events.push_enabled` and `event_types.push_default` (the coordinator controls push through reminders); a reach count per event and "sent to N" per occurrence in the admin console (the health card has the aggregate); pushes for new events and urgent announcements; "just this one" subscription to a single occurrence; a per-subscriber daily cap that collapses to one push per event (the panel's expected-volume line comes first); and an urgent override that bypasses a mute, which is rejected because it is what makes players revoke the permission. Use Discord for urgency.
 
 ### 78.17 Open questions for the owner
 
@@ -2707,6 +2761,10 @@ Quiet hours (the OS does it), accounts and cross-device sync, email and SMS, Dec
 | O7 | Should installed-app scope exclude `/admin`? | Scope `/` lets admin links open in the app window; a narrower scope would send `/feedback` to a browser tab instead |
 | O8 | Does the restic backup include `/opt/taraka/.env`? | Losing the VAPID private key invalidates every subscription |
 | O9 | What does Caddy do with `X-Forwarded-For`, and is `Cf-Connecting-Ip` passed through? | The per-IP limits (this feature's and the ticket board's) are only as good as the client IP. Run the `grep` in 78.11 |
+| O10 | Follow the gate in 78.4, or build phase 2 regardless? | The review found no demand evidence and cheaper alternatives. Measuring costs about a session |
+| O11 | Who can read the push text in Arabic, French, German, Russian, Spanish, Turkish and Simplified Chinese? | The permission explanation and privacy note are the strings that decide whether a player consents. Without a reader, ship English only |
+| O12 | Test Discord's in-app browser on an iPhone and an Android phone: do install, service workers and push work there? | Players arrive from Discord links. The answer decides how much of the funnel exists |
+| O13 | Which Discord reminders do coordinators actually use, and what share of events have none? | In the default mode an event with no reminders sends no push. A one-line query is in 78.19 |
 
 ### 78.18 Review record
 
@@ -2737,3 +2795,68 @@ The first draft was reviewed 2026-10-04 by two independent reviewers with no sta
 | The auth secret is stored in cleartext; a Uptime Kuma monitor alarms on the kill switch; the single Kingdom assumption; Topic plus tag replaces the earlier notification | Accepted as documented (78.13, 78.14, 78.8, 78.10) |
 
 Not verified in review or here: Safari's behaviour on a push without a visible notification, the real push hostnames of Edge and Samsung Internet, the maintenance state of `http-ece` and `py-vapid`, the Topic length rule against the RFC text, and Cloudflare's and Caddy's actual handling of the forwarded headers.
+
+### 78.19 Players' perspective review
+
+Run 2026-10-04 before any build, from four independent lenses that did not see each other's work: player personas and journeys; notification content, volume, change handling and coordinator control; alternatives and real incremental value; accessibility, languages, devices and trust. Each separated FACT (with a source), INFERENCE and UNKNOWN. I checked the claims about this codebase myself and they hold: the ICS feed has no `VALARM`; a move or cancel sends no Discord channel message (`PATCH /occurrences/{id}`); the seeded event type has `default_reminder_minutes = []` (migration 0001); and a row's head in `events-public.js` is a `<button>`, so a bell cannot nest in it.
+
+**What the reviewers could and could not establish.** Reported from third-party guides, not verified by me: Kingshot launched on iOS 2025-02-22 and Android 2025-03-03 with the US the largest market; alliances hold up to 100 players; Bear Hunt runs every 2 days for 30 minutes; leaders recommend notice "a day before" and "an hour before" for recurring events and several days for strategic ones; time-critical calls go over in-game chat, and Discord timestamps are used to convert UTC (sources: gameszoom.com, kingshotalmanach.com, kingshotmastery.com, u7buy.com); the App Store lists the game at 9+ with chat. Unknown: the players' age, iOS and Android split, languages, how many use Discord notifications, any web push opt-in data for games, how Google Calendar and Outlook treat `VALARM` in a subscribed feed, and whether service workers, install and push work in Discord's in-app browser. The only opt-in figures found (91 percent Android and 44 percent iOS) are for native app push from a vendor blog, not web push.
+
+**The main finding.** Nothing shows that players want push, and two cheaper routes may do the job for more of them. The job is "do not miss Bear Hunt, even when Discord is muted".
+
+| Route | Cost to the player | Where it fails |
+|---|---|---|
+| Discord channel ping, Scheduled Event "Interested", Discord mobile push | None | The player muted the channel, the role or Discord |
+| Calendar subscription (exists, no alarms in the feed) | Find the menu, subscribe | No alarms today; Google polls subscribed feeds about every 12 to 24 hours, Apple about hourly, Outlook 1 to 4 hours, so a move arrives late (secondary sources) |
+| Calendar subscription with `VALARM` added | The same, then alarms | Apple honours them with a "Remove Alerts" option; Google and Outlook behaviour is unknown |
+| Discord `/remind` DM (not built) | One command, no install | The player blocked the bot or disabled DMs (Discord errors 50007 and 50278), and a muted DM is muted |
+| PWA push (this section) | Find it, install on iPhone, grant permission, configure | In-app browsers, iPhone outside the Home Screen, battery-killed phones, a denied permission, a lost device |
+
+Push adds three things the others lack: a lead time chosen by the player, a channel apart from Discord's mute state, and an immediate notice of a change. Its audience is therefore players who mute Discord and are willing to install and grant permission, a group nobody has measured.
+
+An illustrative reach model by one reviewer (60 Android, 30 iPhone, 10 desktop, 60 percent arriving through Discord's in-app browser) gives about 7 to 10 of 100 players receiving a push, 3 to 5 for calendar alarms and 15 to 20 for DMs. Every percentage in it is an assumption with no source, so it is evidence for the ordering the reviewer drew and not for any number. The ordering is an inference. Even doubling each push step leaves push behind DMs in that model.
+
+| Finding | Outcome |
+|---|---|
+| No demand evidence; phase 2 is a 5 to 6 session commitment | Accepted. Gate and measurement plan (78.4, decision 16) |
+| Calendar alarms and `/remind` DMs may beat push on reach per session | Accepted as options to decide before phase 2 (78.4). Not specified here; each needs its own section if chosen |
+| Phase 0 is justified by page weight alone, and is a prerequisite for a usable installed app on mobile data | Accepted (78.4, 78.15 size budget) |
+| Moves and cancellations are not pushed, so the not-stale rule leaves a follower with silence or a wrong time | Accepted. Change pushes in the core (78.9a, decision 15). New-event pushes deferred |
+| The pushed text lacks a clock time, and the worker cannot read the page's chosen time zone | Accepted. `tz` stored with the subscription, local time first in the body, 24 hour and Western digits (78.7, 78.10) |
+| A reviewer asked for a separate coordinator-written push note | Deferred (78.16). It adds coordinator work, and the name and time already say what and when |
+| A reviewer asked for `events.push_enabled`, `event_types.push_default`, reach counts and a daily cap | Deferred (78.16). Reminders are the control (decision 18); the panel shows expected volume; the health card has the aggregate |
+| A new subscriber may get nothing because the seeded type has no reminders | Accepted in part. No fallback offsets, because that would send pushes the coordinator never chose; instead the panel shows how many reminders fall in the next 7 days and the event form says reminders reach app subscribers (78.8, O13) |
+| The panel is too big for a new player; "series" is jargon | Accepted. One-decision first screen, Customize behind it, "Every Bear Hunt" wording (78.12) |
+| Cut custom lead times and per-event control from v1 | Not accepted as a cut. The owner asked for both. They stay, in phase 3, after the gate (78.4) |
+| Push can stop silently, and in-app browsers hide the control | Accepted. Always-visible status, "last sent", test button, help section, explicit in-app browser and iPhone handling (decision 17, 78.12) |
+| iPhone install is a funnel cliff | Accepted as a risk. The install screen carries the calendar and `/schedule` fallbacks; the phase 1 acceptance includes the Discord in-app browser test (78.6, O12) |
+| A late 1 hour push is still useful on slow-battery phones | Accepted. Late limit 30 minutes and TTL up to 30 minutes for offsets of 60 minutes or more (78.9) |
+| Accessibility gaps: no focus trap, no live region for saves, a button inside a button, chip entry, 44 px targets, new states in theme contrast | Accepted (78.12) |
+| Notification text: bidi isolates, `lang` and `dir`, Western digits in Arabic, the phone language can differ from the page | Accepted (78.10, 78.12). The `Intl` digit result for `ar` was checked in Node only; test on Android |
+| Machine-drafted permission and privacy text reduces consent | Accepted. English first, per-key fallback with a visible note, native reader per language (78.12, O11) |
+| Minors, Law 25 and the content of the notice | Accepted as notice requirements, not legal advice (78.13) |
+| No way to turn a notification off from the notification; no "why did I get this" | Accepted. `from=push` banner with Manage (78.10); Pause for a day or week (78.12) |
+| Shared devices, lost devices, iOS storage eviction | Accepted as documented limits: settings stay on the device, a restore link is not built; the panel says it is starting fresh (78.12, 78.16) |
+| An urgent override that bypasses mutes | Rejected. It drives players to revoke the permission. Use Discord for urgency (78.16) |
+| Per-subscription "last notification received" written by the worker | Replaced by the server's `last_success_at` in the status line, which keeps the rule against worker-side storage (78.10, 78.16). It means "a push service accepted it", not "the phone showed it" |
+
+**Measurement plan (about half a session, before phase 2).**
+1. Cloudflare Web Analytics, or the edge or Caddy logs, for `/events`: device type, operating system, browser and referrer, in particular the share arriving from Discord and the iPhone share. Cloudflare's own documentation should be checked for exactly what it reports; this is not verified.
+2. A counter on the Add to Calendar menu by vendor (Google, Apple, Outlook, `.ics`), which measures calendar demand and costs a few lines.
+3. A Discord poll, at least 30 respondents. Suggested text:
+
+   > Phone reminders for events: if Discord is muted, how would you want a heads-up? (pick one)
+   > 1. A Discord DM from the bot
+   > 2. A notification from the schedule web app (iPhone needs a Home Screen install)
+   > 3. A calendar alarm
+   > 4. Channel pings are enough
+   > 5. I do not want reminders
+   >
+   > And your device: iPhone / Android / PC.
+
+4. A one-hour calendar test: a feed with `VALARM` subscribed in Google Calendar, Apple Calendar and Outlook, noting which alarms fire.
+5. How many events have no reminders (they would send no push). On `lxc-taraka`:
+
+       cd /opt/taraka && docker compose exec db psql -U taraka -d kingshot_scheduler -c "SELECT e.id, e.name FROM events e LEFT JOIN event_reminders r ON r.event_id = e.id WHERE e.active AND NOT e.leadership_only GROUP BY e.id HAVING count(r.id) = 0;"
+
+The decision rule is in 78.4. The owner may build regardless; the rule records what the reviewers would want to see first.
