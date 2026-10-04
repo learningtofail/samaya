@@ -2412,3 +2412,328 @@ The largest whole unit is used (days, then hours, then minutes). The text has no
 ### 77.3 Fix found on the way
 
 An "at the start" (0 minute) reminder was always cancelled as "Event had already started": it comes due at the start time and the check was `start <= now`. It now gets a 5 minute grace period (`AT_START_GRACE`) so the one-minute tick, or a short outage, still posts it. Reminders before the start behave as before.
+
+## 78. Installable app and push notifications
+
+Requirement recorded 2026-10-04. Status: design only, nothing is built. Reviewed twice by independent reviewers before any code (78.18). The public events and feedback pages become an installable web app, and players can get push notifications for the events they choose, at lead times they choose, without an account.
+
+### 78.1 Goal and non-goals
+
+Goal: a player installs the schedule to their phone, picks what they care about once, and gets a notification at the times they asked for, even when Discord is muted.
+
+Non-goals for this section: accounts or sync across devices, email or SMS, native apps, notifications for the admin console, notifications about feedback tickets (the board is for developing Samaya only), and replacing Discord reminders. Discord stays the primary channel and is unchanged.
+
+### 78.2 Decisions
+
+1. **Anonymous.** There are no accounts. A push subscription is the identity. Its preferences live on the server keyed by the subscription, and nothing else about the person is stored.
+2. **One app, one service worker.** A single service worker registered at scope `/` serves both pages and holds the one push subscription. For `/admin`, `/auth`, `/invite`, `/webhooks`, `/health` and every non-GET request it does not call `respondWith` at all, so those requests never pass through it (78.6).
+3. **Push follows the public schedule, not Discord.** What a subscriber can receive is exactly what the public query returns (`services/public_events`). Leadership-only, inactive and cancelled occurrences are never pushed. Discord Audiences, channels and roles do not apply.
+4. **Players set their own lead times.** Push does not depend on an event's Discord reminder offsets, though "use each event's reminders" is the default mode (78.8).
+5. **No quiet hours in v1.** Phones already have Do Not Disturb and Focus, and server-side quiet hours would need time zone handling (`tzdata` is not in the image) for a feature the OS does better (78.16).
+6. **At most once, never late, never stale.** The engine claims a send before calling the push service, like Discord deliveries (§66.4). A push more than 15 minutes past its due time is skipped. A push whose due time is earlier than the moment the subscriber, the event or the occurrence last changed is skipped too (78.8). Discord reminders still send late.
+7. **Standard Web Push through a service worker**, not Declarative Web Push, because it works across Chrome, Firefox and Safari (78.16).
+8. **Wording is built on the device** from structured data and the current time with `Intl.RelativeTimeFormat` in the subscriber's language, so no per-language catalogue is needed for notification text. The §77.4 default reminder text stays English and Discord only.
+9. **Management proof is the subscription's own auth secret.** The browser can always re-read it from its push subscription (78.11).
+10. **Endpoint allowlist.** The server only sends to known push-service hosts (78.13). Without it, any visitor could make the server call any URL.
+11. **A recurring event is followed by `series_id`, and sends are de-duplicated by `series_id` and date.** Occurrence ids are not stable: the engine deletes and recreates occurrences when an event is split, deactivated and reactivated or rescheduled (`_retire_occurrence`, `event_engine.py`). `series_id` survives all of these and is copied by a split.
+12. **Off unless configured.** Push needs VAPID keys and `SAMAYA_PUSH_ENABLED=1`, read at call time. Otherwise the bell is hidden, the jobs are not registered and the API answers `enabled: false`.
+13. **A separate scheduler job**, so a stall in Discord delivery cannot block push and the reverse.
+14. **An async sender that the app controls.** `httpx` for transport, with `follow_redirects=False` and `trust_env=False`, and `http-ece` plus `py-vapid` (the libraries `pywebpush` itself builds on) for RFC 8291 encryption and the VAPID token. `pywebpush` is not used: it is synchronous (it would freeze the single event loop, which also runs the Discord tick and every web request) and its transport follows redirects and proxy environment variables by default (inference; check at build). The maintenance state and `cryptography` compatibility of `http-ece` and `py-vapid` are not verified and must be checked first (78.17 O5), with the RFC 8291 test vectors in the tests.
+
+### 78.3 Facts the design relies on
+
+| Fact | Status |
+|---|---|
+| A push service must accept a message of at least 4096 bytes (the encrypted body); larger may get 413. Encryption is RFC 8291 (`aes128gcm`) | Established (web.dev Web Push protocol guide, RFC 8030) |
+| `TTL` is seconds the push service keeps an undelivered message and may be reduced by the service; `Urgency` is `very-low`, `low`, `normal` (default) or `high`; `Topic` lets a new message replace a pending one with the same topic (at most 32 characters of the URL-safe base64 alphabet) | Established (web.dev); the Topic length rule is from the reviewer's recall of RFC 8030, to be confirmed against the RFC |
+| 404 means the subscription expired and 410 means it was unsubscribed; both mean delete it. 429 carries `Retry-After` | Established (web.dev) |
+| VAPID: the JWT audience is the push service origin, expiry is at most 24 hours, and the subject is a `mailto:` or URL | Established (web.dev) |
+| FCM answers 403 when a subscription was made with a different VAPID key, so a key rotation leaves dead rows that never return 404 or 410 | Reported (webpush-java issue 212); handled by the disable rule in 78.9 |
+| iOS and iPadOS deliver web push only to web apps added to the Home Screen (display `standalone`), from iOS 16.4. Safari 18.4 adds Declarative Web Push for Home Screen web apps. macOS Safari has had web push since 16.1 | Established for Home Screen and 18.4 (WebKit blog, fetched); 16.4 and `standalone` reported by a reviewer from the WebKit iOS post, to be confirmed on a real device |
+| Safari expects every push to end in a visible notification, so the service worker always calls `showNotification` | Widely held, not verified. The design always shows one |
+| `Intl.RelativeTimeFormat` with `numeric: 'always'` gives "in 30 minutes" style text and `format(0, 'second')` with `numeric: 'auto'` gives the "now" wording in `en`, `fr`, `es`, `de`, `tr`, `ru`, `ar` and `zh-Hans`. `format(0, 'minute')` gives "this minute" and must not be used for the start | Verified by running Node on 2026-10-04 for all eight locales |
+| The `/api/events` response was about 23 MB | Observed 2026-10-03. The cause in 78.5 is established by reading the code (every occurrence row carries the cover data URI), not yet by measuring a response |
+| Behind Cloudflare, a client can send its own `X-Forwarded-For` and Cloudflare appends to it, so the leftmost entry that `rate_limit._client_ip` trusts is client-controlled. Whether Caddy overwrites the header, which would put every visitor in one bucket, is unknown | Plausible, unverified for this deployment (78.11, O9) |
+
+### 78.4 Phases
+
+| Phase | Delivers | Needs |
+|---|---|---|
+| 0 | Public payload diet: covers served by URL (78.5) | Owner decision (O2), migration `a1f0c0de0013`, Caddy line `/event-covers/*` |
+| 1 | Installable app shell: manifest, icons, service worker, offline fallback (78.6) | Icons (O1), Caddy lines `/manifest.webmanifest` and `/sw.js` |
+| 2 | Push core: subscribe, follow alliances and the Kingdom, the engine, the test button (78.7 to 78.11) | VAPID keys, migration `a1f0c0de0014`, the client IP fix (O9). No Caddy line: `/api/*` is already routed |
+| 3 | Preferences: own lead times, type mutes, per-event follow and mute (78.8, 78.12) | Phase 2 |
+
+Each phase ships and works alone. Rough effort in working sessions: phase 0 about 1 to 1.5, phase 1 about 1, phase 2 about 4, phase 3 about 1 to 2, so 7 to 8 in all, or 6 to 7 without phase 0.
+
+### 78.5 Phase 0: public payload diet
+
+`routers/events._row_dict` puts `event.cover_image_data`, a data URI, in every occurrence row, so a recurring event with a cover repeats the image once per occurrence in the 28-day window. That is the likely source of the 23 MB `/api/events` response. Stored covers are re-encoded by `services/images.py` (`EVENT_COVER`, 1600x800 JPEG), so each is typically a few hundred kilobytes as base64 (inference); the 8 MB figure in `validators.py` is the upload limit, not the stored size. Check on `lxc-taraka`:
+
+    curl -s https://ks138.taraka.dev/api/events | wc -c
+
+Fix:
+- Migration `a1f0c0de0013` adds a nullable `events.cover_sha256` (`String(64)`), backfilled from the existing covers. Event create, patch and the split set it whenever the cover changes.
+- New public route `GET /event-covers/{event_id}.jpg?v={first 12 characters of the sha}` decodes the stored data URI. It answers 404 for an inactive or leadership-only event, using the same predicate as the public query (78.9), so a leadership-only cover is never public. `Cache-Control: public, max-age=86400` and an `ETag`.
+- Public rows carry `cover_url` (null without a cover) in place of `cover_image_data`. `events-public.js` reads `cover_url` where it now reads `cover_image_data` for the Discord preview (about line 776). Admin responses keep the data URI, so the admin form is unchanged.
+- Caddy needs `reverse_proxy /event-covers/* 127.0.0.1:8000`. `/api/events` is already routed.
+
+This is a prerequisite only for caching `/api/events` offline. It also makes every page load lighter, so it is recommended whether or not the app work proceeds. Without it, phase 1 does not cache the API (78.6).
+
+### 78.6 Phase 1: installable app shell
+
+**Routes** (public, GET, no auth):
+
+| Route | Serves |
+|---|---|
+| `/manifest.webmanifest` | Generated per request from the Kingdom: `name`, `short_name`, `lang`, `start_url` `/events?source=pwa`, `scope` `/`, `display` `standalone`, `theme_color` from `kingdoms.color` when it is a valid hex (else the shipped color), `background_color`, icons 192 and 512 plus a maskable 512 |
+| `/sw.js` | `static/sw.js` with `Cache-Control: no-cache, max-age=0` and `Content-Type: text/javascript`. The route replaces the token `__STATIC_ASSET_VERSION__` with `STATIC_ASSET_VERSION`, so the script's bytes change on every static bump, which is what makes browsers install the new worker and drop old caches |
+| `/static/icons/*` | The icon files, under the existing static mount |
+
+The worker is served from `/sw.js`, not `/static/sw.js`, because a worker controls only paths under its own directory unless the server adds `Service-Worker-Allowed`.
+
+**Caddy and Cloudflare.** `/manifest.webmanifest` and `/sw.js` each need a `reverse_proxy` line and a `systemctl restart caddy` (README "Adding a new public route"); an unlisted path gets an empty 200 and the app never sees it. Cloudflare caches `.js` files by extension, and `/sw.js` is outside `/static`. Verify after deploy with `curl -sI https://ks138.taraka.dev/sw.js | grep -i cf-cache-status`, which must not say `HIT`. If it does, add a Cloudflare cache rule that bypasses `/sw.js`, because a stale worker means browsers never see the new version token.
+
+**Pages.** `public_pages.render_public_page` adds `<link rel="manifest">`, `<meta name="theme-color">` and an `apple-touch-icon` link. A new classic script `static/pwa.js` (one IIFE, no globals, pure section exported under `__SAMAYA_TEST__`) registers the worker when `navigator.serviceWorker` exists and the URL has no `preview_theme`. It also holds the install prompt: on Chromium it keeps the `beforeinstallprompt` event for an "Install app" button; on iOS Safari it shows "Share, then Add to Home Screen" when the page is not already in standalone mode (`matchMedia('(display-mode: standalone)')` or `navigator.standalone`).
+
+**Fetch handler.**
+
+| Request | Strategy |
+|---|---|
+| Navigation to `/events`, `/events/{slug}`, `/feedback` | Network first with a 4 second timeout, then the cached copy, then `/static/offline.html` |
+| `/api/events`, `/api/events/{slug}`, `/api/alliances`, `/api/kingdom-branding` | Network first, falling back to cache. After phase 0 only; before it the API is not cached. The page shows "Offline, last updated hh:mm" when it renders from cache |
+| `/static/*`, `/theme/*.css`, `/theme-assets/*`, `/event-covers/*` | Stale while revalidate |
+| `/admin*`, `/auth*`, `/invite*`, `/webhooks*`, `/health`, ICS feeds, any non-GET | No `respondWith`; the browser handles them |
+
+Cache rules: never `put` a response that has `Cache-Control: no-store` (this covers the superadmin's `?preview_theme=` pages, `public_pages.mark_preview`), a request whose URL has `preview_theme`, or a non-200 status. Caches are named `samaya-static-{STATIC_ASSET_VERSION}` and `samaya-data-v1` (at most 30 entries); `activate` deletes any other cache.
+
+A worker's `fetch(event.request)` carries cookies like any same-origin request, so the language and theme cookies work as usual while online. The cache lives on one device and network first overwrites the stored page on every successful load, so the offline copy is the last page that device saw, in the language it saw it. `ignoreVary` is used so that copy matches despite `Vary: Accept-Language, Cookie`. `offline.html` is plain English and sits outside the i18n pipeline (78.16).
+
+Installed scope is `/`, so the admin console also opens inside the app window when a coordinator follows a link. This is acceptable and recorded as an open point (O7).
+
+### 78.7 Data model (migration `a1f0c0de0014`)
+
+Additive. The downgrade drops the three tables and the column, which loses subscriptions (players resubscribe). Models go in `models/db.py`, so `alembic check` sees them. Guarded creation as in the earlier revisions, verified on Postgres 16 with upgrade, `alembic check`, downgrade and re-upgrade. Every datetime read goes through `ensure_utc`. JSON columns are declared `JSON(none_as_null=True)`, so Python `None` is SQL NULL and the CHECKs below mean what they say.
+
+**`push_subscriptions`**
+
+| Column | Notes |
+|---|---|
+| `id` | primary key |
+| `endpoint_hash` | `String(64)`, unique, sha256 hex of the endpoint; the public handle (not `CHAR`, which pads on Postgres) |
+| `endpoint`, `p256dh`, `auth` | the browser's subscription; `auth` is also the management proof (78.11) and is stored as is because encryption needs it |
+| `locale` | an enabled locale, for the service worker's `Intl` calls |
+| `lead_mode` | `event_defaults` (default) or `custom` |
+| `custom_offsets` | JSON list of minutes; CHECK `lead_mode = 'event_defaults' OR custom_offsets IS NOT NULL` |
+| `kingdom_wide`, `announcements` | booleans, both default true |
+| `created_at`, `prefs_updated_at`, `last_seen_at`, `last_success_at`, `last_failure_at`, `failure_count`, `disabled_at` | housekeeping. `prefs_updated_at` is set on every write to the preferences or rules |
+
+**`push_rules`**: `id`, `subscription_id` (cascade), `kind` (`alliance`, `type`, `series`), `ref` (Text, not null: a tenant id, an event type id or a `series_id`), `label` (Text, the event name shown in the panel, at most 120 characters), `action` (`follow` or `mute`), `offsets` (JSON, nullable). Unique on (`subscription_id`, `kind`, `ref`). CHECKs: `alliance` is only `follow`, `type` is only `mute`, `offsets` only on `series`. `ref` carries no foreign key, so a deleted alliance or type leaves a harmless rule that goes away with the subscription. One text column instead of a nullable id and a nullable text keeps the unique constraint honest, since a UNIQUE over NULLs does not stop duplicates on Postgres.
+
+**`push_sends`**: `id`, `subscription_id` (cascade), `series_id`, `occurrence_date`, `offset_minutes`, `occurrence_id` (nullable, no foreign key, informational only), `due_at_utc`, `status` (`sending`, `sent`, `failed`, `expired`), `detail`, `claimed_at_utc`. Unique on (`subscription_id`, `series_id`, `occurrence_date`, `offset_minutes`), which is the at-most-once guarantee. It does not use the occurrence id, so recreating an occurrence cannot repeat a push (decision 11). Index on (`status`, `claimed_at_utc`).
+
+**`event_occurrences.changed_at`**: nullable, set by `PATCH /api/occurrences/{id}` (cancel, restore, move, message) and by generation when it changes a start time. Needed by the stale rule in 78.8, since a moved occurrence changes the occurrence row and not `events.updated_at`.
+
+**Cascade.** The test database does not enable SQLite foreign keys (no `PRAGMA foreign_keys` in `conftest.py`), so the service deletes a subscription's rules and sends explicitly in code, and `ON DELETE CASCADE` is only the Postgres backstop. Tests cover both.
+
+**Retention** (daily job, 03:10 UTC): delete `push_sends` older than 30 days; delete a subscription when the latest of `last_seen_at`, `last_success_at` and `created_at` is older than 120 days, or `disabled_at` is older than 7 days; delete `series` rules whose series has no occurrence today or later, so finished one-off events do not fill the cap.
+
+**Caps** (enforced in the API): 5,000 subscriptions in total (it matches the in-memory evaluation in 78.9; a larger audience needs a different design, O4); per subscription 50 alliance rules, 100 type mutes, 200 series rules, 5 offsets in any one list, each offset 0 to 10,080 minutes. At the global cap the API first prunes subscriptions that never had a successful send and are over 7 days old, then answers 503. The count-then-insert check can overshoot by a few under concurrent requests, which is acceptable.
+
+### 78.8 Who gets which push
+
+For one public occurrence and one subscriber, in order:
+
+0. The occurrence is not cancelled and the event is public and active (guaranteed by the public query).
+1. A `series` rule with `mute` for the event's `series_id`: no push.
+2. A `series` rule with `follow`: push, skipping steps 3 to 5.
+3. A `type` rule with `mute` for the event's type: no push.
+4. The event is an announcement (no duration) and `announcements` is false: no push.
+5. A kingdom-wide event needs `kingdom_wide` true. An alliance event needs an `alliance` rule for any alliance in the event's audience. The combined view returns one row per audience alliance, so the occurrence matches if any of its rows does. This deployment has one Kingdom (`get_public_kingdom`), so "kingdom-wide" needs no Kingdom reference.
+
+Precedence is series, then type, then alliance. New events and new event types match automatically when they fit the rules, with no re-subscribe. A series follow cannot reach a leadership-only or inactive event, because step 0 comes first.
+
+**Lead times for a match**, first that applies: the series rule's `offsets`; else the subscriber's `custom_offsets` when `lead_mode` is `custom`; else the event's own reminder minutes. Offsets above 10,080 are ignored for push. An event with no reminders and no custom times sends nothing in the default mode.
+
+**Not stale.** A (subscriber, occurrence, offset) is eligible only when its `due` time is later than the latest of the subscriber's `created_at` and `prefs_updated_at`, the event's `updated_at`, and the occurrence's `generated_at` and `changed_at`. Without this, a player who subscribes at 19:10 would receive the 19:00 push, adding a new lead time would fire the ones already past, and moving or creating an event would fire "30 minutes until" with 20 minutes left. The Discord engine has the same guard (`_new_delivery_state` cancels a reminder whose time had already passed when it was generated).
+
+One push per (subscriber, series, date, offset), however many alliances or rules matched.
+
+| Subscriber | Event | Result |
+|---|---|---|
+| Follows MOD, defaults | Bear Hunt, MOD, reminders 60 and 0 | Pushes at 60 minutes and at the start |
+| Follows MOD, custom `[45, 5]` | Same | Pushes at 45 and 5 minutes |
+| Follows MOD, mutes type Arena | Arena, MOD | Nothing |
+| Follows MOD, follows series Trap | Trap, owned by another alliance | Pushes (step 2) |
+| Follows nothing, `kingdom_wide` true | Kingdom-wide KvK | Pushes at the event's reminder minutes |
+| Follows MOD, mutes series Bear Hunt, follows type Bear Hunt | Bear Hunt, MOD | Nothing (series mute wins) |
+| Any | Leadership-only or cancelled occurrence | Never |
+| Subscribes at 19:10 | 20:00 event with a 60 minute offset | Not pushed (due 19:00 is before the subscription) |
+| Any | A 20:00 event moved to 19:20 at 19:05 | The 30 minute push is not sent (due 18:50 is before the move); a 5 minute push at 19:15 is |
+
+### 78.9 Engine
+
+New `services/push_engine.py` with an injectable async sender (`get_pusher()`, like `get_discord()`), so tests use a `FakePush`. The sender interface is `async send(subscription, payload, ttl, urgency, topic) -> PushResult`. The production sender is decision 14.
+
+**Public query.** The rule "leadership-only and inactive events appear nowhere public" stays in one place. `services/public_events.py` factors its filter into one shared predicate and adds `public_occurrences_for_push(db, first, last)`, which applies that predicate and `status != 'cancelled'` and returns occurrences with their events and audience alliances, with `Event.cover_image_data` deferred. It skips what the push engine does not need (`Delivery` rows, destinations, the full tenant map). `public_rows` is not called every minute: it runs about six queries and loads every event whole, including the cover.
+
+**Jobs.** `register_push_jobs(scheduler)` adds `push_tick_job` (every minute, `max_instances=1`, `coalesce=True`, `misfire_grace_time=30`) and the daily prune job, only when `push_enabled()` is true (read at call time from the environment, so tests can toggle it without running the lifespan).
+
+`run_push_tick(session_factory, pusher, now=None)`:
+
+1. **Exit early** when there are no enabled subscribers.
+2. **Offsets in use.** The union of every enabled subscriber's offsets and every event's reminder minutes, computed once.
+3. **Candidates.** Occurrences for UTC dates `today - 1` to `today + 7`, kept when `effective_start` is within `[now - AT_START_GRACE, now + 10,080 minutes]` and some offset in use puts a due time in `(now - 15 minutes, now]`. The date window keys on `occurrence_date`, so an occurrence moved by more than a day from its original date can fall outside it, the same limit the public page has.
+4. **Matching and eligibility.** For each candidate, each enabled subscriber is evaluated with 78.8, including the not-stale rule. Subscribers and rules are loaded into memory once per tick. A pair is due when `due = start - offset` satisfies `now - 15 minutes < due <= now` and the reminder has not expired under the Discord engine's rule (`_reminder_expired`, made public: an at-the-start push has the 5 minute grace and every other offset is dropped once the event has started). A pair whose due time is older than 15 minutes is counted as `late` and logged at WARNING.
+5. **Claim.** Insert the `push_sends` row as `sending` and commit before any network call. A unique violation means the pair was already claimed and it is skipped. The insert is done as try, catch `IntegrityError`, so it runs on SQLite in tests and on Postgres. One commit per claim; the claim cost is measured in phase 2 against a target of 500 claims in under 2 seconds on `lxc-taraka`.
+6. **Send.** At most 500 sends per tick, ordered by due time, with 20 in flight, a 5 second timeout each and a 45 second deadline for the whole tick. At the deadline no new send starts and the unstarted pairs are counted as `deferred`; they are picked up by the next tick while still inside their 15 minute window. The sender never blocks the event loop.
+7. **Record.** `sent`, `failed` or `expired`, then update the subscriber.
+
+`TTL` is the seconds until the push would be skipped as late (15 minutes after its due time, 5 for an at-the-start push), at least 60 and at most 900. `Urgency` is `high` at 15 minutes or less and `normal` otherwise. `Topic` is the first 32 characters of the base64url sha256 of `series:date:offset`, so a duplicate replaces rather than stacks. `VAPID_SUBJECT` supplies the subject.
+
+**Responses.**
+
+| Push service answer | Result |
+|---|---|
+| 201 | `sent`, `last_success_at` set, `failure_count` reset to 0 |
+| 404 or 410 | `expired`, the subscription and its rules and sends are deleted |
+| 429 | `failed`, no retry (at most once), no penalty to the subscriber |
+| Other 4xx (including FCM's 403 after a key change), 5xx, timeout, network error | `failed`, `failure_count` plus 1, `last_failure_at` set |
+
+A subscriber is disabled (`disabled_at` set) when `failure_count` is 10 or more and `last_success_at` is null or older than 3 days, so a push-service outage cannot disable healthy subscribers. A `sending` row older than 10 minutes becomes `failed` with "interrupted; it may or may not have been delivered", as for Discord. If the process dies between the claim and the send, that push is lost and never repeated.
+
+Cancelled, moved and deactivated occurrences behave correctly because eligibility is recomputed from the current start every tick. A push already sent for an offset is not repeated when the event is later moved, which matches a posted Discord delivery (§66.4a).
+
+Cost: one query for subscribers and rules, one push query over nine UTC dates, and at most 500 outbound requests per tick. At 5,000 subscribers and a handful of candidate occurrences per tick this is well inside a minute.
+
+### 78.10 Payload and notification
+
+Plaintext JSON, version 1, at most 1,536 bytes (the encrypted body must stay under 4,096):
+
+    {"v":1,"occurrence_id":123,"series":"<32 hex>","name":"Bear Hunt","minutes":30,
+     "start":"2026-10-04T20:00:00+00:00","url":"/events?occ=123","title":"Bear Hunt","body":"30 minutes until Bear Hunt"}
+
+`name` and `title` are cut at 120 characters. `title` and `body` are the English fallback. The service worker builds the shown text itself. Title is the event name. For the body it computes `remaining = round((start - now) / 60 s)` and uses `minutes` when `abs(remaining - minutes) <= 2` and `remaining` otherwise, so a late delivery does not claim the wrong time; a result of 0 or less, or `minutes` of 0, reads as "now". The largest whole unit is used (days, then hours, then minutes, as §77.4) with `numeric: 'always'`, and "now" is `format(0, 'second')` with `numeric: 'auto'` (78.3). If `Intl` throws for the locale the English fallback is shown.
+
+The notification always shows (78.3). It uses `tag` `occ-{id}` with `renotify: true`, so the 5 minute push replaces the 60 minute one for the same occurrence and still alerts; this is a deliberate choice. It has a 192 px icon and a monochrome badge and no action buttons (iOS ignores them).
+
+**Click.** `notificationclick` focuses an open window of the app or opens one, and navigates only to a same-origin path from the allowlist (`/events`, `/events/*`, `/feedback`). Anything else opens `/events`. `?occ=` is a hint: when the page has that occurrence it scrolls to it and highlights it, and otherwise ignores it.
+
+**Keeping a subscription alive.** A browser can replace its subscription (expiry, a key change). The worker does not rely on `pushsubscriptionchange`, which Safari does not fire reliably and which has no storage to read the old credentials from. Instead the page reconciles on every load: it keeps the subscription's `hash` and `auth` in `localStorage`, and when `getSubscription()` yields a different endpoint, or the key from `/api/push/config` differs from the subscription's `applicationServerKey`, it reads the old preferences with the old credentials, registers the new subscription with them and deletes the old one. If the old one is gone the person starts again from defaults. A subscriber who never opens the page after a browser-side change is lost until they do; the `last_success_at` age shows it in the health card.
+
+### 78.11 API (public, JSON, no cookies)
+
+All under `/api/push`. `/api/*` is already routed by Caddy, so there is no new Caddy line. Management routes put the subscription's `hash` in the path and its `auth` secret in `X-Push-Auth`, compared with `hmac.compare_digest`. An unknown hash and a wrong secret both answer 404, and a miss compares against a dummy value so timing does not tell them apart. Every management response carries `Cache-Control: no-store`.
+
+| Route | Purpose |
+|---|---|
+| `GET /config` | `{enabled, public_key}`. `Cache-Control: max-age=300` |
+| `POST /subscriptions` | Body: the browser's `PushSubscription` JSON, `locale`, and the preferences. Validates the endpoint (78.13). 201 on create. If the hash already exists, 200 and an update only when the body's `auth` equals the stored one; otherwise 409 and no change. A different `auth` for a known endpoint cannot overwrite it |
+| `GET /subscriptions/{hash}` | The stored preferences and rules; updates `last_seen_at` at most once a day |
+| `PUT /subscriptions/{hash}` | Replaces the preferences and rules in one call (the panel sends the whole state), validated against the caps in 78.7 |
+| `PATCH /subscriptions/{hash}/series` | Adds, changes or clears one series rule (the per-row bell) |
+| `POST /subscriptions/{hash}/test` | Sends a test push. 3 per subscription per hour |
+| `DELETE /subscriptions/{hash}` | Deletes the subscription and everything under it (the erasure path) |
+
+**Rate limits** use `services/rate_limit.RateLimiter`, one instance per route: 10 subscribes per client per hour and 60 in total per hour, and a lighter limit on the other routes. They depend on the client IP being right. Today `_client_ip` trusts the leftmost `X-Forwarded-For`. Behind Cloudflare that value can be set by the client, which bypasses any per-IP limit; if Caddy instead replaces the header with the tunnel's address, every visitor shares one bucket. Which of these applies is unknown. Before phase 2: run `grep -n 'trusted_proxies\|X-Forwarded-For\|header_up' /etc/caddy/Caddyfile` on `lxc-taraka`, and key the limiter on `Cf-Connecting-Ip` (which Cloudflare sets and the README says is the only path to the app), with the forwarded header as a fallback and a test that a client-sent header does not change the key. The limiter also gets eviction of empty histories, since it never frees keys today. This fix also covers the existing ticket board limiter, which has the same exposure (O9).
+
+Superadmin: `GET /admin/api/push/health` returns subscriber counts, sends in the last 24 hours by status and the `late` and `deferred` counts, the time of the last tick and the oldest failed send, and the Delivery log tab shows it as a card. Admin responses never include endpoints or keys.
+
+### 78.12 Public page UI
+
+A new classic script `static/push.js` (one IIFE, no globals, pure section exported under `__SAMAYA_TEST__`), loaded on both pages. Strings live in `app/i18n/en.json` under `public.push.*` and in the seven machine-drafted catalogues. The i18n work includes the page prefixes in `render_public_page`, the file list in `test_i18n.py` (`PAGES`, which now covers only `events-public.js` and `feedback.js`; otherwise `test_no_unused_keys` fails), and the markup fallbacks. The ESLint config (`eslint.config.mjs`) uses an explicit globals list that lacks `navigator`, `Notification`, `self`, `caches` and `clients`, so those are added for `pwa.js`, `push.js` and `sw.js`.
+
+- **Header button** "Notifications", hidden when the browser lacks support or the server says `enabled: false`. On iOS Safari outside the Home Screen it shows the install steps instead of a subscribe control.
+- **Panel** (a `.modal` with Escape and focus return, as in `feedback.js`):
+  - Status and a subscribe or unsubscribe control. The permission prompt appears only from this tap.
+  - *What*: a checkbox per alliance (the current alliance is pre-ticked on `/events/{slug}`), "Kingdom-wide events", "Announcements", and a checkbox per event type (all ticked; unticking mutes the type).
+  - *When*: "Use each event's reminders" or "My own times", with chips (at the start, 5 minutes, 15 minutes, 30 minutes, 1 hour, 3 hours, 1 day) and a custom entry, at most 5.
+  - *Followed and muted events*: the list of series rules with their `label`, each clearable.
+  - A "Send me a test notification" button and a privacy note (78.13) that names the browser vendors' push services.
+- **Per-row bell** on schedule and list rows: a toggle with `aria-pressed` and a small menu (Follow, Mute, Use my defaults). It acts on the row's `series_id`, so the public row payload gains an opaque `series_id`.
+- **Permission denied** shows how to re-enable it in the browser's site settings, since the page cannot ask again.
+- **State** is one object; the DOM reacts to it and never reads state from the DOM. Saves are optimistic, debounced 500 ms, and roll back with a toast on failure.
+- **Accessibility and style:** WCAG 2.0 AA contrast checked for every new token pair, visible focus, full keyboard use, labels on every input, BEM classes, tokens from the page's `:root`, no inline styles or handlers, `prefers-reduced-motion` respected. `STATIC_ASSET_VERSION` is bumped with each static change.
+
+### 78.13 Security, abuse and privacy
+
+- **Server-side request forgery.** The endpoint comes from an anonymous visitor and the server will call it. Parse it once, with one parser. Reject any backslash, `@`, whitespace or non-ASCII character. Lowercase the host and strip a trailing dot. Accept only `https`, port 443 (an explicit `:443` is accepted, any other port is not), a hostname (never an IP literal) on the allowlist, at most 2,048 characters. Rebuild the URL from the validated parts and send to exactly that string, so a parser difference between validator and sender cannot matter. A suffix rule matches one or more labels under the suffix, never the suffix alone. The sender sets `trust_env=False` (no proxy variables) and `follow_redirects=False`, with a 5 second timeout, and discards the response body. Starting list: `fcm.googleapis.com`, `updates.push.services.mozilla.com`, `web.push.apple.com` and `*.push.apple.com`; Edge's host (`*.notify.windows.com`) is added only if a real Edge subscription needs it. `PUSH_ENDPOINT_HOSTS` overrides the list. It is checked against real Chrome, Firefox, Safari and Edge subscriptions before release (O6).
+- **Key shapes.** `p256dh` decodes to 65 bytes and `auth` to 16, both base64url. Anything else is a 422.
+- **Spam.** The limits in 78.11, the global cap and the per-subscription caps in 78.7. The limiter is in memory, valid because there is one worker.
+- **Tampering.** Changing a subscription needs its `auth` secret, which only that browser and this server know, and a known endpoint cannot be overwritten without it (78.11). There is no cookie auth, so no CSRF surface; requests must be `application/json`. No CORS headers are sent. The secret is stored as is because encryption needs it, so a database or backup leak lets someone change the preferences of those subscriptions. It does not let them send a push, which needs the VAPID private key.
+- **Content.** Notifications are plain text, never HTML. Event names come from coordinators and are truncated.
+- **Service worker.** It is served from a fixed same-origin route, does not touch the paths listed in 78.6, never stores a `no-store` or preview response, and navigates only to allowlisted same-origin paths on click.
+- **Privacy.** The application database stores the endpoint and keys, locale, preferences and timestamps, and no IP address or user agent. The rate limiter keeps IPs in memory only. Server, Caddy and Cloudflare logs outside the app can hold IP and user agent, and the endpoint's host reveals the browser family. The app's logs never contain an endpoint or key; the access log does contain the subscription hash in the URL, which on its own grants nothing without the `auth` secret. An endpoint is a stable pseudonymous identifier, so treat it as personal information under GDPR, PIPEDA and Quebec Law 25: the panel's privacy note says what is stored and that the browser's push service (Google, Apple or Mozilla) delivers the notification, `DELETE` is the erasure path, and idle subscriptions are pruned after 120 days.
+- **VAPID private key** only in `.env`, never in git, logs or any API response.
+
+### 78.14 Operations
+
+- **Environment** (`.env.example` gains these): `SAMAYA_PUSH_ENABLED`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT` (a `mailto:` address, set by the owner), optional `PUSH_ENDPOINT_HOSTS`. The key generation command is documented in the README when this is built.
+- **Key rotation breaks every subscription**, because a browser binds a subscription to the public key it was made with, and FCM answers such sends with 403 rather than 404 or 410. The page's reconciliation (78.10) resubscribes on load. Do not rotate casually.
+- **Kill switch:** set `SAMAYA_PUSH_ENABLED=0` and restart. The bell disappears, the jobs are not registered, and subscriptions are kept. Pause the Uptime Kuma monitor first.
+- **Backup:** the new tables are inside the nightly `ops/backup.sh` dump. The VAPID keys live in `.env`; whether the restic backup of `/opt/taraka` includes `.env` must be checked (O8). Restore check: `SELECT count(*) FROM push_subscriptions`, then a test push.
+- **Monitoring:** an Uptime Kuma keyword monitor on `https://ks138.taraka.dev/api/push/config` expecting `"enabled":true`, plus the admin health card.
+- **Deploy order:** migrations, then the Caddy lines for the phase being shipped, then `systemctl restart caddy`, then the app. RISK: a Caddy restart drops connections for a moment, and an unlisted path answers an empty 200 rather than failing, so check each new path through the public hostname. Roll back by removing the lines and restarting again.
+- **Rollback:** code-only rollback leaves the tables unused. `alembic downgrade a1f0c0de0012` drops everything from §78 (both revisions) and deletes all subscriptions; `events.cover_sha256` goes with phase 0.
+
+### 78.15 Tests and verification
+
+- `tests/test_pwa_routes.py`: manifest content and Kingdom colour handling, `/sw.js` content type, no-cache header and version substitution, and a table test of the worker's routing (which paths get `respondWith`).
+- `tests/test_event_covers.py`: `cover_url` in public rows, no data URI anywhere public, 404 for leadership-only and inactive events, `cover_sha256` kept in step on create, patch and split, ETag.
+- `tests/test_push_subscriptions_api.py`: create, 200 and 409 on an existing hash, validation (endpoint host, key lengths), every cap and the cap pruning, management proof (wrong secret and unknown hash both 404), rate limits, delete, test push limit, `no-store` headers.
+- `tests/test_push_rules.py`: the 78.8 matrix including every row of the table, precedence, announcements, kingdom-wide, leadership-only and cancelled never, offsets precedence, offsets above 10,080, and the not-stale rule (new subscriber, new offset, event edit, occurrence move).
+- `tests/test_push_engine.py` with `FakePush` and an injected clock: due window, 15 minute late limit and the `late` count, at-the-start grace, at-most-once across two ticks and a simulated crash, no repeat after the occurrence is deleted and recreated (split, deactivate then reactivate), cancel, move and deactivate, one push for several matching alliances, the 500 per tick cap and the 45 second deadline with `deferred`, response handling (201, 404 and 410 delete, 429, 5xx counting and the disable rule), stale `sending` recovery, retention including finished one-off series rules, explicit child deletion with SQLite foreign keys off, and a slow `FakePush` that must not block another coroutine.
+- `tests/test_push_security.py`: endpoint allowlist cases (IP literal, userinfo, backslash, trailing dot, uppercase, port, lookalike suffix, `http`, non-ASCII), payload size under 1,536 bytes for a 120 character name with multibyte text, no endpoint or key in any app log line or admin response, nothing but `series_id` added to the public payload, a client-sent forwarded header not changing the limiter key.
+- `tests/test_push_jobs.py`: `register_push_jobs` adds nothing when disabled and both jobs when enabled.
+- `tests/test_migration_0013.py` and `test_migration_0014.py`: upgrade, `alembic check`, downgrade, re-upgrade on Postgres 16 (opt-in, like the 0004 and 0005 tests), plus the backfill of `cover_sha256`.
+- vitest: `push.js` pure functions (state derivation, preference diffing, offset validation, page-load reconciliation), `sw.js` notification builder over all eight locales including "now" at the start, a late delivery and the English fallback, and the fetch-handler routing table.
+- **Device matrix, by hand before release:** Android Chrome in a tab and installed, iOS 16.4 or later from the Home Screen, desktop Chrome, desktop Firefox, desktop Safari. For each: subscribe, test push, a scheduled push five minutes ahead, click opens the right page, unsubscribe, permission denied path, and an offline load. Also record each browser's real endpoint host for the allowlist.
+- **After each deploy:** `curl -s -o /dev/null -w '%{http_code} %{size_download}B %{content_type}\n' https://ks138.taraka.dev/manifest.webmanifest` (a size of 0B means the Caddy line is missing), the same for `/sw.js` and `/event-covers/<id>.jpg?v=...`, `curl -sI https://ks138.taraka.dev/sw.js | grep -i cf-cache-status`, and `curl -s https://ks138.taraka.dev/api/push/config`.
+
+### 78.16 Not built
+
+Quiet hours (the OS does it), accounts and cross-device sync, email and SMS, Declarative Web Push (a later option once iOS 18.4 and later is the norm), `pushsubscriptionchange` handling and any worker-side storage (the page reconciles instead), notification action buttons, badge counts, a digest, linking a Discord identity, notifications for coordinators or about feedback tickets, a localised offline page, and a server-side message catalogue for push text.
+
+### 78.17 Open questions for the owner
+
+| # | Question | Why it matters |
+|---|---|---|
+| O1 | Which icon artwork, and may a crest be used? | Phase 1 needs 192, 512 and maskable PNGs. No art is generated or copied |
+| O2 | Do phase 0 (payload diet) first? | Needed for offline `/api/events`, recommended regardless. It adds a migration and a route |
+| O3 | Which address goes in `VAPID_SUBJECT`? | Push services use it to contact the sender. It stays in `.env`, not in git |
+| O4 | How many subscribers do you expect? | The design is sized for 5,000 with in-memory evaluation. Beyond that it needs a due-time index |
+| O5 | Are `http-ece` and `py-vapid` maintained and compatible with the pinned `cryptography`? | Decision 14 depends on it. If not, write a small sender against the RFC 8291 vectors |
+| O6 | Is the host allowlist complete? | Checked on real devices before release, since a wrong list silently blocks a browser |
+| O7 | Should installed-app scope exclude `/admin`? | Scope `/` lets admin links open in the app window; a narrower scope would send `/feedback` to a browser tab instead |
+| O8 | Does the restic backup include `/opt/taraka/.env`? | Losing the VAPID private key invalidates every subscription |
+| O9 | What does Caddy do with `X-Forwarded-For`, and is `Cf-Connecting-Ip` passed through? | The per-IP limits (this feature's and the ticket board's) are only as good as the client IP. Run the `grep` in 78.11 |
+
+### 78.18 Review record
+
+The first draft was reviewed 2026-10-04 by two independent reviewers with no stake in it, one on security and web push protocol, one on fit with the code and the engine. Each finding was checked against the code or a source before it was accepted. Items marked "corrected" were wrong or overstated in the review.
+
+| Finding | Outcome |
+|---|---|
+| Occurrence rows are deleted and recreated, which would cascade away `push_sends` and repeat a push | Confirmed in `_retire_occurrence`. Dedupe key is now `series_id`, date and offset; no occurrence foreign key (decision 11, 78.7) |
+| A synchronous sender (`pywebpush`) blocks the single event loop; 1,000 slow sends outlast the minute and tick coalescing | Confirmed. Async sender, 5 second timeout, 45 second deadline, 500 per tick, `misfire_grace_time` (decision 14, 78.9) |
+| A new subscriber, a new lead time or a moved event fires stale pushes; the spec wrongly said Discord behaves the same | Confirmed against `_new_delivery_state`. Not-stale rule and `event_occurrences.changed_at` (78.8) |
+| `public_rows` every minute loads every event with its cover and runs about six queries | Confirmed. A push-specific query sharing one predicate (78.9) |
+| `format(0, 'minute')` is "this minute", not "now" | Confirmed by running Node on eight locales. Use `format(0, 'second')` (78.10) |
+| Per-IP rate limiting is bypassable or collapses to one bucket; the limiter never evicts | Plausible, unverified here. Fix, check and eviction specified (78.11, O9). Also affects the ticket board |
+| Phase 0 needs a column and migration, and `events-public.js` reads the cover | Confirmed. `events.cover_sha256`, `a1f0c0de0013`, route and JS change (78.5) |
+| `/api/push/*` needs no Caddy line; phase 1 needs two lines, not three | Confirmed against the README route list (78.4, 78.6) |
+| `/sw.js` may be edge cached by Cloudflare | Plausible. `cf-cache-status` check and bypass rule (78.6) |
+| Upsert on POST lets anyone with an endpoint overwrite its keys | Accepted. 200 only with the matching `auth`, else 409 (78.11). The 409 reveals existence only to someone who already holds the endpoint, which is itself the secret |
+| The 8 character hash claim for logs is false because the path carries the whole hash | Accepted as a wording fix (78.13). The hash is a lookup handle that grants nothing without `auth`, so it stays in the path |
+| "No IP stored" overstated; GDPR, PIPEDA and Law 25 | Accepted. Wording, push-service recipients in the notice, `DELETE` as erasure (78.13) |
+| SSRF parser differentials, trailing dot, wildcard width, proxy variables | Accepted (78.13) |
+| Service worker caches `no-store` and preview pages; "cookies invisible to the worker" is false | Accepted. Cache rules and wording fixed (78.6). Corrected: the reviewer said `ignoreVary` serves the first cached language to everyone; the cache is per device and network first overwrites it on each load, so it holds the last page that device saw |
+| TTL up to an hour delivers an old "60 minutes" push at the start | Accepted. TTL tied to the late limit; wording computed from the time left (78.9, 78.10) |
+| `pushsubscriptionchange` has no storage and Safari does not fire it | Accepted. Dropped for page-load reconciliation (78.10, 78.16) |
+| JSON NULL versus CHECK; `CHAR(64)`; dead series rules fill the cap; idle receivers pruned at 120 days; datetime handling | Accepted (78.7) |
+| Cap of 20,000 contradicts in-memory evaluation sized for thousands | Accepted. Cap 5,000 (78.7) |
+| SQLite tests do not enforce foreign key cascades | Confirmed. Explicit deletion in code, both tested (78.7, 78.15) |
+| ESLint globals, `test_i18n.py` `PAGES`, and the lifespan not being run in tests | Accepted (78.12, 78.9 `register_push_jobs`) |
+| The auth secret is stored in cleartext; a Uptime Kuma monitor alarms on the kill switch; the single Kingdom assumption; Topic plus tag replaces the earlier notification | Accepted as documented (78.13, 78.14, 78.8, 78.10) |
+
+Not verified in review or here: Safari's behaviour on a push without a visible notification, the real push hostnames of Edge and Samsung Internet, the maintenance state of `http-ece` and `py-vapid`, the Topic length rule against the RFC text, and Cloudflare's and Caddy's actual handling of the forwarded headers.
