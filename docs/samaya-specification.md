@@ -2417,6 +2417,8 @@ An "at the start" (0 minute) reminder was always cancelled as "Event had already
 
 Requirement recorded 2026-10-04. Status: design only, nothing is built. Reviewed by independent reviewers before any code: twice on the technical design (78.18) and once from the players' side (78.19). The players' review found no evidence yet that players want push, so phases 2 and 3 are gated on measurement (78.4). The public events and feedback pages become an installable web app, and players can get push notifications for the events they choose, at lead times they choose, without an account.
 
+**Summary and reading order.** The idea: make the public schedule and feedback pages installable on a phone and let players opt in to push notifications for the events they choose, at lead times they choose, with no account. Status: design only, nothing built, and the owner has not yet decided whether to proceed (O10). The recommendation is to measure first and to consider calendar alarms and a Discord `/remind` DM as cheaper routes (78.4, 78.19). Read 78.2 for the decisions, 78.4 for the gate and phases, 78.8 and 78.9a for who gets which push, 78.12 for the player experience, 78.17 for the questions that need the owner, and 78.18 and 78.19 for what the reviews found. 78.20 records the questions asked while this was being designed.
+
 ### 78.1 Goal and non-goals
 
 Goal: a player installs the schedule to their phone, picks what they care about once, and gets a notification at the times they asked for, even when Discord is muted.
@@ -2505,6 +2507,8 @@ This is a prerequisite only for caching `/api/events` offline. It also makes eve
 The worker is served from `/sw.js`, not `/static/sw.js`, because a worker controls only paths under its own directory unless the server adds `Service-Worker-Allowed`.
 
 **Caddy and Cloudflare.** `/manifest.webmanifest` and `/sw.js` each need a `reverse_proxy` line and a `systemctl restart caddy` (README "Adding a new public route"); an unlisted path gets an empty 200 and the app never sees it. Cloudflare caches `.js` files by extension, and `/sw.js` is outside `/static`. Verify after deploy with `curl -sI https://ks138.taraka.dev/sw.js | grep -i cf-cache-status`, which must not say `HIT`. If it does, add a Cloudflare cache rule that bypasses `/sw.js`, because a stale worker means browsers never see the new version token.
+
+**App shortcuts (optional).** The manifest may list `shortcuts` that open `/events` and `/feedback` from a long press on the app icon. They are a few lines and need no new route. Android support is reported to be better than iOS, which is not verified here. A "Next event" shortcut is not specified because the page has no URL for it.
 
 **Pages.** `public_pages.render_public_page` adds `<link rel="manifest">`, `<meta name="theme-color">` and an `apple-touch-icon` link. A new classic script `static/pwa.js` (one IIFE, no globals, pure section exported under `__SAMAYA_TEST__`) registers the worker when `navigator.serviceWorker` exists and the URL has no `preview_theme`. It also holds the install prompt: on Chromium it keeps the `beforeinstallprompt` event for an "Install app" button; on iOS Safari it shows "Share, then Add to Home Screen" when the page is not already in standalone mode (`matchMedia('(display-mode: standalone)')` or `navigator.standalone`).
 
@@ -2744,7 +2748,7 @@ A new classic script `static/push.js` (one IIFE, no globals, pure section export
 
 ### 78.16 Not built
 
-Quiet hours (the OS does it), accounts and cross-device sync, a restore link or QR code for a lost device, email and SMS, Declarative Web Push (a later option once iOS 18.4 and later is the norm), `pushsubscriptionchange` handling and any worker-side storage (the page reconciles instead), notification action buttons, badge counts, a digest, linking a Discord identity, notifications for coordinators or about feedback tickets, a localised offline page, and a server-side message catalogue for push text.
+Home screen widgets (not possible for a PWA on iPhone or Android, see 78.20), quiet hours (the OS does it), accounts and cross-device sync, a restore link or QR code for a lost device, email and SMS, Declarative Web Push (a later option once iOS 18.4 and later is the norm), `pushsubscriptionchange` handling and any worker-side storage (the page reconciles instead), notification action buttons, badge counts, a digest, linking a Discord identity, notifications for coordinators or about feedback tickets, a localised offline page, and a server-side message catalogue for push text.
 
 From the players' review (78.19), considered and deferred: a coordinator-written push note (the reminder text of §77 stays private to Discord); `events.push_enabled` and `event_types.push_default` (the coordinator controls push through reminders); a reach count per event and "sent to N" per occurrence in the admin console (the health card has the aggregate); pushes for new events and urgent announcements; "just this one" subscription to a single occurrence; a per-subscriber daily cap that collapses to one push per event (the panel's expected-volume line comes first); and an urgent override that bypasses a mute, which is rejected because it is what makes players revoke the permission. Use Discord for urgency.
 
@@ -2860,3 +2864,19 @@ An illustrative reach model by one reviewer (60 Android, 30 iPhone, 10 desktop, 
        cd /opt/taraka && docker compose exec db psql -U taraka -d kingshot_scheduler -c "SELECT e.id, e.name FROM events e LEFT JOIN event_reminders r ON r.event_id = e.id WHERE e.active AND NOT e.leadership_only GROUP BY e.id HAVING count(r.id) = 0;"
 
 The decision rule is in 78.4. The owner may build regardless; the rule records what the reviewers would want to see first.
+
+### 78.20 Questions asked while designing, and the answers
+
+Recorded 2026-10-04 so the reasoning behind the decisions is not lost.
+
+| Question | Answer |
+|---|---|
+| How much work is it to make the public pages a PWA with mobile notifications? | Phase 1 (installable shell) about 1 session. Push about 3 to 4 sessions at the first estimate, then about 5 after the reviews added change pushes and the status and fallback work. About 9 to 10 sessions end to end including measurement and the payload fix, about 8 without the payload fix (78.4) |
+| How would users control which events they are pinged for? | By alliance and Kingdom-wide events first, then by event type, a single recurring event ("Every Bear Hunt") and announcements, with precedence series, then type, then alliance (78.8). In the panel, behind a one-decision first screen (78.12) |
+| Can users set their own reminders instead of accepting the event's? | Yes. The default mode uses each event's reminders. A subscriber can switch to their own lead times (up to 5, 0 to 10,080 minutes), and a single event can carry its own times. Pushes are computed from the event start minus the subscriber's offset, independent of the Discord reminders (78.8). The first draft said push would fire only at offsets the event has; that was corrected the same day. Phase 3 (78.4) |
+| Can a PWA have home screen widgets on iPhone and Android? | No. A PWA cannot provide a home screen widget on iPhone or Android. Microsoft Edge on Windows 11 supports PWA widgets in the Widgets Board through a manifest `widgets` entry and Adaptive Cards. Chrome has an open request for Android widgets whose status could not be read. Sources: Progressier's help article, Microsoft Edge documentation, the Chromium issue tracker (a vendor page and two documentation pages; Apple's own documentation was not checked). Widgets need native apps, which do not fit a one-developer alpha. The nearer routes are `/next` in Discord, a calendar subscription (calendar widgets show subscribed events) and app shortcuts (78.6) |
+| Should we consider the players' perspective before building? | Yes, done: four independent reviews (78.19). Result: gate on measurement, add change pushes, make failure visible, simplify the first screen, and consider calendar alarms and Discord DMs first |
+| What went wrong with the first draft? | Occurrence ids are not stable, so de-duplication keyed on them would repeat pushes; a synchronous sender would have frozen the single event loop; a new subscriber or a moved event would have fired stale pushes; `Intl` gives "this minute", not "now", at zero minutes; and the draft claimed some Caddy lines that `/api/*` already covers (78.18) |
+| What does the owner need to do next? | Answer O10 to O13 in 78.17, run the three checks (the Caddy forwarded-header grep in 78.11, the `/api/events` size in 78.5, and the events-without-reminders query in 78.19), and decide whether to run the measurement plan in 78.19 |
+
+Open and unverified, collected from the whole section: Safari's behaviour on a push with no visible notification; the real push hostnames of Edge and Samsung Internet; the maintenance state of `http-ece` and `py-vapid`; the Topic length rule against the RFC text; how Google Calendar and Outlook treat `VALARM` in a subscribed feed; whether install, service workers and push work in Discord's in-app browser; how Caddy and Cloudflare handle the forwarded headers; whether the restic backup includes `.env`; Cloudflare's analytics fields; and the Kingshot player facts the reviewers took from third-party guides.
