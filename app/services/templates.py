@@ -36,6 +36,20 @@ def discord_timestamp(dt: datetime, style: str) -> str:
     return f"<t:{int(dt.timestamp())}:{style}>"
 
 
+def default_reminder_text(event_name: str, minutes_before: int) -> str:
+    """What a reminder says when neither it nor the event has a message
+    (spec §77.4): "1 hour until Bear Hunt". The largest whole unit is used, so
+    90 minutes stays "90 minutes". A reminder at the start says the event is
+    starting now. The name is inserted as written, not rendered as a template."""
+    if minutes_before <= 0:
+        return f"{event_name} is starting now"
+    for size, unit in ((1440, "day"), (60, "hour"), (1, "minute")):
+        if minutes_before % size == 0:
+            count = minutes_before // size
+            return f"{count} {unit}{'' if count == 1 else 's'} until {event_name}"
+    raise AssertionError("unreachable: every positive integer is a whole number of minutes")
+
+
 def render_placeholders(
     text: str,
     *,

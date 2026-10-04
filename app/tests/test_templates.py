@@ -3,7 +3,8 @@ pure functions, no I/O.
 """
 from datetime import datetime, timezone
 
-from services.templates import discord_timestamp, render_placeholders
+import pytest
+from services.templates import default_reminder_text, discord_timestamp, render_placeholders
 
 
 def _dt(iso):
@@ -99,3 +100,24 @@ class TestRenderPlaceholders:
         assert result == (
             f"NSR/Kingdom 138: <t:{send_ts}:F> <t:{send_ts}:R> <t:{event_ts}:F> <t:{event_ts}:R>"
         )
+
+
+class TestDefaultReminderText:
+
+    @pytest.mark.parametrize("minutes, expected", [
+        (0, "Bear Hunt is starting now"),
+        (1, "1 minute until Bear Hunt"),
+        (5, "5 minutes until Bear Hunt"),
+        (45, "45 minutes until Bear Hunt"),
+        (60, "1 hour until Bear Hunt"),
+        (90, "90 minutes until Bear Hunt"),
+        (120, "2 hours until Bear Hunt"),
+        (1440, "1 day until Bear Hunt"),
+        (2880, "2 days until Bear Hunt"),
+        (40320, "28 days until Bear Hunt"),
+    ])
+    def test_wording_uses_the_largest_whole_unit(self, minutes, expected):
+        assert default_reminder_text("Bear Hunt", minutes) == expected
+
+    def test_name_is_not_treated_as_a_template(self):
+        assert default_reminder_text("{alliance_name} Night", 60) == "1 hour until {alliance_name} Night"

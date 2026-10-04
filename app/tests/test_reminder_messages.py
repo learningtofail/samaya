@@ -196,3 +196,24 @@ class TestAtStartReminder:
                 str(ev.anchor_date): (await s.execute(select(EventReminder.message).where(EventReminder.event_id == ev.id))).scalar_one()
                 for ev in events}
         assert messages["2026-10-05"] == "old" and messages["2026-10-19"] == "new"
+
+
+class TestDefaultText:
+    async def test_each_reminder_says_its_own_time_until_the_event(self, sf, fake, configured):
+        event_id = await make_event(sf, configured, reminders=(60, 0), interval=None)
+        await sync(sf, event_id)
+        await run_delivery_tick(sf, fake, AT)
+        await run_delivery_tick(sf, fake, datetime(2026, 10, 2, 19, 0, 30, tzinfo=UTC))
+        assert await _sent(fake) == ["1 hour until Bear Hunt", "Bear Hunt is starting now"]
+
+    async def test_role_mention_still_leads_the_default_text(self, sf, fake, configured):
+        event_id = await make_event(sf, configured, mention_role=True, interval=None)
+        await sync(sf, event_id)
+        await run_delivery_tick(sf, fake, AT)
+        assert await _sent(fake) == ["<@&role-mod> 1 hour until Bear Hunt"]
+
+    async def test_event_message_still_wins_over_the_default(self, sf, fake, configured):
+        event_id = await make_event(sf, configured, message="event message", interval=None)
+        await sync(sf, event_id)
+        await run_delivery_tick(sf, fake, AT)
+        assert await _sent(fake) == ["event message"]

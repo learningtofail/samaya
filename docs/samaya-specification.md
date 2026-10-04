@@ -1547,7 +1547,7 @@ Rules:
 ### 66.3 Publishing and notifying
 
 - **Publishing** creates the Discord Scheduled Event and makes the occurrence visible on the public page and feeds. It needs no channel and sends no message. Automatic publishing keeps the semantics of §51: seven days ahead, skipped inside 15 minutes, a same-named Discord event with a different time is flagged and never overwritten, and a same-named same-time event is recorded without a second API call.
-- **Notifying** is the `reminder` deliveries, sent to the alliance's Notifications destination, or the event's override. The text is the effective message (the alliance override, else the default). If that is empty the system sends "{name} starts {event_time_relative}".
+- **Notifying** is the `reminder` deliveries, sent to the alliance's Notifications destination, or the event's override. The text is the effective message (the alliance override, else the default). If that is empty the system sends the default reminder text (§77.4).
 - **Shared Discord servers** still produce one Scheduled Event per guild (§52); each alliance keeps its own delivery rows and its own reminder.
 - There is no creation notice. Publishing never sends a channel message by itself.
 
@@ -2383,7 +2383,7 @@ Requirement recorded 2026-10-03. An event's reminders can each carry their own t
 ### 77.1 Decisions
 
 - `event_reminders.message` is a nullable column (migration `a1f0c0de0012`, additive; the downgrade drops it and reminders then use the event message again). NULL or blank means "use the event's message", so every existing event behaves as before.
-- **Precedence when a reminder is sent:** the occurrence's `message_override`, then the reminder's own message, then the alliance's `message_override`, then the event's message, then the fallback "{name} starts {event_time_relative}". A reminder's own message therefore applies to every alliance and replaces an alliance's own message for that reminder; an alliance override still applies to reminders without a message of their own.
+- **Precedence when a reminder is sent:** the occurrence's `message_override`, then the reminder's own message, then the alliance's `message_override`, then the event's message, then the default reminder text (§77.4). A reminder's own message therefore applies to every alliance and replaces an alliance's own message for that reminder; an alliance override still applies to reminders without a message of their own.
 - Placeholders (`{event_time_relative}` and the rest of §66.5) render in a reminder message like in any other message. Limit 2,000 characters, as for the event message.
 - The Discord Scheduled Event description does not use reminder messages; it still follows occurrence override, alliance override, event message.
 - Not built: event types' default reminders stay a plain list of minute offsets, so a new event does not inherit per-reminder messages from its type. Also not built: the composer toolbar and live preview per reminder (each reminder has a plain text box).
@@ -2394,6 +2394,20 @@ Requirement recorded 2026-10-03. An event's reminders can each carry their own t
 - API: `reminder_messages` is `{minutes: text}` on `POST /api/events` and `PATCH /api/events/{id}` (and the `changes` of the split endpoint), and in every event response (only reminders that have a message appear, keys are strings). On create and on patch a message must belong to a reminder in the resulting list (422 otherwise). On patch the map is a full replacement. Sending only `reminder_minutes` keeps the messages of the offsets that stay. Blank text drops the entry. Changes are audited in the event's `reminder_messages` snapshot. The split copies the messages to the new part of the series.
 - Engine: `_send_reminder` looks up the delivery's own reminder row by `minutes_before`. Because deliveries merge by guild, channel and offset, one reminder message never conflicts with another.
 - Admin: the Events form shows a text box under the reminder chips for each reminder (`createReminderEditor` with `withMessages`); the event type form is unchanged. Typed text survives adding other reminders and is dropped with a removed reminder.
+
+### 77.4 Default reminder text
+
+When a reminder has no message of its own and the event has none either, the text is built from the reminder's offset (changed 2026-10-03; it used to be "{name} starts {event_time_relative}"):
+
+| Offset | Text |
+| --- | --- |
+| 0 | `Bear Hunt is starting now` |
+| 1 | `1 minute until Bear Hunt` |
+| 60 | `1 hour until Bear Hunt` |
+| 90 | `90 minutes until Bear Hunt` |
+| 2880 | `2 days until Bear Hunt` |
+
+The largest whole unit is used (days, then hours, then minutes). The text has no Discord timestamp, so it reads correctly wherever the reminder is shown. `services/templates.default_reminder_text`; it is English only, like the rest of the posted messages. The event name is inserted as written and is not rendered as a template. A role mention is still added in front when the event asks for one.
 
 ### 77.3 Fix found on the way
 

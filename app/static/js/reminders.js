@@ -49,7 +49,7 @@ function createReminderEditor(host, opts) {
   function renderMessages() {
     if (!messagesHost) return;
     messagesHost.innerHTML = minutes.length
-      ? `<p class="reminders__help">Give a reminder its own text, for example "Starting now!" at 0. A reminder left empty posts the event message. A reminder's own text is used for every alliance, in place of an alliance's own message.</p>`
+      ? `<p class="reminders__help">Give a reminder its own text, for example "Starting now!" at 0. A reminder left empty posts the event message, or "1 hour until Event Name" if that is empty too. A reminder's own text is used for every alliance, in place of an alliance's own message.</p>`
         + minutes.map((m) => `<div class="reminders__message">
           <label class="pf-v6-c-form__label" for="${p}Msg${m}"><span class="pf-v6-c-form__label-text">Message: ${escapeHtml(describeReminder(m))}</span></label>
           <textarea class="pf-v6-c-form-control" id="${p}Msg${m}" rows="2" maxlength="${COMPOSER_MAX_CHARS}" data-minutes="${m}" placeholder="Uses the event message">${escapeHtml(texts[m] || '')}</textarea>

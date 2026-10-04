@@ -29,7 +29,7 @@ async def _published(sf, tenant, name="Bear Hunt", **kw):
     kw.setdefault("interval", None)
     kw.setdefault("reminders", ())
     event_id = await make_event(sf, tenant, name=name, **kw)
-    await sync(sf, event_id, now=NOW.replace(hour=0, minute=0))
+    await sync(sf, event_id, now=datetime.combine(TODAY, time(0, 0), tzinfo=UTC))
     return event_id
 
 

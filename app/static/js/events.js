@@ -709,7 +709,7 @@ async function openEventForm({ mode, event, splitFrom, duplicate }) {
 
   EVF.composer = createComposer(byId('evMessageHost'), {
     idPrefix: 'evMsg', label: 'Message', value: event ? event.message : '', rows: 6,
-    helper: 'Posted at each reminder that has no message of its own (set those under Reminders). If empty, reminders say "{name} starts {event_time_relative}".',
+    helper: 'Posted at each reminder that has no message of its own (set those under Reminders). If empty, a reminder says "1 hour until Event Name" (and "Event Name is starting now" at the start).',
     previewSlug: ownerSlugValue,
     eventStart: eventStartDate,
   });

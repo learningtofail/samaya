@@ -33,7 +33,7 @@ from services.destinations import (
     MERGED_PREFIX, Target, alliance_overrides, find_conflicts, group_sends, merge_key, plan_destinations, resolve_for_event,
 )
 from services.recurrence import build_start_datetime, event_dates_in_window
-from services.templates import render_placeholders
+from services.templates import default_reminder_text, render_placeholders
 from services.time_utils import ensure_utc
 
 logger = logging.getLogger(__name__)
@@ -521,8 +521,10 @@ async def _send_reminder(
                     f"Overrides for {', '.join(names)} were not used")
         else:
             message = overrides.get(delivery.tenant_id, base)
-    message = message or f"{event.name} starts {{event_time_relative}}"
-    content = await _render(event, occ, tenant, message, now, send.alliance_names)
+    if message:
+        content = await _render(event, occ, tenant, message, now, send.alliance_names)
+    else:
+        content = default_reminder_text(event.name, delivery.reminder_minutes)
     if event.mention_role and send.role_ids:
         content = " ".join(f"<@&{r}>" for r in send.role_ids) + f" {content}"
     ok, error = await discord.send_channel_message(token, dest.channel_id, content[:MAX_CONTENT_CHARS])
