@@ -11,7 +11,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from scheduler.unified_jobs import delivery_tick_job, generation_job
+from scheduler.unified_jobs import delivery_tick_job, generation_job, giftcode_tick_job
+from services import giftcode_client
 from routers import events, admin, webhooks, ics, auth as auth_router, auth_pages, tickets_public, themes_public
 
 logging.basicConfig(level=logging.INFO)
@@ -66,6 +67,12 @@ async def lifespan(app: FastAPI):
         delivery_tick_job, IntervalTrigger(minutes=1),
         id="unified_delivery_tick", replace_existing=True,
     )
+    if giftcode_client.is_configured():
+        # Spec §79.5: off until KS_GIFTCODE_SIGN_KEY is set.
+        scheduler.add_job(
+            giftcode_tick_job, IntervalTrigger(minutes=1), id="giftcode_tick", replace_existing=True,
+            max_instances=1, coalesce=True,
+        )
     await generation_job()
 
     scheduler.start()

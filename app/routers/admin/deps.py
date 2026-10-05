@@ -222,3 +222,19 @@ async def resolve_target_tenants(db: AsyncSession, user: User, target_slugs: lis
     await check_target_access(db, user, [t.id for t in tenants_by_slug.values()])
     return tenants_by_slug
 
+
+async def check_write_access(db: AsyncSession, user: User, tenant_ids: list[int]) -> None:
+    """Like check_target_access, but also refuses a read-only Viewer grant. For
+    actions that name several alliances in the body instead of one in the
+    X-Tenant-Slug header (spec §79.6)."""
+    if user.is_superadmin:
+        return
+    rows = (await db.execute(
+        select(UserTenant.tenant_id, UserTenant.role).where(UserTenant.user_id == user.id, UserTenant.tenant_id.in_(tenant_ids))
+    )).all()
+    roles = {tenant_id: role for tenant_id, role in rows}
+    missing = set(tenant_ids) - set(roles)
+    if missing:
+        raise HTTPException(status_code=403, detail=f"You don't have access to tenant id(s) {sorted(missing)}")
+    if any(role == "viewer" for role in roles.values()):
+        raise HTTPException(status_code=403, detail="Viewer access is read-only")

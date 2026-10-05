@@ -25,6 +25,8 @@
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="schedule">Schedule</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="delivery">Delivery log</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="types">Event types</button></li>
+      <li class="tabs__item"><button type="button" class="tabs__link" data-view="players">Players</button></li>
+      <li class="tabs__item"><button type="button" class="tabs__link" data-view="giftcodes">Gift codes</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="feedback">Feedback</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="setup">Setup</button></li>
       <li class="tabs__item hidden" id="appearanceTabItem"><button type="button" class="tabs__link" data-view="appearance">Appearance</button></li>
@@ -226,6 +228,82 @@
     </div>
   </details>
 </section>
+<section id="v-players" class="view" aria-labelledby="h-players">
+  <div class="view__head"><h2 class="view__title" id="h-players">Players</h2></div>
+  <div class="filters filters--panel" role="group" aria-label="Choose an alliance">
+    <div class="filters__item">
+      <label class="filters__label" for="playersAlliance">Alliance</label>
+      <select class="pf-v6-c-form-control" id="playersAlliance"></select>
+    </div>
+  </div>
+  <p class="count" id="playersCount" role="status"></p>
+  <section class="panel" id="playersAddPanel" aria-labelledby="h-players-add">
+    <h3 class="panel__title" id="h-players-add">Add players</h3>
+    <div class="pf-v6-c-form__group">
+      <label class="pf-v6-c-form__label" for="playersText"><span class="pf-v6-c-form__label-text">Player IDs</span></label>
+      <textarea class="pf-v6-c-form-control" id="playersText" rows="5" spellcheck="false" autocomplete="off"></textarea>
+      <p class="pf-v6-c-form__helper-text">One player per line: the ID, or ID,kingdom, or ID,kingdom,name. Up to 500 lines at a time. Lines starting with # are ignored.</p>
+    </div>
+    <div class="row-actions">
+      <button type="button" class="pf-v6-c-button pf-m-primary" id="btnAddPlayers">Add players</button>
+      <button type="button" class="pf-v6-c-button pf-m-secondary" id="btnExportPlayers">Export CSV</button>
+    </div>
+    <div class="samaya-muted" id="playersAddResult" role="status"></div>
+  </section>
+  <div class="table-wrap">
+    <table class="pf-v6-c-table pf-m-grid-md responsive-table">
+      <caption class="sr-only">Players in this alliance</caption>
+      <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Player ID</th><th class="pf-v6-c-table__th" scope="col">Kingdom</th><th class="pf-v6-c-table__th" scope="col">Name</th><th class="pf-v6-c-table__th" scope="col">Note</th><th class="pf-v6-c-table__th" scope="col">Actions</th></tr></thead>
+      <tbody id="playersBody"></tbody>
+    </table>
+  </div>
+  <details class="about-page">
+    <summary>About this tab</summary>
+    <div class="about-page__body">
+      <p>The list of player IDs for one alliance. Gift code redemption reads it, and later features will too. Only leaders can see or change it, and nothing here appears on the public pages.</p>
+      <p>Samaya cannot check who owns an ID, because the game gives it no way to. By listing a player you are saying they agreed to it. Names and notes are optional and typed by you.</p>
+      <p>A player's kingdom is the Kingdom's game number (set in Setup) unless you give that player their own, for example after a transfer. A player can be on one alliance's list at a time. Export CSV downloads the list and is recorded in the audit log.</p>
+    </div>
+  </details>
+</section>
+
+<section id="v-giftcodes" class="view" aria-labelledby="h-giftcodes">
+  <div class="view__head"><h2 class="view__title" id="h-giftcodes">Gift codes</h2></div>
+  <p class="notice hidden" id="giftcodesOff" role="status">Gift code redemption is not switched on for this server. The server administrator sets a signing key to enable it; see the notes below.</p>
+  <section class="panel" id="giftStartPanel" aria-labelledby="h-gift-start">
+    <h3 class="panel__title" id="h-gift-start">Redeem a code</h3>
+    <div class="pf-v6-c-form__group">
+      <label class="pf-v6-c-form__label" for="giftCode"><span class="pf-v6-c-form__label-text">Gift code</span></label>
+      <input class="pf-v6-c-form-control code-input" type="text" id="giftCode" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false">
+    </div>
+    <fieldset class="pf-v6-c-form__group check-group">
+      <legend class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Alliances</span></legend>
+      <div id="giftAlliances"></div>
+    </fieldset>
+    <div class="row-actions"><button type="button" class="pf-v6-c-button pf-m-primary" id="btnStartRun">Start redeeming</button></div>
+  </section>
+  <section class="panel hidden" id="giftActive" aria-labelledby="h-gift-active">
+    <h3 class="panel__title" id="h-gift-active">In progress</h3>
+    <div class="run-card" id="giftActiveBody"></div>
+  </section>
+  <h3 class="view__subtitle" id="h-gift-runs">Recent runs</h3>
+  <div class="table-wrap">
+    <table class="pf-v6-c-table pf-m-grid-md responsive-table" aria-labelledby="h-gift-runs">
+      <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Code</th><th class="pf-v6-c-table__th" scope="col">Started</th><th class="pf-v6-c-table__th" scope="col">Status</th><th class="pf-v6-c-table__th" scope="col">Result</th><th class="pf-v6-c-table__th" scope="col">Actions</th></tr></thead>
+      <tbody id="giftRunsBody"></tbody>
+    </table>
+  </div>
+  <details class="about-page">
+    <summary>About this tab</summary>
+    <div class="about-page__body">
+      <p>Paste a code and Samaya redeems it for every player on the chosen alliances' lists, one at a time. A run is kept going by the server, so you can close this page. Players who already redeemed the same code in an earlier run are not asked again.</p>
+      <p>A run stops on its own if the code has expired, is wrong, or has reached its claim limit, if the game server cannot be reached or refuses Samaya, or if its answers stop making sense, which usually means the game changed its API. "Wrong kingdom" means the game rejected that player's ID and kingdom number together; fix the number on the Players tab and run the code again.</p>
+      <p>Samaya talks to the game's own redemption endpoint with its own name in the request, not pretending to be a browser. The game could still block it. Results are kept for 90 days.</p>
+      <p>To switch this on, the server administrator sets <code>KS_GIFTCODE_SIGN_KEY</code> in <code>.env</code> and restarts the app.</p>
+    </div>
+  </details>
+</section>
+
 <section id="v-feedback" class="view" aria-labelledby="h-feedback">
   <div class="view__head"><h2 class="view__title" id="h-feedback">Feedback</h2></div>
   <p class="banner banner--info" id="ticketAuthor"></p>
@@ -1107,6 +1185,11 @@
             <input class="pf-v6-c-form-control" type="text" id="kgSlug">
           </div>
           <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="kgGameNumber"><span class="pf-v6-c-form__label-text">Game kingdom number</span></label>
+            <input class="pf-v6-c-form-control" type="number" id="kgGameNumber" min="1" max="999999" inputmode="numeric">
+            <p class="pf-v6-c-form__helper-text">The number the game uses for this Kingdom, such as 138. Gift code redemption sends it for every player without their own.</p>
+          </div>
+          <div class="pf-v6-c-form__group">
             <label class="pf-v6-c-form__label" for="kgPublicTitle"><span class="pf-v6-c-form__label-text">Public events page title</span></label>
             <input class="pf-v6-c-form-control" type="text" id="kgPublicTitle" placeholder="Kingshot Event Schedule">
             <p class="pf-v6-c-form__helper-text">Blank uses the default.</p>
@@ -1135,6 +1218,58 @@
       <footer class="pf-v6-c-modal-box__footer">
         <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSaveKingdomModal">Save</button>
         <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<div class="pf-v6-c-backdrop" id="playerModal" data-close-fn="closePlayerModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="playerModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="playerModalTitle">Edit player</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <input type="hidden" id="plId">
+        <form class="pf-v6-c-form" novalidate>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="plKid"><span class="pf-v6-c-form__label-text">Kingdom number</span></label>
+            <input class="pf-v6-c-form-control" type="number" id="plKid" min="1" max="999999" inputmode="numeric">
+            <p class="pf-v6-c-form__helper-text" id="plKidHelp"></p>
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="plName"><span class="pf-v6-c-form__label-text">Name</span></label>
+            <input class="pf-v6-c-form-control" type="text" id="plName" maxlength="60">
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="plNote"><span class="pf-v6-c-form__label-text">Note</span></label>
+            <input class="pf-v6-c-form-control" type="text" id="plNote" maxlength="40">
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="plAlliance"><span class="pf-v6-c-form__label-text">Alliance</span></label>
+            <select class="pf-v6-c-form-control" id="plAlliance"></select>
+          </div>
+        </form>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSavePlayer">Save</button>
+        <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<div class="pf-v6-c-backdrop" id="runModal" data-close-fn="closeRunModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="runModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="runModalTitle">Run details</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body" id="runModalBody"></div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-primary" data-modal-dismiss>Close</button>
       </footer>
     </div>
   </div>
@@ -1174,6 +1309,8 @@
 <script src="/static/js/platform.js"></script>
 <script src="/static/js/setup.js"></script>
 <script src="/static/js/appearance.js"></script>
+<script src="/static/js/players.js"></script>
+<script src="/static/js/giftcodes.js"></script>
 <script src="/static/js/audit.js"></script>
 <script src="/static/js/init.js"></script>
 </body>

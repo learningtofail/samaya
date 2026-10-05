@@ -547,3 +547,13 @@ textarea.pf-v6-c-form-control { min-height: 5rem; resize: vertical; }
 /* Per-reminder messages (spec §77) */
 .reminders__messages { display: grid; gap: var(--space-3); }
 .reminders__message { display: grid; gap: var(--space-1); }
+
+/* ── Players and Gift codes (spec §79, §80) ───────────── */
+.notice { background: var(--info-bg); color: var(--info-ink); border-radius: var(--radius); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4); }
+.check-group { border: 0; padding: 0; margin: 0 0 var(--space-3); min-width: 0; }
+.check-group .check { display: flex; min-height: var(--tap); align-items: center; gap: var(--space-2); }
+.code-input { max-width: 22rem; font-family: var(--font-mono, ui-monospace, monospace); letter-spacing: 0.04em; }
+.run-card { display: grid; gap: var(--space-2); }
+.run-card__title { font-weight: 600; }
+.run-card__bar { width: 100%; max-width: 32rem; height: 12px; accent-color: var(--accent); }
+.run-card__counts { color: var(--muted); font-size: var(--fs-sm); }

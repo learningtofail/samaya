@@ -2473,9 +2473,9 @@ Decision rule the reviewers propose, which is a judgement and not a fact: procee
 
 | Phase | Delivers | Needs |
 |---|---|---|
-| 0 | Public payload diet: covers served by URL (78.5). Page weight alone justifies it | Migration `a1f0c0de0013`, Caddy line `/event-covers/*` |
+| 0 | Public payload diet: covers served by URL (78.5). Page weight alone justifies it | Migration `a1f0c0de0017`, Caddy line `/event-covers/*` |
 | 1 | Installable app shell: manifest, icons, service worker, offline fallback (78.6). Needs phase 0 | Icons (O1), Caddy lines `/manifest.webmanifest` and `/sw.js` |
-| 2 | Push core: subscribe, follow alliances and the Kingdom, reminders, change pushes, status and fallbacks, the test button (78.7 to 78.12) | The gate, VAPID keys, migration `a1f0c0de0014`, the client IP fix (O9). No Caddy line: `/api/*` is already routed |
+| 2 | Push core: subscribe, follow alliances and the Kingdom, reminders, change pushes, status and fallbacks, the test button (78.7 to 78.12) | The gate, VAPID keys, migration `a1f0c0de0018`, the client IP fix (O9). No Caddy line: `/api/*` is already routed |
 | 3 | Preferences: own lead times, type mutes, per-event follow and mute, pause (78.8, 78.12) | Phase 2 |
 
 Each phase ships and works alone. Rough effort in working sessions: measurement and calendar test about 1, phase 0 about 1 to 1.5, phase 1 about 1, phase 2 about 5 (it now includes change pushes and the status and fallback work), phase 3 about 1 to 2, so about 9 to 10 end to end, or about 8 without phase 0. The owner asked for custom lead times and per-event control, so phase 3 stays in the plan, last.
@@ -2487,7 +2487,7 @@ Each phase ships and works alone. Rough effort in working sessions: measurement 
     curl -s https://ks138.taraka.dev/api/events | wc -c
 
 Fix:
-- Migration `a1f0c0de0013` adds a nullable `events.cover_sha256` (`String(64)`), backfilled from the existing covers. Event create, patch and the split set it whenever the cover changes.
+- Migration `a1f0c0de0017` adds a nullable `events.cover_sha256` (`String(64)`), backfilled from the existing covers. Event create, patch and the split set it whenever the cover changes.
 - New public route `GET /event-covers/{event_id}.jpg?v={first 12 characters of the sha}` decodes the stored data URI. It answers 404 for an inactive or leadership-only event, using the same predicate as the public query (78.9), so a leadership-only cover is never public. `Cache-Control: public, max-age=86400` and an `ETag`.
 - Public rows carry `cover_url` (null without a cover) in place of `cover_image_data`. `events-public.js` reads `cover_url` where it now reads `cover_image_data` for the Discord preview (about line 776). Admin responses keep the data URI, so the admin form is unchanged.
 - Caddy needs `reverse_proxy /event-covers/* 127.0.0.1:8000`. `/api/events` is already routed.
@@ -2529,7 +2529,7 @@ A worker's `fetch(event.request)` carries cookies like any same-origin request, 
 
 Installed scope is `/`, so the admin console also opens inside the app window when a coordinator follows a link. This is acceptable and recorded as an open point (O7).
 
-### 78.7 Data model (migration `a1f0c0de0014`)
+### 78.7 Data model (migration `a1f0c0de0018`)
 
 Additive. The downgrade drops the three tables and the column, which loses subscriptions (players resubscribe). Models go in `models/db.py`, so `alembic check` sees them. Guarded creation as in the earlier revisions, verified on Postgres 16 with upgrade, `alembic check`, downgrade and re-upgrade. Every datetime read goes through `ensure_utc`. JSON columns are declared `JSON(none_as_null=True)`, so Python `None` is SQL NULL and the CHECKs below mean what they say.
 
@@ -2740,7 +2740,7 @@ A new classic script `static/push.js` (one IIFE, no globals, pure section export
 - `tests/test_push_security.py`: endpoint allowlist cases (IP literal, userinfo, backslash, trailing dot, uppercase, port, lookalike suffix, `http`, non-ASCII), payload size under 1,536 bytes for a 120 character name with multibyte text, no endpoint or key in any app log line or admin response, nothing but `series_id` added to the public payload, a client-sent forwarded header not changing the limiter key.
 - `tests/test_push_changes.py`: the 78.9a rules (move threshold, date crossing, move back to the original, coalescing two edits into one, 48 hour scope, one push per series after a whole-event time edit, cancel only after a reminder or inside 24 hours, restore sends nothing, paused subscribers, at-most-once with `kind` and `token`).
 - `tests/test_push_jobs.py`: `register_push_jobs` adds nothing when disabled and both jobs when enabled.
-- `tests/test_migration_0013.py` and `test_migration_0014.py`: upgrade, `alembic check`, downgrade, re-upgrade on Postgres 16 (opt-in, like the 0004 and 0005 tests), plus the backfill of `cover_sha256`.
+- `tests/test_migration_0017.py` and `test_migration_0018.py`: upgrade, `alembic check`, downgrade, re-upgrade on Postgres 16 (opt-in, like the 0004 and 0005 tests), plus the backfill of `cover_sha256`.
 - vitest: `push.js` pure functions (status line states, in-app browser and iPhone detection, expected-volume line, preference diffing, offset validation, page-load reconciliation), the body text with a time zone and Western digits in all eight locales, `sw.js` notification builder over all eight locales including "now" at the start, a late delivery and the English fallback, and the fetch-handler routing table.
 - **Players' acceptance checklist, by hand before release:** (1) Chrome Android with TalkBack: open the panel, turn on, change an option, hear "Saved", close and see focus return to the header button. (2) iPhone with VoiceOver from the Home Screen, and the same page in a Safari tab, where install steps and fallbacks must appear and nothing is silently missing. (3) Keyboard only on desktop: every control reachable, the focus trap works, Escape closes, the bell menu closes on Escape. (4) 200 percent zoom and 320 px width, no horizontal scroll and no clipped panel. (5) Arabic: the panel mirrors, a Latin event name reads in the right order, digits are Western. (6) Block the permission, reload: a clear status and steps. (7) Open the page from Discord's in-app browser on Android and on iOS: a clear message, not a missing button; record what works. (8) A Xiaomi or Samsung phone on default battery settings with the screen off: a test push scheduled 5 minutes ahead; record the delay. (9) iOS Focus on: record what the player sees. (10) Clear site data and reopen: the panel says it is starting fresh and the old row does not stay as a duplicate. (11) Slow 3G in DevTools: the installed app shows the schedule within a few seconds and covers load later; `/api/events` stays under about 200 KB gzipped for a typical Kingdom (a CI check after phase 0). (12) Unsubscribe and confirm the server row is gone and nothing more is sent.
 - **Device matrix, by hand before release:** Android Chrome in a tab and installed, iOS 16.4 or later from the Home Screen, desktop Chrome, desktop Firefox, desktop Safari. For each: subscribe, test push, a scheduled push five minutes ahead, click opens the right page, unsubscribe, permission denied path, and an offline load. Also record each browser's real endpoint host for the allowlist.
@@ -2782,7 +2782,7 @@ The first draft was reviewed 2026-10-04 by two independent reviewers with no sta
 | `public_rows` every minute loads every event with its cover and runs about six queries | Confirmed. A push-specific query sharing one predicate (78.9) |
 | `format(0, 'minute')` is "this minute", not "now" | Confirmed by running Node on eight locales. Use `format(0, 'second')` (78.10) |
 | Per-IP rate limiting is bypassable or collapses to one bucket; the limiter never evicts | Plausible, unverified here. Fix, check and eviction specified (78.11, O9). Also affects the ticket board |
-| Phase 0 needs a column and migration, and `events-public.js` reads the cover | Confirmed. `events.cover_sha256`, `a1f0c0de0013`, route and JS change (78.5) |
+| Phase 0 needs a column and migration, and `events-public.js` reads the cover | Confirmed. `events.cover_sha256`, `a1f0c0de0017`, route and JS change (78.5) |
 | `/api/push/*` needs no Caddy line; phase 1 needs two lines, not three | Confirmed against the README route list (78.4, 78.6) |
 | `/sw.js` may be edge cached by Cloudflare | Plausible. `cf-cache-status` check and bypass rule (78.6) |
 | Upsert on POST lets anyone with an endpoint overwrite its keys | Accepted. 200 only with the matching `auth`, else 409 (78.11). The 409 reveals existence only to someone who already holds the endpoint, which is itself the secret |
@@ -2911,7 +2911,7 @@ Scope. Resolved 2026-10-05: the owner confirmed Samaya is heading toward a full 
 
 ### 79.3 Data model (one Alembic revision, additive, downgrade drops the tables and column)
 
-The revision id is chosen at build time as the next free one after whatever has merged. §78 reserves `a1f0c0de0013` and `a1f0c0de0014`, so this one may not be `0013`. Models go in `models/db.py` so `alembic check` sees them.
+Built as `a1f0c0de0013`. §78's reservations moved to `0017` and `0018`, because §81 to §83 take `0014` to `0016`. Models go in `models/db.py` so `alembic check` sees them.
 
 `kingdoms.game_number` Integer, nullable.
 
@@ -2998,6 +2998,17 @@ O3. Accept the honest client (decision 6) and the higher risk of being blocked?
 O4. Should Century Games' terms be read before building? Not reviewed here, and automating redemptions for other people's accounts is the kind of thing a game's terms may restrict.
 O5. Should a run post a summary to a Discord channel when it ends? Deferred, as are button interactions.
 
+### 79.14 As built (2026-10-05)
+
+Built with the player registry of §80.3 as Alembic `a1f0c0de0013` (verified on Postgres 16: upgrade, `alembic check`, downgrade, re-upgrade). Where the build differs from the design above:
+
+- `players.tenant_id` is `CASCADE`, so removing an alliance removes its roster. `players` is unique per Kingdom on `(kingdom_id, fid)`, so a player cannot be listed by two alliances. There is no cross-alliance dedupe step.
+- The `fid` CHECK only requires a non-empty value. The 5 to 20 digit rule lives in `services/player_import.py`.
+- `redemption_results.player_id` is a `CASCADE` foreign key, as designed. `redemption_results.tenant_id` is the player's alliance at run creation.
+- Added stop reason `blocked`: the API answered 401 or 403, which ends the run like `unreachable` but is reported differently.
+- Added env var for the user agent next to `KS_GIFTCODE_SIGN_KEY` and `KS_GIFTCODE_BASE_URL`; see `.env.example`. The feature stays off, with a 503 from the API, until the sign key is set. The key is never committed.
+- Verified end to end against a local fake game server (success, already received, wrong kingdom, signing). The real game API is unverified: only a redemption of the owner's own account with a live code can confirm it. O3 and O4 stay open.
+
 ## 80. Alliance management roadmap
 
 Status: proposed, design only, nothing built. Direction confirmed by the owner on 2026-10-05: Samaya is heading toward a full alliance management suite, and every feature is Samaya's own implementation. Inputs: a read-only review of `kingshot-project/Kingshot-Discord-Bot` (custom license, discord.py, SQLite, about 72,000 lines, last commit 2026-10-04) by three readers, then a spot check by me. Nothing is copied. The bot is evidence of what leaders ask for and of what goes wrong, not a source of code. Findings about the bot are from reading code and have not been run.
@@ -3066,7 +3077,7 @@ OCR of any kind, the kingdom probe and scan, a public player lookup, the shared 
 
 ### 80.7 Sequencing and cross-cutting work
 
-Order: 1, 2, 3, 4, then 5 to 7 in the order the alliance actually asks for them. Items 2 to 4 touch the delivery engine and need its tests extended (at-most-once, the stale rules). Items 1, 5, 6 and 7 add a permission surface and each gets the same tests: viewer 403, other alliance 403, nothing in public routes, audit rows written. Alembic revisions are numbered at build time after whatever has merged, and §78 reserves `0013` and `0014`. Each feature gets its own spec section before it is built, as this one has for gift codes.
+Order: 1, 2, 3, 4, then 5 to 7 in the order the alliance actually asks for them. Items 2 to 4 touch the delivery engine and need its tests extended (at-most-once, the stale rules). Items 1, 5, 6 and 7 add a permission surface and each gets the same tests: viewer 403, other alliance 403, nothing in public routes, audit rows written. Alembic revisions are numbered at build time after whatever has merged, and §78's reservations now sit at `0017` and `0018`. Each feature gets its own spec section before it is built, as this one has for gift codes.
 
 ### 80.8 Open questions
 
