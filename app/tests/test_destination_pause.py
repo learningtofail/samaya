@@ -92,14 +92,14 @@ class TestPauseRules:
         await add_audience(sf, tenant, "chan-mod")
         await add_audience(sf, second_tenant, "chan-nsr")
         fake.raise_on_send_to = set()
-        original = fake.send_channel_message
+        original = fake.post_channel_message
 
-        async def flaky(token, channel, content):
+        async def flaky(token, channel, content, **kw):
             if channel == "chan-mod":
                 fake.calls.append(("send", channel, content))
-                return False, "403 Missing permissions"
-            return await original(token, channel, content)
-        fake.send_channel_message = flaky
+                return "", "403 Missing permissions"
+            return await original(token, channel, content, **kw)
+        fake.post_channel_message = flaky
         event_id = await make_event(sf, tenant, scope="kingdom-wide", interval=1, duration=1.0,
                                     audience=[tenant["id"], second_tenant["id"]])
         await sync(sf, event_id)

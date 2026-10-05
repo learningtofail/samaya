@@ -504,6 +504,8 @@ class Event(Base):
     anchor_date      = Column(Date, nullable=False)
     until_date       = Column(Date, nullable=True)
     mention_role     = Column(Boolean, nullable=False, default=False)
+    # Spec §83: delete earlier reminders once a later one posts, and all of them after the event.
+    clean_up_reminders = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     active           = Column(Boolean, nullable=False, default=True)
     cover_image_data = Column(Text, nullable=True)
     created_at       = Column(DateTime(timezone=True), server_default=func.now())
@@ -630,6 +632,9 @@ class Delivery(Base):
     guild_id           = Column(Text, nullable=False, default="", server_default="")
     channel_id         = Column(Text, nullable=False, default="", server_default="")
     merged_into_id     = Column(Integer, ForeignKey("deliveries.id", ondelete="SET NULL"), nullable=True)
+    # Spec §83: when Samaya deleted this reminder's Discord message, or why it could not.
+    message_deleted_at = Column(DateTime(timezone=True), nullable=True)
+    cleanup_error      = Column(Text, nullable=True)
 
     occurrence = relationship("EventOccurrence", back_populates="deliveries")
     destination = relationship("AudienceDestination", lazy="joined")

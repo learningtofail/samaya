@@ -90,6 +90,8 @@ def _delivery_dict(d: Delivery, occ: EventOccurrence, event: Event, tenant: Tena
         "detail":             d.detail,
         "discord_event_id":   d.discord_event_id,
         "posted_at_utc":      _iso(d.posted_at_utc),
+        "message_deleted_at": _iso(d.message_deleted_at),
+        "cleanup_error":      d.cleanup_error,
         "audience_label":     d.destination.audience.label if d.destination is not None else None,
         "channel_id":         d.channel_id or None,
         "guild_id":           d.guild_id or None,
@@ -286,6 +288,7 @@ async def split_event(
         location=event.location, start_time_utc=event.start_time_utc, duration_hours=event.duration_hours,
         recurrence_kind=event.recurrence_kind, interval_days=event.interval_days,
         anchor_date=payload.from_date, until_date=event.until_date, mention_role=event.mention_role,
+        clean_up_reminders=event.clean_up_reminders,
         active=event.active, cover_image_data=event.cover_image_data,
     )
     new_event.reminders = [EventReminder(minutes_before=r.minutes_before, message=r.message) for r in event.reminders]

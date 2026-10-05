@@ -533,9 +533,10 @@ async def _send_reminder(
         content = default_reminder_text(event.name, delivery.reminder_minutes)
     if event.mention_role and send.role_ids:
         content = " ".join(f"<@&{r}>" for r in send.role_ids) + f" {content}"
-    ok, error = await discord.send_channel_message(token, dest.channel_id, content[:MAX_CONTENT_CHARS])
-    if not ok:
+    message_id, error = await discord.post_channel_message(token, dest.channel_id, content[:MAX_CONTENT_CHARS])
+    if not message_id:
         return "error", error
+    delivery.discord_message_id = message_id  # spec §83: kept so the message can be cleaned up later
     return "posted", note
 
 
@@ -552,7 +553,8 @@ async def _claim(session: AsyncSession, delivery_id: int, now: datetime) -> bool
 
 
 async def _finish(session_factory, delivery_id: int, status: str, detail: str | None,
-                  discord_event_id: str | None, now: datetime, merged_into_id: int | None = None) -> None:
+                  discord_event_id: str | None, now: datetime, merged_into_id: int | None = None,
+                  discord_message_id: str | None = None) -> None:
     async with session_factory() as session:
         values = {"status": status, "detail": detail}
         if merged_into_id is not None:
@@ -561,6 +563,8 @@ async def _finish(session_factory, delivery_id: int, status: str, detail: str | 
             values["posted_at_utc"] = now
         if discord_event_id:
             values["discord_event_id"] = discord_event_id
+        if discord_message_id:
+            values["discord_message_id"] = discord_message_id
         await session.execute(update(Delivery).where(Delivery.id == delivery_id).values(**values))
         await session.commit()
 
@@ -604,6 +608,7 @@ async def process_delivery(session_factory, discord, delivery_id: int, now: date
 
     status, detail, discord_event_id, merged_into_id = "error", "Unexpected failure before sending", None, None
     reminder_destination_id: int | None = None
+    message_id: str | None = None
     try:
         async with session_factory() as session:
             delivery = await session.get(Delivery, delivery_id)
@@ -624,10 +629,11 @@ async def process_delivery(session_factory, discord, delivery_id: int, now: date
             else:
                 reminder_destination_id = delivery.destination_id
                 status, detail = await _send_reminder(session, discord, delivery, event, occ, tenant, now)
+                message_id = delivery.discord_message_id
     except Exception as exc:  # one delivery's failure must not stop the tick
         logger.exception("delivery %s failed", delivery_id)
         status, detail = "error", f"{type(exc).__name__}: {exc}"
-    await _finish(session_factory, delivery_id, status, detail, discord_event_id, now, merged_into_id)
+    await _finish(session_factory, delivery_id, status, detail, discord_event_id, now, merged_into_id, message_id)
     if reminder_destination_id is not None:
         try:
             await record_destination_outcome(session_factory, reminder_destination_id, status, detail, now)
@@ -648,6 +654,67 @@ async def recover_stale_claims(session_factory, now: datetime) -> int:
         return result.rowcount or 0
 
 
+CLEANUP_BATCH = 50
+CLEANUP_GIVE_UP_AFTER = timedelta(hours=24)
+
+
+async def run_cleanup(session_factory, discord, now: datetime) -> dict[str, int]:
+    """Spec §83: deletes reminder messages that are no longer wanted. Never raises. Returns counts
+    of deleted, failed (access, stored) and retry (transient, tried again next tick)."""
+    counts = {"deleted": 0, "failed": 0, "retry": 0}
+    async with session_factory() as session:
+        rows = (await session.execute(
+            select(Delivery, EventOccurrence)
+            .join(EventOccurrence, EventOccurrence.id == Delivery.occurrence_id)
+            .join(Event, Event.id == EventOccurrence.event_id)
+            .where(
+                Event.clean_up_reminders.is_(True), Delivery.kind == KIND_REMINDER, Delivery.status == "posted",
+                Delivery.discord_message_id.is_not(None), Delivery.message_deleted_at.is_(None),
+                Delivery.cleanup_error.is_(None), Delivery.merged_into_id.is_(None),
+            )
+        )).unique().all()
+        groups: dict[tuple, list[tuple[Delivery, EventOccurrence]]] = {}
+        for delivery, occ in rows:
+            groups.setdefault((occ.id, delivery.guild_id, delivery.channel_id), []).append((delivery, occ))
+        doomed: list[tuple[int, str, str, str]] = []  # delivery id, channel id, message id, bot token
+        for group in groups.values():
+            occ = group[0][1]
+            ended_at = effective_end(occ) or effective_start(occ)
+            ended = now >= ensure_utc(ended_at)
+            if ended and now - ensure_utc(ended_at) > CLEANUP_GIVE_UP_AFTER:
+                continue
+            group.sort(key=lambda pair: (pair[0].reminder_minutes, pair[0].id))  # latest reminder first
+            for delivery, _ in (group if ended else group[1:]):
+                server = delivery.destination.server if delivery.destination is not None else None
+                token = (server.bot_token if server else "") or platform_bot_token()
+                doomed.append((delivery.id, delivery.channel_id, delivery.discord_message_id, token))
+    for delivery_id, channel_id, message_id, token in doomed[:CLEANUP_BATCH]:
+        try:
+            if not token:
+                ok, error = False, "403 No Discord bot token configured for this server"
+            else:
+                ok, error = await discord.delete_channel_message(token, channel_id, message_id)
+        except Exception as exc:  # cleanup must never stop the tick
+            logger.exception("cleanup of delivery %s failed", delivery_id)
+            ok, error = False, f"{type(exc).__name__}: {exc}"
+        values: dict = {}
+        if ok:
+            values["message_deleted_at"] = now
+            counts["deleted"] += 1
+        elif is_access_failure(error):
+            values["cleanup_error"] = error[:255]
+            counts["failed"] += 1
+            logger.warning("could not delete reminder message of delivery %s: %s", delivery_id, error)
+        else:
+            counts["retry"] += 1
+            logger.warning("could not delete reminder message of delivery %s, will retry: %s", delivery_id, error)
+        if values:
+            async with session_factory() as session:
+                await session.execute(update(Delivery).where(Delivery.id == delivery_id).values(**values))
+                await session.commit()
+    return counts
+
+
 async def run_delivery_tick(session_factory, discord, now: datetime | None = None) -> dict[str, int]:
     """The single per-minute job. Returns counts by final status."""
     now = now or datetime.now(timezone.utc)
@@ -665,6 +732,13 @@ async def run_delivery_tick(session_factory, discord, now: datetime | None = Non
         status = await process_delivery(session_factory, discord, delivery_id, now)
         if status:
             counts[status] = counts.get(status, 0) + 1
+    try:
+        cleaned = await run_cleanup(session_factory, discord, now)
+        for key, n in cleaned.items():
+            if n:
+                counts[f"cleanup_{key}"] = n
+    except Exception:  # spec §83.2: cleanup never blocks sending
+        logger.exception("reminder cleanup failed")
     return counts
 
 

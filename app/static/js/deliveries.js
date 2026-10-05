@@ -108,6 +108,13 @@ function deliveryMembersHtml(d) {
   return `<details class="delivery-merged"><summary>Merged with ${d.members.length} other destination${d.members.length === 1 ? '' : 's'}</summary><ul class="delivery-members">${items}</ul></details>`;
 }
 
+// Spec §83: what happened to a reminder's Discord message when its event cleans up after itself.
+function deliveryCleanupHtml(d) {
+  if (d.message_deleted_at) return '<div class="samaya-muted">Reminder removed from Discord.</div>';
+  if (d.cleanup_error) return `<div class="board-note__error">Could not remove the reminder: ${escapeHtml(d.cleanup_error)}</div>`;
+  return '';
+}
+
 function buildDeliveryRow(d) {
   const canRetry = d.status === 'error' && canWriteAnywhere();
   const action = canRetry
@@ -121,7 +128,7 @@ function buildDeliveryRow(d) {
     <td class="pf-v6-c-table__td" data-label="Event"><strong>${escapeHtml(d.event_name)}</strong><div class="samaya-muted">${escapeHtml(d.occurrence_date)}</div></td>
     <td class="pf-v6-c-table__td" data-label="Alliance and kind">${escapeHtml(names)}${merged ? ` ${pfLabel('Merged', 'pf-m-blue')}` : ''}${target}<div class="samaya-muted">${escapeHtml(deliveryKindText(d))}</div></td>
     <td class="pf-v6-c-table__td" data-label="Status">${deliveryStatusLabel(d.status)}</td>
-    <td class="pf-v6-c-table__td" data-label="Detail">${d.detail ? escapeHtml(d.detail) : '<span class="samaya-muted">None</span>'}${deliveryMembersHtml(d)}</td>
+    <td class="pf-v6-c-table__td" data-label="Detail">${d.detail ? escapeHtml(d.detail) : '<span class="samaya-muted">None</span>'}${deliveryCleanupHtml(d)}${deliveryMembersHtml(d)}</td>
     <td class="pf-v6-c-table__td" data-label="Actions">${action}</td>
   </tr>`;
 }

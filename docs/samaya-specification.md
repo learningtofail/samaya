@@ -3165,3 +3165,45 @@ Render (days, UTC, cancelled, truncation, escaping, empty, leadership-only absen
 
 O1. Pin the board message? Needs Manage Messages; not in this version.
 O2. Should a board offer a language other than English? Not yet.
+
+## 83. Self-cleaning reminders
+
+Status: built with this section (alliance management roadmap item 4, §80.4).
+
+### 83.1 Goal
+
+A channel that gets "Bear Hunt in 60 minutes", "in 15 minutes" and "now" ends up with three messages saying the same thing. With this option on, only the newest reminder of an occurrence stays, and none stay once the event is over.
+
+### 83.2 Decisions
+
+1. Per event: `events.clean_up_reminders`, default off. One checkbox in the event form. It is copied by the "this and following" split and never inherited from the event type.
+2. Samaya stores the Discord message id of every reminder it posts, whether or not the option is on (`deliveries.discord_message_id`, already in the schema and now filled), so turning the option on later works for reminders that are already up.
+3. Two rules, per occurrence and per channel (a merged send is one message, §67.3):
+   a. When a later reminder (fewer minutes before the start) has posted, every earlier posted reminder in that channel is deleted.
+   b. When the occurrence has ended (its end, or its start when it has no duration), every remaining reminder is deleted.
+   A cancelled occurrence keeps its reminders until rule b; a cancellation notice is the leader's to post.
+4. Deletion never blocks sending. It runs after the delivery pass in the same tick, inside its own try block. Success sets `message_deleted_at`. A message that is already gone (Unknown Message) counts as deleted. An access failure (403, 404 channel) is stored in `cleanup_error`, shown in the delivery log, and not retried. Any other failure (network, 429, 5xx) is logged and retried on the next tick, for at most 24 hours after the occurrence ended.
+5. Permission: to my knowledge a bot may delete its own messages without Manage Messages. That is Discord's documented behaviour but not verified against a live server in this build, so the form says "needs no extra permission" only as a note to check on first use. Nothing here deletes a message Samaya did not post (a manual or unknown message id is never stored).
+6. The Discord Scheduled Event is not a reminder and is untouched. Schedule boards (§82) are not reminders and are untouched.
+7. At most 50 deletions per tick so a backlog cannot stall the minute.
+
+### 83.3 Data (Alembic `a1f0c0de0016`, additive, downgrade drops the columns)
+
+`events.clean_up_reminders` Boolean not null default false. `deliveries.message_deleted_at` timestamptz null, `deliveries.cleanup_error` Text null.
+
+### 83.4 Engine change
+
+Reminder sends call `post_channel_message` (the id-returning call from §82) instead of `send_channel_message`, and `_finish` stores the id. Existing behaviour (claim before the call, at most once, the destination pause of §81) is unchanged. `run_cleanup(session_factory, discord, now)` implements decisions 3 and 4 and is called from `run_delivery_tick`.
+
+### 83.5 API and UI
+
+Event create, patch, the event dict, the split copy and the audit snapshot carry `clean_up_reminders`. The delivery log row shows "Reminder removed" or the cleanup error.
+
+### 83.6 Tests
+
+The id is stored; rule a (earlier deleted, latest kept, other channels untouched); rule b; option off deletes nothing; already gone counts as done; 403 stored and not retried; transient failure retried then given up after 24 hours; a failing delete does not stop other deletes or later sends; merged sends delete once; split copies the flag; API round trip and audit; viewer permissions as for any event edit.
+
+### 83.7 Open questions
+
+O1. Confirm on a real server that deleting the bot's own message needs no Manage Messages.
+O2. Should the last reminder also go when the event starts rather than ends? One constant if so.
