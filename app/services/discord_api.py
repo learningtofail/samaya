@@ -469,3 +469,102 @@ async def send_channel_message(
             return False, f"HTTP {response.status_code}"
     logger.warning(f"send_channel_message: max retries exceeded for channel {channel_id}")
     return False, "Max retries exceeded"
+
+
+# Channel message calls that return or use a message id (spec §82 schedule
+# board, §83 self-cleaning reminders). send_channel_message above stays as is.
+
+MESSAGE_GONE = "MESSAGE_GONE"
+_NO_MENTIONS = {"parse": []}
+
+
+async def _message_request(method: str, url: str, token: str, body: dict | None, label: str):
+    """One Discord call with the shared retry rules. Returns (response, error); exactly one is None."""
+    async with httpx.AsyncClient() as client:
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = await client.request(method, url, headers=_auth_headers(token), json=body)
+            except httpx.RequestError as e:
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                logger.warning(f"{label}: network error after {MAX_RETRIES} attempts — {e}")
+                return None, f"Network error: {e}"
+            if response.status_code == 429:
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(_retry_wait(response, attempt))
+                    continue
+                logger.warning(f"{label}: 429 rate limited after {MAX_RETRIES} attempts")
+                return None, "429 Rate limited"
+            return response, None
+    return None, "Max retries exceeded"
+
+
+def _message_error(response, label: str) -> str:
+    code = response.status_code
+    logger.warning(f"{label}: HTTP {code}")
+    if code == 401:
+        return "401 Unauthorized"
+    if code == 403:
+        return "403 Missing permissions — the bot needs View Channel, Send Messages and, to delete, Manage Messages"
+    if code == 404:
+        return "404 Channel not found — check the destination channel"
+    return f"HTTP {code}"
+
+
+async def post_channel_message(token: str, channel_id: str, content: str, *, no_mentions: bool = False) -> tuple[str, str]:
+    """Posts a message. Returns (message_id, error_message); the id is empty on failure."""
+    body: dict = {"content": content}
+    if no_mentions:
+        body["allowed_mentions"] = _NO_MENTIONS
+    label = f"post_channel_message {channel_id}"
+    response, error = await _message_request(
+        "POST", f"{DISCORD_API_BASE}/channels/{channel_id}/messages", token, body, label)
+    if error:
+        return "", error
+    if response.status_code in (200, 201):
+        try:
+            return str(response.json()["id"]), ""
+        except (ValueError, KeyError, TypeError):
+            return "", "Discord answered without a message id"
+    return "", _message_error(response, label)
+
+
+async def edit_channel_message(token: str, channel_id: str, message_id: str, content: str,
+                               *, no_mentions: bool = False) -> tuple[bool, str]:
+    """Edits a message the bot posted. A deleted message answers (False, MESSAGE_GONE)."""
+    body: dict = {"content": content}
+    if no_mentions:
+        body["allowed_mentions"] = _NO_MENTIONS
+    label = f"edit_channel_message {channel_id}/{message_id}"
+    response, error = await _message_request(
+        "PATCH", f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}", token, body, label)
+    if error:
+        return False, error
+    if response.status_code == 200:
+        return True, ""
+    if response.status_code == 404:
+        try:
+            if response.json().get("code") == 10008:  # Unknown Message, as opposed to Unknown Channel (10003)
+                return False, MESSAGE_GONE
+        except ValueError:
+            pass
+    return False, _message_error(response, label)
+
+
+async def delete_channel_message(token: str, channel_id: str, message_id: str) -> tuple[bool, str]:
+    """Deletes a message. One that is already gone counts as deleted."""
+    label = f"delete_channel_message {channel_id}/{message_id}"
+    response, error = await _message_request(
+        "DELETE", f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}", token, None, label)
+    if error:
+        return False, error
+    if response.status_code in (200, 204):
+        return True, ""
+    if response.status_code == 404:
+        try:
+            if response.json().get("code") == 10008:
+                return True, ""
+        except ValueError:
+            pass
+    return False, _message_error(response, label)

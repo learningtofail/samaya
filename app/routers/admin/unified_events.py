@@ -88,6 +88,7 @@ def _event_dict(e: Event) -> dict:
         "anchor_date":       str(e.anchor_date),
         "until_date":        str(e.until_date) if e.until_date else None,
         "mention_role":      e.mention_role,
+        "clean_up_reminders": e.clean_up_reminders,
         "active":            e.active,
         "cover_image_data":  e.cover_image_data or None,
         "reminder_minutes":  sorted((r.minutes_before for r in e.reminders), reverse=True),
@@ -120,7 +121,7 @@ def _event_audit_snapshot(e: Event) -> dict:
         "duration_hours": float(e.duration_hours) if e.duration_hours is not None else None,
         "recurrence_kind": e.recurrence_kind, "interval_days": e.interval_days,
         "anchor_date": str(e.anchor_date), "until_date": str(e.until_date) if e.until_date else None,
-        "mention_role": e.mention_role, "active": e.active,
+        "mention_role": e.mention_role, "clean_up_reminders": e.clean_up_reminders, "active": e.active,
         "reminder_minutes": sorted((r.minutes_before for r in e.reminders), reverse=True),
         "reminder_messages": {str(r.minutes_before): r.message for r in e.reminders if r.message},
         "alliance_tenant_ids": sorted(a.tenant_id for a in e.alliances),
@@ -415,7 +416,7 @@ async def apply_event_patch(
 
     if payload.type_id is not None:
         event.type_id = (await _get_type_in_kingdom(db, payload.type_id, owner.kingdom_id)).id
-    for field in ("name", "leadership_only", "active", "message", "location", "mention_role"):
+    for field in ("name", "leadership_only", "active", "message", "location", "mention_role", "clean_up_reminders"):
         value = getattr(payload, field)
         if field in given and value is not None:
             setattr(event, field, value)
@@ -617,6 +618,7 @@ async def create_event(
         anchor_date=anchor,
         until_date=until,
         mention_role=mention_role,
+        clean_up_reminders=bool(payload.clean_up_reminders),
         active=True,
         cover_image_data=cover_image_data,
     )

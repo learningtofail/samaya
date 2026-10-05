@@ -88,6 +88,8 @@ class KingdomPatch(BaseModel):
     enabled_locales: Optional[list[str]] = None
     # Spec §71.5 base theme. Send an explicit null to clear it; omit to keep it.
     default_theme_id: Optional[int] = None
+    # Spec §79.2: the game's number for this Kingdom (138 for K138). Send an explicit null to clear it.
+    game_number: Optional[int] = Field(default=None, ge=1, le=999999)
 
     _validate_color = field_validator("color", mode="before")(parse_clearable_hex_color)
 

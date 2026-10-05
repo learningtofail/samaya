@@ -96,6 +96,7 @@ class EventIn(BaseModel):
     interval_days:    Optional[int] = None
     until_date:       Optional[str] = None
     mention_role:     Optional[bool] = None
+    clean_up_reminders: Optional[bool] = None  # spec §83
     reminder_minutes: Optional[list[int]] = None
     reminder_messages: Optional[dict[int, str]] = None
 
@@ -142,6 +143,7 @@ class EventPatch(BaseModel):
     interval_days:    Optional[int] = None
     until_date:       Optional[str] = None
     mention_role:     Optional[bool] = None
+    clean_up_reminders: Optional[bool] = None  # spec §83
     reminder_minutes: Optional[list[int]] = None
     reminder_messages: Optional[dict[int, str]] = None
     alliances:        Optional[list[EventAllianceIn]] = None

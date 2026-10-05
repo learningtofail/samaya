@@ -2473,9 +2473,9 @@ Decision rule the reviewers propose, which is a judgement and not a fact: procee
 
 | Phase | Delivers | Needs |
 |---|---|---|
-| 0 | Public payload diet: covers served by URL (78.5). Page weight alone justifies it | Migration `a1f0c0de0013`, Caddy line `/event-covers/*` |
+| 0 | Public payload diet: covers served by URL (78.5). Page weight alone justifies it | Migration `a1f0c0de0017`, Caddy line `/event-covers/*` |
 | 1 | Installable app shell: manifest, icons, service worker, offline fallback (78.6). Needs phase 0 | Icons (O1), Caddy lines `/manifest.webmanifest` and `/sw.js` |
-| 2 | Push core: subscribe, follow alliances and the Kingdom, reminders, change pushes, status and fallbacks, the test button (78.7 to 78.12) | The gate, VAPID keys, migration `a1f0c0de0014`, the client IP fix (O9). No Caddy line: `/api/*` is already routed |
+| 2 | Push core: subscribe, follow alliances and the Kingdom, reminders, change pushes, status and fallbacks, the test button (78.7 to 78.12) | The gate, VAPID keys, migration `a1f0c0de0018`, the client IP fix (O9). No Caddy line: `/api/*` is already routed |
 | 3 | Preferences: own lead times, type mutes, per-event follow and mute, pause (78.8, 78.12) | Phase 2 |
 
 Each phase ships and works alone. Rough effort in working sessions: measurement and calendar test about 1, phase 0 about 1 to 1.5, phase 1 about 1, phase 2 about 5 (it now includes change pushes and the status and fallback work), phase 3 about 1 to 2, so about 9 to 10 end to end, or about 8 without phase 0. The owner asked for custom lead times and per-event control, so phase 3 stays in the plan, last.
@@ -2487,7 +2487,7 @@ Each phase ships and works alone. Rough effort in working sessions: measurement 
     curl -s https://ks138.taraka.dev/api/events | wc -c
 
 Fix:
-- Migration `a1f0c0de0013` adds a nullable `events.cover_sha256` (`String(64)`), backfilled from the existing covers. Event create, patch and the split set it whenever the cover changes.
+- Migration `a1f0c0de0017` adds a nullable `events.cover_sha256` (`String(64)`), backfilled from the existing covers. Event create, patch and the split set it whenever the cover changes.
 - New public route `GET /event-covers/{event_id}.jpg?v={first 12 characters of the sha}` decodes the stored data URI. It answers 404 for an inactive or leadership-only event, using the same predicate as the public query (78.9), so a leadership-only cover is never public. `Cache-Control: public, max-age=86400` and an `ETag`.
 - Public rows carry `cover_url` (null without a cover) in place of `cover_image_data`. `events-public.js` reads `cover_url` where it now reads `cover_image_data` for the Discord preview (about line 776). Admin responses keep the data URI, so the admin form is unchanged.
 - Caddy needs `reverse_proxy /event-covers/* 127.0.0.1:8000`. `/api/events` is already routed.
@@ -2529,7 +2529,7 @@ A worker's `fetch(event.request)` carries cookies like any same-origin request, 
 
 Installed scope is `/`, so the admin console also opens inside the app window when a coordinator follows a link. This is acceptable and recorded as an open point (O7).
 
-### 78.7 Data model (migration `a1f0c0de0014`)
+### 78.7 Data model (migration `a1f0c0de0018`)
 
 Additive. The downgrade drops the three tables and the column, which loses subscriptions (players resubscribe). Models go in `models/db.py`, so `alembic check` sees them. Guarded creation as in the earlier revisions, verified on Postgres 16 with upgrade, `alembic check`, downgrade and re-upgrade. Every datetime read goes through `ensure_utc`. JSON columns are declared `JSON(none_as_null=True)`, so Python `None` is SQL NULL and the CHECKs below mean what they say.
 
@@ -2740,7 +2740,7 @@ A new classic script `static/push.js` (one IIFE, no globals, pure section export
 - `tests/test_push_security.py`: endpoint allowlist cases (IP literal, userinfo, backslash, trailing dot, uppercase, port, lookalike suffix, `http`, non-ASCII), payload size under 1,536 bytes for a 120 character name with multibyte text, no endpoint or key in any app log line or admin response, nothing but `series_id` added to the public payload, a client-sent forwarded header not changing the limiter key.
 - `tests/test_push_changes.py`: the 78.9a rules (move threshold, date crossing, move back to the original, coalescing two edits into one, 48 hour scope, one push per series after a whole-event time edit, cancel only after a reminder or inside 24 hours, restore sends nothing, paused subscribers, at-most-once with `kind` and `token`).
 - `tests/test_push_jobs.py`: `register_push_jobs` adds nothing when disabled and both jobs when enabled.
-- `tests/test_migration_0013.py` and `test_migration_0014.py`: upgrade, `alembic check`, downgrade, re-upgrade on Postgres 16 (opt-in, like the 0004 and 0005 tests), plus the backfill of `cover_sha256`.
+- `tests/test_migration_0017.py` and `test_migration_0018.py`: upgrade, `alembic check`, downgrade, re-upgrade on Postgres 16 (opt-in, like the 0004 and 0005 tests), plus the backfill of `cover_sha256`.
 - vitest: `push.js` pure functions (status line states, in-app browser and iPhone detection, expected-volume line, preference diffing, offset validation, page-load reconciliation), the body text with a time zone and Western digits in all eight locales, `sw.js` notification builder over all eight locales including "now" at the start, a late delivery and the English fallback, and the fetch-handler routing table.
 - **Players' acceptance checklist, by hand before release:** (1) Chrome Android with TalkBack: open the panel, turn on, change an option, hear "Saved", close and see focus return to the header button. (2) iPhone with VoiceOver from the Home Screen, and the same page in a Safari tab, where install steps and fallbacks must appear and nothing is silently missing. (3) Keyboard only on desktop: every control reachable, the focus trap works, Escape closes, the bell menu closes on Escape. (4) 200 percent zoom and 320 px width, no horizontal scroll and no clipped panel. (5) Arabic: the panel mirrors, a Latin event name reads in the right order, digits are Western. (6) Block the permission, reload: a clear status and steps. (7) Open the page from Discord's in-app browser on Android and on iOS: a clear message, not a missing button; record what works. (8) A Xiaomi or Samsung phone on default battery settings with the screen off: a test push scheduled 5 minutes ahead; record the delay. (9) iOS Focus on: record what the player sees. (10) Clear site data and reopen: the panel says it is starting fresh and the old row does not stay as a duplicate. (11) Slow 3G in DevTools: the installed app shows the schedule within a few seconds and covers load later; `/api/events` stays under about 200 KB gzipped for a typical Kingdom (a CI check after phase 0). (12) Unsubscribe and confirm the server row is gone and nothing more is sent.
 - **Device matrix, by hand before release:** Android Chrome in a tab and installed, iOS 16.4 or later from the Home Screen, desktop Chrome, desktop Firefox, desktop Safari. For each: subscribe, test push, a scheduled push five minutes ahead, click opens the right page, unsubscribe, permission denied path, and an offline load. Also record each browser's real endpoint host for the allowlist.
@@ -2782,7 +2782,7 @@ The first draft was reviewed 2026-10-04 by two independent reviewers with no sta
 | `public_rows` every minute loads every event with its cover and runs about six queries | Confirmed. A push-specific query sharing one predicate (78.9) |
 | `format(0, 'minute')` is "this minute", not "now" | Confirmed by running Node on eight locales. Use `format(0, 'second')` (78.10) |
 | Per-IP rate limiting is bypassable or collapses to one bucket; the limiter never evicts | Plausible, unverified here. Fix, check and eviction specified (78.11, O9). Also affects the ticket board |
-| Phase 0 needs a column and migration, and `events-public.js` reads the cover | Confirmed. `events.cover_sha256`, `a1f0c0de0013`, route and JS change (78.5) |
+| Phase 0 needs a column and migration, and `events-public.js` reads the cover | Confirmed. `events.cover_sha256`, `a1f0c0de0017`, route and JS change (78.5) |
 | `/api/push/*` needs no Caddy line; phase 1 needs two lines, not three | Confirmed against the README route list (78.4, 78.6) |
 | `/sw.js` may be edge cached by Cloudflare | Plausible. `cf-cache-status` check and bypass rule (78.6) |
 | Upsert on POST lets anyone with an endpoint overwrite its keys | Accepted. 200 only with the matching `auth`, else 409 (78.11). The 409 reveals existence only to someone who already holds the endpoint, which is itself the secret |
@@ -2880,3 +2880,330 @@ Recorded 2026-10-04 so the reasoning behind the decisions is not lost.
 | What does the owner need to do next? | Answer O10 to O13 in 78.17, run the three checks (the Caddy forwarded-header grep in 78.11, the `/api/events` size in 78.5, and the events-without-reminders query in 78.19), and decide whether to run the measurement plan in 78.19 |
 
 Open and unverified, collected from the whole section: Safari's behaviour on a push with no visible notification; the real push hostnames of Edge and Samsung Internet; the maintenance state of `http-ece` and `py-vapid`; the Topic length rule against the RFC text; how Google Calendar and Outlook treat `VALARM` in a subscribed feed; whether install, service workers and push work in Discord's in-app browser; how Caddy and Cloudflare handle the forwarded headers; whether the restic backup includes `.env`; Cloudflare's analytics fields; and the Kingshot player facts the reviewers took from third-party guides.
+
+## 79. Gift code redemption
+
+Status: proposed, design only, nothing built. Depends on nothing in §78. Reference implementation studied: `github.com/justncodes/ks-giftcode` v2.0.0 (2026-07-25, GPLv3, one Python file). The protocol facts below come from that script and from nothing else. They are unverified against the live API and must be checked with one real redemption before any build is trusted.
+
+### 79.1 Goal, non-goals and a scope warning
+
+A coordinator pastes a gift code, and Samaya redeems it for every player on their alliance's roster, then shows who got it, who already had it, and whose kingdom number is wrong. The reason to do it inside Samaya is that alliances, access control, the admin console and the audit log already exist.
+
+Not in this section: finding codes automatically, player nicknames (the API no longer returns them), a public page, player self-registration, Discord result posts, and any tracking beyond redemption outcomes.
+
+Scope. Resolved 2026-10-05: the owner confirmed Samaya is heading toward a full alliance management suite, which supersedes the 2026-10-01 note that player tracking is not to be designed yet. A list of player IDs is the first per-player data Samaya holds, so §80 defines it once as a shared player registry and §79 builds on it. Alternative A in 79.12 stays as the zero-code fallback.
+
+### 79.2 Decisions
+
+| # | Decision |
+|---|---|
+| 1 | The roster is the player registry of §80.3: a player has an ID, an optional kingdom override and a current alliance. Redemption reads it and never writes to it except through the bulk add in 79.6. |
+| 2 | The game kingdom number lives on the Kingdom (`kingdoms.game_number`, nullable). A roster entry's `kid` overrides it for transferred players. Redemption without a resolvable kingdom is refused before any request. |
+| 3 | A run is one code for the alliances the user picks. Results are one row per distinct player ID, so a player on two rosters is redeemed once. |
+| 4 | A run is resumable. State is in the database, a tick job advances it, and a restart loses nothing. Redemption is idempotent on the game's side (`RECEIVED`), so a row left `in_flight` by a crash is simply retried. |
+| 5 | One run advances at a time. At least 1 second plus up to 0.5 seconds of jitter between requests, because the API limits per player and the reference script uses that pace. |
+| 6 | An honest client. A fixed `User-Agent` of `Samaya/{version} (+https://ks138.taraka.dev)` and no header rotation. The reference script rotates browser, version and platform headers "to avoid bot detection". Samaya does not copy that. If the server blocks the client, the run stops and says so, and nobody works around it. This may get blocked sooner than the reference script (O3). |
+| 7 | The signing key and base URL are configuration (`KS_GIFTCODE_SIGN_KEY`, `KS_GIFTCODE_BASE_URL`), never committed. The key was extracted from the game's web client, can change without notice, and has already differed between the owner's earlier bot and this script. Feature off when the key is unset. |
+| 8 | Drift is detected, not guessed. Three players in a row answering `SIGN ERROR`, `NOT LOGIN` or an unknown message stops the run as `api_changed`. |
+| 9 | Player IDs never appear in any public payload, ICS feed or Discord message. Every roster change and run start is audited. |
+| 10 | Redemption is a game-account action taken on behalf of players who put their ID on a list. The coordinator is responsible for having their members' agreement. Samaya does not verify ownership of an ID, and cannot, since the API returns no nickname. |
+| 11 | Clean reimplementation, not a copy. The protocol is about 60 lines (79.5). The reference repo is credited in the module docstring. GPLv3 would attach to copied code only if Samaya were distributed, which it is not, but a rewrite avoids the question. Not legal advice. |
+
+### 79.3 Data model (one Alembic revision, additive, downgrade drops the tables and column)
+
+Built as `a1f0c0de0013`. §78's reservations moved to `0017` and `0018`, because §81 to §83 take `0014` to `0016`. Models go in `models/db.py` so `alembic check` sees them.
+
+`kingdoms.game_number` Integer, nullable.
+
+`players`: defined in §80.3 and created by the same revision. Redemption rows reference it with `player_id` (FK, `CASCADE`) next to `fid`, so a deleted player takes their results with them. Delete children explicitly in application code as well, because the test SQLite has foreign keys off.
+
+`redemption_runs`: `id`, `code` Text, `status` (`queued`, `running`, `done`, `stopped`, `cancelled`), `stop_reason` Text nullable (`code_expired`, `code_invalid`, `claim_limit`, `api_changed`, `unreachable`, `cancelled`), `created_by`, `created_at`, `started_at`, `finished_at`.
+
+`redemption_results`: `id`, `run_id` (FK, `CASCADE`), `tenant_id` (the first alliance that listed the player), `fid`, `kid`, `status` (`pending`, `in_flight`, `cooling`, then the final classified key), `message`, `attempts`, `cooldowns`, `next_attempt_at`, `updated_at`. Unique on `(run_id, fid)`.
+
+Retention: results and runs older than 90 days are deleted by the daily generation job. Deleting a Tenant cascades its roster.
+
+### 79.4 Outcomes the client must classify
+
+From the reference script. The `err_code` is checked together with the message.
+
+| `msg` | `err_code` | Meaning | Action |
+|---|---|---|---|
+| `SUCCESS`, `SAME TYPE EXCHANGE` | none, 40011 | Redeemed | final, counts as success |
+| `RECEIVED` | 40008 | Already redeemed | final, harmless |
+| `TIME ERROR` | 40007 | Code expired | stop the whole run |
+| `CDK NOT FOUND` | 40014 | Wrong code | stop the whole run |
+| `USED` | 40005 | Claim limit reached | stop the whole run |
+| `TOO FREQUENT` | 40019 | Per-player limit | park that player 60 seconds, at most 3 times |
+| `TIMEOUT RETRY` | 40004 | Server asks for a retry | retry up to 3 times with growing delay |
+| `USER INFO ERROR` | 40020 | Wrong kingdom for this ID | final, listed for the coordinator to fix |
+| not exist | 40001 | No such player | final |
+| `STOVE_LV ERROR`, `RECHARGE_MONEY ERROR`, `RECHARGE_MONEY_VIP ERROR` | 40006, 40017, 40018 | Player does not meet the code's requirement | final |
+| anything else | any | Unknown | final as an error, counts toward drift (decision 8) |
+
+Transport failures (HTTP 429, 502, 503, 504, timeout) retry 3 times with growing delay. Ten players in a row unreachable stops the run as `unreachable`.
+
+### 79.5 Module layout
+
+`services/giftcode_client.py`: `sign(payload, key)` is the lowercase hex MD5 of the keys sorted alphabetically and joined as `k=v&k=v`, followed by the key, and the signed request is form-encoded `fid`, `cdk`, `kid`, `time` (Unix seconds) plus `sign`, POSTed to `{base}/api/gift_code`. `classify(response_json)` is pure. `GiftcodeClient` takes an injected `httpx.AsyncClient` (`follow_redirects=False`, `trust_env=False`, 10 second connect and 30 second read timeouts) so tests use a fake transport and CI never touches the network.
+
+`services/giftcode_engine.py`: `create_run`, `run_tick(session_factory, client, now)` (claim by update before the call, commit, then call, process until a 50 second deadline, yield), `recover_stale_claims` (`in_flight` older than 5 minutes returns to `pending`), `cancel_run`. Registered in `scheduler/` as `giftcode_tick_job`, every minute, `max_instances=1`, only when the feature is configured.
+
+`routers/admin/giftcodes.py` and `schemas`: roster and runs (79.6). Wired into `admin/__init__.py`.
+
+### 79.6 API (all under `/admin/api`, tenant by `X-Tenant-Slug` as elsewhere)
+
+| Route | Who | Behaviour |
+|---|---|---|
+| `GET /roster` | not viewer | The alliance's entries |
+| `POST /roster` | not viewer | Bulk add from pasted text. A line is `fid` or `fid,kid`, `#` comments ignored, a two-number row is `fid,kid` when the second is 6 digits or fewer (the reference rule). Returns added, duplicates and rejected lines. Cap 500 entries per alliance |
+| `DELETE /roster/{id}` | not viewer | Remove one |
+| `POST /giftcode-runs` | not viewer | Body: `code` (trimmed, 3 to 40 characters, letters and digits), `tenant_ids` the user can access. Refuses while another run is active (409), when the feature is off (503), or when a roster has no kingdom (422 naming the players). Players already `SUCCESS` or `RECEIVED` for the same code in an earlier run are marked `RECEIVED` without a request |
+| `GET /giftcode-runs`, `GET /giftcode-runs/{id}` | not viewer | Progress, counts per status, wrong-kingdom list |
+| `POST /giftcode-runs/{id}/cancel` | not viewer | Remaining rows become `cancelled`, the run `cancelled` |
+
+Audit rows: roster add and remove (counts, never the IDs in the log message), run start and cancel.
+
+### 79.7 Admin UI
+
+One new tab, "Gift codes", in the existing no-build console: a roster card (paste box, table with delete, count), a Redeem card (code field, alliance checkboxes, Start), and a run list that polls every 3 seconds while a run is active and every 30 otherwise. A finished run shows five numbers (redeemed, already had it, wrong kingdom, requirement not met, other) and a wrong-kingdom list with each ID and the kingdom that was rejected. The tab ends in the collapsed `about-page` explainer. BEM classes, no inline styles or handlers, `classList` for hiding, `focusModal()` for any dialog. Strings in English only, like the rest of the console.
+
+### 79.8 Security and privacy
+
+Payloads are built from validated digits and a validated code, never concatenated from free text. The code is not secret, so it is stored and shown. Responses never echo the signing key. Log lines carry run id and counts, not player IDs. The roster API is the only place IDs are returned, and only to users with access to that alliance. A test asserts that no `fid` reaches `/api/events`, `/events.ics` or any other public route.
+
+### 79.9 Tests
+
+Signature against a vector computed from the formula in a test, so a change to the algorithm is deliberate. Classifier table above, one case per row. Engine with a fake client: success, already redeemed, cooldown then success, three cooldowns then give up, fatal status stops the rest, drift stop, unreachable stop, crash recovery (`in_flight` returns to `pending`), cross-alliance dedupe, earlier-run skip, deadline yield and resume. API: permissions with `make_user_and_client`, viewer 403, another alliance's roster 403, bulk parse edge cases, 409 and 503 paths, audit rows. Public leakage test (79.8). Migration: `alembic upgrade head`, `alembic check`, downgrade.
+
+### 79.10 Effort
+
+About 3 sessions: models, migration, client and classifier with tests; engine, scheduler job and API with tests; UI, explainer, `CLAUDE.md` and Part I updates. The live check (one real redemption with the owner's own ID and a real code) is a manual acceptance step and cannot be automated.
+
+### 79.11 Operations
+
+Env vars in `.env`: `KS_GIFTCODE_SIGN_KEY` and optionally `KS_GIFTCODE_BASE_URL` (default `https://kingshot-giftcode.centurygame.com`). Add both to `.env.example` without values. Back up `.env` with the rest of the host config. Production already has outbound HTTPS. The egress IP is the host's, so a burst that earns a rate limit affects only this feature. Deploy order: pull, build, `alembic upgrade head`, set the key, restart. Rollback: unset the key (feature off, tables stay), or `alembic downgrade` to the previous head. If redemption starts failing, check `stop_reason` first: `api_changed` means the reference repo's changelog is the place to look.
+
+### 79.12 Alternatives
+
+A. A sidecar container running the reference script from a mounted CSV, started by hand or by cron. No Samaya changes, no roster inside Samaya, no UI, GPLv3 code kept in its own container. Effort under 1 hour.
+B. The owner's earlier Discord bot or the community `kingshot-project/Kingshot-Discord-Bot` (named in the reference README). Players register themselves in Discord. Not evaluated here.
+C. This section.
+
+### 79.13 Open questions
+
+O1. Closed 2026-10-05: in scope, as part of §80.
+O2. Roster owner: alliance coordinators paste IDs (this design), or players self-register later. Self-registration needs a way to stop one person listing another's ID (80.3).
+O3. Accept the honest client (decision 6) and the higher risk of being blocked?
+O4. Should Century Games' terms be read before building? Not reviewed here, and automating redemptions for other people's accounts is the kind of thing a game's terms may restrict.
+O5. Should a run post a summary to a Discord channel when it ends? Deferred, as are button interactions.
+
+### 79.14 As built (2026-10-05)
+
+Built with the player registry of §80.3 as Alembic `a1f0c0de0013` (verified on Postgres 16: upgrade, `alembic check`, downgrade, re-upgrade). Where the build differs from the design above:
+
+- `players.tenant_id` is `CASCADE`, so removing an alliance removes its roster. `players` is unique per Kingdom on `(kingdom_id, fid)`, so a player cannot be listed by two alliances. There is no cross-alliance dedupe step.
+- The `fid` CHECK only requires a non-empty value. The 5 to 20 digit rule lives in `services/player_import.py`.
+- `redemption_results.player_id` is a `CASCADE` foreign key, as designed. `redemption_results.tenant_id` is the player's alliance at run creation.
+- Added stop reason `blocked`: the API answered 401 or 403, which ends the run like `unreachable` but is reported differently.
+- Added env var for the user agent next to `KS_GIFTCODE_SIGN_KEY` and `KS_GIFTCODE_BASE_URL`; see `.env.example`. The feature stays off, with a 503 from the API, until the sign key is set. The key is never committed.
+- Verified end to end against a local fake game server (success, already received, wrong kingdom, signing). The real game API is unverified: only a redemption of the owner's own account with a live code can confirm it. O3 and O4 stay open.
+
+## 80. Alliance management roadmap
+
+Status: proposed, design only, nothing built. Direction confirmed by the owner on 2026-10-05: Samaya is heading toward a full alliance management suite, and every feature is Samaya's own implementation. Inputs: a read-only review of `kingshot-project/Kingshot-Discord-Bot` (custom license, discord.py, SQLite, about 72,000 lines, last commit 2026-10-04) by three readers, then a spot check by me. Nothing is copied. The bot is evidence of what leaders ask for and of what goes wrong, not a source of code. Findings about the bot are from reading code and have not been run.
+
+### 80.1 What the review established
+
+| Finding | Consequence for Samaya |
+|---|---|
+| The game's player lookup endpoint is gone. The bot's `/w` now reads only its own database, and the `ks-giftcode` changelog says the same. | Names, furnace level and power cannot be fetched. They are typed, imported or read from screenshots. Samaya stores a typed name at most. |
+| Nothing verifies who owns a player ID. In the bot anyone can register any ID, first come first served. | Samaya cannot verify either. Leaders write the registry. Self-registration is a later, approval-gated feature (80.3). |
+| The bot's `/w` answers publicly for any ID in the database and its autocomplete lists every nickname and ID. Alliance-scoped admins are not scoped everywhere. | Samaya has no unauthenticated player lookup and scopes every player read to an alliance the user can access. |
+| Its reminder loop skips a reminder that was due during an outage and rolls the schedule forward. | Samaya's engine already treats this deliberately (never late, never stale, §66.4). Keep that. |
+| Its minister booking is admin-only, has no reminders and no database uniqueness on a slot. | Samaya adds a unique constraint and uses its own reminder engine. |
+| Bear damage records only players who dealt damage, so it cannot report who skipped. | With a roster, Samaya can report absentees. That is a real advantage. |
+| OCR carries unverified patterns (parts still say "Whiteout"), fuzzy matching that can credit the wrong player, and an optional third-party OCR service that receives screenshots. | No OCR in this roadmap. Pasted lists first (80.5). |
+| It stores backup passwords in plaintext, sends a shared API key over plain HTTP and probes the game server to guess kingdoms. | Not adopted. Samaya's secrets stay in `.env`. No probing. |
+
+### 80.2 Principles for every player-facing feature
+
+1. One shared registry (80.3). No feature keeps its own list of players.
+2. Player data is written and read by authenticated leaders only, scoped to alliances they can access. Kingdom coordinators see all alliances. Viewers read, never write.
+3. No player ID, name or per-player statistic appears in any public payload, ICS feed, push payload or Discord message unless a leader explicitly posts a report. A test asserts the first part for every new public route.
+4. No public shaming surfaces. Absence and damage rankings are leadership views. A leader may post a summary, which is their decision.
+5. Every bulk write and every export is audited with counts, never with the IDs in the log message.
+6. Retention is stated per table and enforced by the daily job. Removing a player removes their rows everywhere.
+7. Each feature is off until configured, and none changes the behavior of the event engine.
+8. Samaya states in the console that it does not verify ID ownership and that leaders attest their members agreed to be listed.
+
+### 80.3 The player registry
+
+One new table, created by the first revision that needs it (§79's).
+
+`players`: `id`, `kingdom_id` (FK to kingdoms, `CASCADE`), `fid` String(20) with a digits-only CHECK, `kid` Integer nullable (overrides the Kingdom's `game_number` for a transferred player), `tenant_id` (FK to tenants, `SET NULL`, the current alliance), `name` String(60) nullable (typed, optional), `note` String(40) nullable, `created_by` (FK to users, `SET NULL`), `created_at`, `updated_at`. Unique on `(kingdom_id, fid)`. A player is in at most one alliance at a time. Moving a player is a write with an audit row.
+
+Not stored: a Discord ID. Linking a player to a Discord account is what makes DMs and personal pings possible, and it is also what makes the table dangerous. It is deferred to its own decision (O3) and will need an approval step because the game gives no way to prove ownership.
+
+API: list, bulk add (pasted `fid` or `fid,kid[,name]` lines, cap 500 per alliance per request), edit, move, delete, CSV export (audited, `fid,kid,name,alliance`). Admin UI: a "Players" tab, the home of the roster that §79 describes. Import accepts the bot's CSV shape so an alliance can bring its list across.
+
+### 80.4 Features, ranked by value over effort
+
+Effort is a guess in sessions (inference), counting tests and the admin UI.
+
+| # | Feature | Source of the idea | What it is in Samaya | Effort |
+|---|---|---|---|---|
+| 1 | Player registry and gift code redemption | Most prominent feature in the bot, both readers agree | §79 on top of 80.3 | 3 to 3.5 |
+| 2 | Pause failing destinations | The bot's quarantine. Your own 403 "bot needs Send Messages" failures on 2026-10-04 | After N consecutive permission failures (403 on a channel) a destination is paused, shown in the delivery health card with the reason, and resumed by a button or automatically when a probe succeeds. Never silent: the coordinator is told in the console. Needs a decision on who is notified (O4) | 1 |
+| 3 | Schedule board | The bot's pinned live boards, rated among the most valued | One message per chosen channel that Samaya edits in place: next 7 days by day, refreshed daily and when an event changes. Reuses `public_rows`. Needs the message id stored per destination and edit-or-recreate handling when someone deletes it. Timezone shown as UTC with a relative time per line (no per-viewer timezone) | 2 |
+| 4 | Self-cleaning reminders | The bot deletes earlier reminders when later ones go out | Optional per event: after a later reminder posts, or after the event ends, delete the earlier Discord messages. Needs Manage Messages and the stored message ids. Failure to delete is logged and never blocks sending | 1 |
+| 5 | Minister appointment slots | The bot's Construction, Research and Training day slots | See 80.5. Leader-booked in v1, a public read-only slot table, reminders through the existing engine | 2 to 3 |
+| 6 | Bear hunt damage | The bot's most developed tracker | See 80.5. Pasted `fid,damage` per hunt, leaderboards, trend per player, and the absentee list the bot cannot produce | 2 |
+| 7 | Attendance | The bot's attendance sessions | Manual checklist per event occurrence (present, absent, excused, walk-in), per-player history for leaders. A no-show ranking stays a leadership view (principle 4) | 2 |
+| 8 | Kingshot event presets | The bot ships a library of the game's events | A seed list of event types (name, color, default duration, default reminders) a coordinator can import. Durations and cycles are game facts that must be checked in game before they ship (inference: the bot's own comments flag some as unverified) | 0.5 |
+| 9 | First-run checklist | The bot's setup wizard | A dismissible checklist in the console: Kingdom, alliance, server, destination, first event. No wizard flow | 0.5 |
+
+Roughly 14 to 16 sessions for everything. The sensible stopping points are after 1 and after 4.
+
+### 80.5 Designs for the two data features
+
+Minister slots. The game mechanic as the bot models it: three appointment types, each a 24 hour grid in 30 minute slots (a 15 minute variant exists), one holder per slot and one slot per player per type. Verify the mechanic in game before building. Data: `appointment_slots` with `kingdom_id`, `kind`, `day` (date), `slot_start` (UTC), `player_id`; unique on `(kingdom_id, kind, day, slot_start)` and on `(kingdom_id, kind, day, player_id)`, enforced by the database. Kingdom coordinators book. The public page shows a read-only table of slots with open ones marked, never a player ID, with the player's typed name only if the leader enabled "show names". A slot reminder is a delivery to the Kingdom's appointment destination, sent at a lead time before the slot, naming the slot and, only if a leader chose it, the typed name. No DMs and no mentions until O3 is decided.
+
+Bear damage. A hunt is `(kingdom_id, tenant_id, date, trap, rallies, total_damage)` and its rows are `(hunt_id, player_id, damage)`. A leader pastes `fid,damage` lines after a hunt. Reports: top players, a player's damage over time and change against their previous hunt on the same trap, alliance total over time, and members on the roster with no row (absent or zero). Everything stays behind the console. Retention 12 months. No screenshots are accepted or stored.
+
+### 80.6 Not on the roadmap
+
+OCR of any kind, the kingdom probe and scan, a public player lookup, the shared gift code distribution service, theme galleries (Samaya has §71), backups by DM, self-updating, a button-driven menu bot, and anything that stores a screenshot. Backup stays `ops/backup.sh` plus restic.
+
+### 80.7 Sequencing and cross-cutting work
+
+Order: 1, 2, 3, 4, then 5 to 7 in the order the alliance actually asks for them. Items 2 to 4 touch the delivery engine and need its tests extended (at-most-once, the stale rules). Items 1, 5, 6 and 7 add a permission surface and each gets the same tests: viewer 403, other alliance 403, nothing in public routes, audit rows written. Alembic revisions are numbered at build time after whatever has merged, and §78's reservations now sit at `0017` and `0018`. Each feature gets its own spec section before it is built, as this one has for gift codes.
+
+### 80.8 Open questions
+
+O1. The owner's order of interest after item 1, and whether 2 to 4 should come before 5 to 7.
+O2. Whether alliance coordinators or only Kingdom coordinators book minister slots.
+O3. Linking a player to a Discord account, for DMs and pings: wanted at all, and with what approval step.
+O4. Who is told when a destination is paused: the console only, the alliance owner by DM, or a channel post.
+O5. Retention: the 90 days for redemption results and 12 months for bear data are proposals.
+O6. Whether to read Century Games' terms before item 1 (79.13 O4).
+
+## 81. Pausing failing destinations
+
+Status: built with this section (alliance management roadmap item 2, §80.4).
+
+### 81.1 Problem
+
+A destination whose channel was deleted, or whose permissions the bot lost, fails every reminder with a 403 or 404. Each failure is an error row the leader has to notice, and every one still costs a Discord call. After a few, Samaya should stop trying, say so where leaders already look, and start again only when someone says the cause is fixed.
+
+### 81.2 Decisions
+
+1. The unit is the **Audience destination** (server, channel, optional role), the same unit that posts. One destination pausing never affects another.
+2. Only a reminder send counts. An error whose text starts with `403` (missing permission) or `404` (channel not found) is an access failure. Network errors, 429, 5xx and 400 are not, because they say nothing about the destination. Discord Scheduled Event calls are guild-level (Manage Events) and are out of scope.
+3. After **3 consecutive** access failures the destination is paused. Any successful send resets the count to 0. Only the representative delivery of a merged send is counted, so one channel is one failure, not one per alliance.
+4. A paused destination is never called. Its due deliveries end as `error` with the detail `Paused: <reason>`, so the delivery log shows every skipped reminder (never silent) and **Retry** works once the destination is resumed. These skips do not count as failures.
+5. Resume is explicit: `POST /api/audience-destinations/{id}/resume`, by Kingdom coordinators (the people who may edit the Audience). It clears `paused_at`, `pause_reason` and the count, and writes an audit row. Changing a destination's server, channel or role creates a new row (§68), so a fixed channel starts clean.
+6. Where it shows: the delivery health card lists each paused destination (audience, server, channel, reason, since when, a Resume button) and the card's state becomes "Needs attention". The Audience editor in Setup marks the destination as paused. No Discord message and no email in this version (assumption for O1).
+
+### 81.3 Data (Alembic `a1f0c0de0014`, additive, downgrade drops the columns)
+
+`audience_destinations.consecutive_failures` Integer not null, default 0. `paused_at` timestamptz null. `pause_reason` Text null.
+
+### 81.4 Engine
+
+`_send_reminder` returns an `error` with the `Paused:` detail before any Discord call when `paused_at` is set. After the delivery is finished, `process_delivery` calls `record_destination_outcome` in its own session: `posted` resets the count; an access-failure error increments it and pauses at the threshold (`PAUSE_AFTER_FAILURES = 3`); every other outcome leaves it alone. The claim-before-call rule is unchanged.
+
+### 81.5 API
+
+`GET /api/delivery-health` adds `paused_destinations` (scoped to the Kingdoms of the selected alliances) and `healthy` is false while any exists. Audience destinations in `/api/audiences` carry `paused_at` and `pause_reason`. Resume: 404 for another Kingdom's destination, 403 for non-coordinators and viewers, a no-op 200 when not paused.
+
+### 81.6 Tests
+
+Threshold, reset on success, non-access errors ignored, merged send counts once, paused skip makes no Discord call and is not counted, resume then retry posts, permissions (viewer, other Kingdom), audit row, health payload, no change to public routes.
+
+### 81.7 Open questions
+
+O1. Notify somewhere other than the console (a message to a leadership channel, or an email)? Not in this version.
+O2. Is 3 the right threshold? It is one constant.
+
+## 82. Schedule board
+
+Status: built with this section (alliance management roadmap item 3, §80.4).
+
+### 82.1 Goal
+
+One Discord message per chosen channel that always shows the next 7 days, edited in place so the channel does not fill with reminders to scroll through. It reads the same public rows as the website, so a leadership-only event is never on a board.
+
+### 82.2 Decisions
+
+1. A board belongs to an **Audience destination** (server, channel). Setting: `board_scope` = off (null), `kingdom` (every public event of the Kingdom, one line per occurrence with the alliances that take part) or `alliance` (that alliance's own schedule, as on its page). Set in the Audience editor by Kingdom coordinators.
+2. Content: a title line, then days (UTC, today through today plus 6) each with lines `HH:MM UTC` and name and a Discord relative time (`<t:unix:R>`), cancelled occurrences struck through. Past lines of the current day stay until midnight UTC. If the text would pass about 1900 characters it ends with "and N more" and the website is the full list. No per-viewer time zones: the relative time is the viewer-local part.
+3. Names are escaped for Discord Markdown and the message is sent with `allowed_mentions: {parse: []}`, so an event name can never ping anyone.
+4. Refresh: every minute the engine renders each enabled board and compares a hash of the text with the stored one. Same hash: nothing is sent. Different (an event changed, or midnight UTC passed): the message is edited. So event changes and the daily roll both refresh within about a minute without hooks in the event code. A manual **Refresh now** forces a render.
+5. Message id stored per destination. First time, or after the message was deleted in Discord (edit answers "Unknown Message"): post a new message and store its id. Turning the board off deletes the message (404 counts as done) and clears the id. Removing a destination row does not call Discord, so turn the board off first; the form says so.
+6. Failures never touch reminders. A board error is stored (`board_error`), shown on the destination in Setup, and cleared by the next success. After an error the board is retried every 10 minutes (a manual Refresh now ignores that wait). Boards on a paused destination (§81) are skipped. At most 20 boards per tick.
+7. Posting is claim-free: the id is committed right after Discord answers. A crash between the two could post a second message; the old one is then deleted by hand. Single worker only, as everywhere.
+8. Not built: a board of leadership-only events, a per-alliance title or colour, pinning (needs another permission), a board in more than one language.
+
+### 82.3 Data (Alembic `a1f0c0de0015`, additive, downgrade drops the columns)
+
+`audience_destinations`: `board_scope` Text null (CHECK null or `kingdom` or `alliance`), `board_tenant_id` Integer null (FK `tenants`, `SET NULL`; `alliance` with a null tenant means the alliance was removed and shows as an error), `board_message_id` Text null, `board_hash` String(64) null, `board_refreshed_at` timestamptz null, `board_error` Text null.
+
+### 82.4 Discord
+
+Three new client calls: `post_channel_message` (returns the message id), `edit_channel_message` (an Unknown Message answer is reported as `MESSAGE_GONE`), `delete_channel_message`. `FakeDiscord` gets the same three.
+
+### 82.5 API
+
+`DestinationIn` takes `board_scope` and `board_tenant_id` (alliance must be in the Kingdom; `kingdom` takes no alliance). Destinations in `/api/audiences` return the scope, tenant, `board_refreshed_at` and `board_error`. `POST /api/audience-destinations/{id}/board/refresh` (coordinators) renders now and returns the destination. Both writes are audited.
+
+### 82.6 Tests
+
+Render (days, UTC, cancelled, truncation, escaping, empty, leadership-only absent), hash skip, edit on change, recreate when the message is gone, off deletes, failure isolation from reminders, paused skip, permissions, API validation, audit.
+
+### 82.7 Open questions
+
+O1. Pin the board message? Needs Manage Messages; not in this version.
+O2. Should a board offer a language other than English? Not yet.
+
+## 83. Self-cleaning reminders
+
+Status: built with this section (alliance management roadmap item 4, §80.4).
+
+### 83.1 Goal
+
+A channel that gets "Bear Hunt in 60 minutes", "in 15 minutes" and "now" ends up with three messages saying the same thing. With this option on, only the newest reminder of an occurrence stays, and none stay once the event is over.
+
+### 83.2 Decisions
+
+1. Per event: `events.clean_up_reminders`, default off. One checkbox in the event form. It is copied by the "this and following" split and never inherited from the event type.
+2. Samaya stores the Discord message id of every reminder it posts, whether or not the option is on (`deliveries.discord_message_id`, already in the schema and now filled), so turning the option on later works for reminders that are already up.
+3. Two rules, per occurrence and per channel (a merged send is one message, §67.3):
+   a. When a later reminder (fewer minutes before the start) has posted, every earlier posted reminder in that channel is deleted.
+   b. When the occurrence has ended (its end, or its start when it has no duration), every remaining reminder is deleted.
+   A cancelled occurrence keeps its reminders until rule b; a cancellation notice is the leader's to post.
+4. Deletion never blocks sending. It runs after the delivery pass in the same tick, inside its own try block. Success sets `message_deleted_at`. A message that is already gone (Unknown Message) counts as deleted. An access failure (403, 404 channel) is stored in `cleanup_error`, shown in the delivery log, and not retried. Any other failure (network, 429, 5xx) is logged and retried on the next tick, for at most 24 hours after the occurrence ended.
+5. Permission: to my knowledge a bot may delete its own messages without Manage Messages. That is Discord's documented behaviour but not verified against a live server in this build, so the form says "needs no extra permission" only as a note to check on first use. Nothing here deletes a message Samaya did not post (a manual or unknown message id is never stored).
+6. The Discord Scheduled Event is not a reminder and is untouched. Schedule boards (§82) are not reminders and are untouched.
+7. At most 50 deletions per tick so a backlog cannot stall the minute.
+
+### 83.3 Data (Alembic `a1f0c0de0016`, additive, downgrade drops the columns)
+
+`events.clean_up_reminders` Boolean not null default false. `deliveries.message_deleted_at` timestamptz null, `deliveries.cleanup_error` Text null.
+
+### 83.4 Engine change
+
+Reminder sends call `post_channel_message` (the id-returning call from §82) instead of `send_channel_message`, and `_finish` stores the id. Existing behaviour (claim before the call, at most once, the destination pause of §81) is unchanged. `run_cleanup(session_factory, discord, now)` implements decisions 3 and 4 and is called from `run_delivery_tick`.
+
+### 83.5 API and UI
+
+Event create, patch, the event dict, the split copy and the audit snapshot carry `clean_up_reminders`. The delivery log row shows "Reminder removed" or the cleanup error.
+
+### 83.6 Tests
+
+The id is stored; rule a (earlier deleted, latest kept, other channels untouched); rule b; option off deletes nothing; already gone counts as done; 403 stored and not retried; transient failure retried then given up after 24 hours; a failing delete does not stop other deletes or later sends; merged sends delete once; split copies the flag; API round trip and audit; viewer permissions as for any event edit.
+
+### 83.7 Open questions
+
+O1. Confirm on a real server that deleting the bot's own message needs no Manage Messages.
+O2. Should the last reminder also go when the event starts rather than ends? One constant if so.

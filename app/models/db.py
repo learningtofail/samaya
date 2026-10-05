@@ -11,6 +11,7 @@ built:
   Audience, AudienceDestination,
   AllianceAudience, EventAudience,
   TenantSecondaryServer                  — where messages go (spec §68)
+  Player, RedemptionRun, RedemptionResult — the player registry and gift codes (spec §79, §80)
 
 Every table has its own docstring explaining what it's for and why it's
 shaped the way it is — this header is just the map."""
@@ -18,7 +19,7 @@ import uuid
 
 from sqlalchemy import (
     JSON, Boolean, CheckConstraint, Column, Date, DateTime,
-    ForeignKey, Index, Integer, LargeBinary, Numeric, Text, Time,
+    ForeignKey, Index, Integer, LargeBinary, Numeric, String, Text, Time,
     UniqueConstraint, func, text
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -65,6 +66,10 @@ class Kingdom(Base):
         Integer, ForeignKey("themes.id", ondelete="RESTRICT", name="fk_kingdom_default_theme", use_alter=True),
         nullable=True,
     )
+
+    # Spec §79.2: the number the game uses for this Kingdom (138 for K138). Gift
+    # code redemption sends it as `kid` for every player without their own.
+    game_number = Column(Integer, nullable=True)
 
     tenants = relationship("Tenant", back_populates="kingdom")
 
@@ -499,6 +504,8 @@ class Event(Base):
     anchor_date      = Column(Date, nullable=False)
     until_date       = Column(Date, nullable=True)
     mention_role     = Column(Boolean, nullable=False, default=False)
+    # Spec §83: delete earlier reminders once a later one posts, and all of them after the event.
+    clean_up_reminders = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     active           = Column(Boolean, nullable=False, default=True)
     cover_image_data = Column(Text, nullable=True)
     created_at       = Column(DateTime(timezone=True), server_default=func.now())
@@ -625,6 +632,9 @@ class Delivery(Base):
     guild_id           = Column(Text, nullable=False, default="", server_default="")
     channel_id         = Column(Text, nullable=False, default="", server_default="")
     merged_into_id     = Column(Integer, ForeignKey("deliveries.id", ondelete="SET NULL"), nullable=True)
+    # Spec §83: when Samaya deleted this reminder's Discord message, or why it could not.
+    message_deleted_at = Column(DateTime(timezone=True), nullable=True)
+    cleanup_error      = Column(Text, nullable=True)
 
     occurrence = relationship("EventOccurrence", back_populates="deliveries")
     destination = relationship("AudienceDestination", lazy="joined")
@@ -696,6 +706,18 @@ class AudienceDestination(Base):
     server_id   = Column(Integer, ForeignKey("discord_servers.id"), nullable=False)
     channel_id  = Column(Text, nullable=False)
     role_id     = Column(Text, nullable=False, default="", server_default="")
+    # Spec §81: a destination that keeps answering 403/404 is paused until a
+    # coordinator resumes it.
+    consecutive_failures = Column(Integer, nullable=False, default=0, server_default="0")
+    paused_at            = Column(DateTime(timezone=True))
+    pause_reason         = Column(Text)
+    # Spec §82: an optional schedule board, one Discord message edited in place.
+    board_scope        = Column(Text)  # null (off), "kingdom" or "alliance"
+    board_tenant_id    = Column(Integer, ForeignKey("tenants.id", ondelete="SET NULL"))
+    board_message_id   = Column(Text)
+    board_hash         = Column(String(64))
+    board_refreshed_at = Column(DateTime(timezone=True))
+    board_error        = Column(Text)
 
     server   = relationship("DiscordServer", lazy="joined")
     audience = relationship("Audience", lazy="joined", back_populates="destinations")
@@ -703,6 +725,8 @@ class AudienceDestination(Base):
     __table_args__ = (
         UniqueConstraint("audience_id", "server_id", "channel_id", "role_id", name="uq_audience_destination"),
         CheckConstraint("channel_id <> ''", name="ck_audience_destination_channel_set"),
+        CheckConstraint("board_scope IS NULL OR board_scope IN ('kingdom', 'alliance')",
+                        name="ck_audience_destination_board_scope"),
     )
 
 
@@ -802,4 +826,80 @@ class ScheduledTheme(Base):
         CheckConstraint("start_utc < end_utc", name="ck_scheduled_theme_window"),
         CheckConstraint("priority_level >= 0 AND priority_level <= 1000", name="ck_scheduled_theme_priority"),
         Index("ix_scheduled_themes_window", "kingdom_id", "start_utc", "end_utc"),
+    )
+
+
+class Player(Base):
+    """Spec §80.3: the player registry every player-facing feature reads. A
+    player is an in-game ID (`fid`) in one alliance. Samaya cannot verify who
+    owns an ID, so only leaders write this table. `kid` overrides the Kingdom's
+    game_number for a transferred player. `name` and `note` are typed by a
+    leader and optional; the game no longer lets Samaya fetch them."""
+    __tablename__ = "players"
+
+    id         = Column(Integer, primary_key=True)
+    kingdom_id = Column(Integer, ForeignKey("kingdoms.id", ondelete="CASCADE"), nullable=False)
+    tenant_id  = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    fid        = Column(String(20), nullable=False)
+    kid        = Column(Integer, nullable=True)
+    name       = Column(String(60), nullable=True)
+    note       = Column(String(40), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("kingdom_id", "fid", name="uq_player_kingdom_fid"),
+        CheckConstraint("fid <> ''", name="ck_player_fid_set"),
+        Index("ix_players_tenant", "tenant_id"),
+    )
+
+
+class RedemptionRun(Base):
+    """Spec §79.3: one gift code being redeemed for the players of one or more
+    alliances. The tick job advances it; state lives here so a restart loses
+    nothing. A Kingdom has at most one active run at a time."""
+    __tablename__ = "redemption_runs"
+
+    id          = Column(Integer, primary_key=True)
+    kingdom_id  = Column(Integer, ForeignKey("kingdoms.id", ondelete="CASCADE"), nullable=False)
+    code        = Column(Text, nullable=False)
+    status      = Column(Text, nullable=False, default="queued")
+    stop_reason = Column(Text, nullable=True)
+    created_by  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at  = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    started_at  = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    results = relationship("RedemptionResult", cascade="all, delete-orphan", back_populates="run")
+
+    __table_args__ = (
+        CheckConstraint("status IN ('queued', 'running', 'done', 'stopped', 'cancelled')", name="ck_redemption_run_status"),
+    )
+
+
+class RedemptionResult(Base):
+    """Spec §79.3: one distinct player ID within one run. `status` is
+    pending, in_flight or cooling while the run is working, then the final
+    outcome key (services/giftcode_client.py)."""
+    __tablename__ = "redemption_results"
+
+    id              = Column(Integer, primary_key=True)
+    run_id          = Column(Integer, ForeignKey("redemption_runs.id", ondelete="CASCADE"), nullable=False)
+    tenant_id       = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    player_id       = Column(Integer, ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
+    fid             = Column(String(20), nullable=False)
+    kid             = Column(Integer, nullable=False)
+    status          = Column(Text, nullable=False, default="pending")
+    message         = Column(Text, nullable=True)
+    attempts        = Column(Integer, nullable=False, default=0)
+    cooldowns       = Column(Integer, nullable=False, default=0)
+    next_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at      = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    run = relationship("RedemptionRun", back_populates="results")
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "fid", name="uq_redemption_result_fid"),
+        Index("ix_redemption_results_run_status", "run_id", "status"),
     )

@@ -77,9 +77,24 @@ function renderDeliveryHealth(h) {
     <ul class="health__counts" aria-label="Deliveries due in the last ${h.window_days} days">
       ${order.map(([key, label, color]) => `<li class="health__count">${pfLabel(label, color)} <strong>${counts[key] || 0}</strong></li>`).join('')}
     </ul>
+    ${pausedDestinationsHtml(h.paused_destinations || [])}
     <p class="health__note">Last ${h.window_days} days. ${overdue > 5
     ? `The oldest pending delivery is ${overdue} minutes overdue, which means the engine is not sending.`
     : 'Nothing is waiting longer than it should.'}</p>`;
+}
+
+// Spec §81: destinations Samaya stopped calling after repeated 403/404 answers.
+function pausedDestinationsHtml(paused) {
+  if (!paused.length) return '';
+  const canResume = canWriteAnywhere();
+  const items = paused.map((d) => `<li class="health__paused-item">
+      <span><strong>${escapeHtml(d.audience)}</strong> on ${escapeHtml(d.server_name)}, channel ${escapeHtml(d.channel_id)}.
+      Paused ${escapeHtml(new Date(d.paused_at).toISOString().slice(0, 16).replace('T', ' '))} UTC. ${escapeHtml(d.reason || '')}</span>
+      ${canResume ? `<button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="resume" data-id="${d.id}" data-slug="${escapeHtml(d.slug)}">Resume</button>` : ''}
+    </li>`).join('');
+  return `<div class="health__paused" role="alert">
+    <p class="health__paused-title">Paused destinations. Reminders to these channels are not being sent. Fix the channel or the bot's permissions, then resume.</p>
+    <ul class="health__paused-list">${items}</ul></div>`;
 }
 
 function deliveryStatusLabel(status) {
@@ -91,6 +106,13 @@ function deliveryMembersHtml(d) {
   if (!d.members || !d.members.length) return '';
   const items = d.members.map((m) => `<li>${escapeHtml(m.tenant_name)}${m.destination_label ? `, ${escapeHtml(m.destination_label)}` : ''}: ${escapeHtml(m.status)}${m.detail ? ` (${escapeHtml(m.detail)})` : ''}</li>`).join('');
   return `<details class="delivery-merged"><summary>Merged with ${d.members.length} other destination${d.members.length === 1 ? '' : 's'}</summary><ul class="delivery-members">${items}</ul></details>`;
+}
+
+// Spec §83: what happened to a reminder's Discord message when its event cleans up after itself.
+function deliveryCleanupHtml(d) {
+  if (d.message_deleted_at) return '<div class="samaya-muted">Reminder removed from Discord.</div>';
+  if (d.cleanup_error) return `<div class="board-note__error">Could not remove the reminder: ${escapeHtml(d.cleanup_error)}</div>`;
+  return '';
 }
 
 function buildDeliveryRow(d) {
@@ -106,7 +128,7 @@ function buildDeliveryRow(d) {
     <td class="pf-v6-c-table__td" data-label="Event"><strong>${escapeHtml(d.event_name)}</strong><div class="samaya-muted">${escapeHtml(d.occurrence_date)}</div></td>
     <td class="pf-v6-c-table__td" data-label="Alliance and kind">${escapeHtml(names)}${merged ? ` ${pfLabel('Merged', 'pf-m-blue')}` : ''}${target}<div class="samaya-muted">${escapeHtml(deliveryKindText(d))}</div></td>
     <td class="pf-v6-c-table__td" data-label="Status">${deliveryStatusLabel(d.status)}</td>
-    <td class="pf-v6-c-table__td" data-label="Detail">${d.detail ? escapeHtml(d.detail) : '<span class="samaya-muted">None</span>'}${deliveryMembersHtml(d)}</td>
+    <td class="pf-v6-c-table__td" data-label="Detail">${d.detail ? escapeHtml(d.detail) : '<span class="samaya-muted">None</span>'}${deliveryCleanupHtml(d)}${deliveryMembersHtml(d)}</td>
     <td class="pf-v6-c-table__td" data-label="Actions">${action}</td>
   </tr>`;
 }
@@ -136,6 +158,19 @@ const deliveryActions = {
     }
   },
 };
+bindActions(byId('deliveryHealth'), {
+  async resume(btn) {
+    btn.disabled = true;
+    try {
+      await api('POST', `/api/audience-destinations/${btn.dataset.id}/resume`, null, false, btn.dataset.slug);
+      toast('Destination resumed. Retry the skipped reminders from the list below if they are still due.');
+      loadDelivery();
+    } catch (e) {
+      toast(e.message, true);
+      btn.disabled = false;
+    }
+  },
+});
 bindActions(byId('deliveryUpcomingBody'), deliveryActions);
 bindActions(byId('deliveryPastBody'), deliveryActions);
 ['deliveryStatus', 'deliveryKind', 'deliveryEvent', 'deliveryDays'].forEach((id) => byId(id).addEventListener('change', loadDelivery));

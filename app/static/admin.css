@@ -418,6 +418,10 @@ textarea.pf-v6-c-form-control { min-height: 5rem; resize: vertical; }
 .health__counts { gap: var(--space-4); margin: 0; }
 .health__count { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--fs-md); }
 .health__note { margin: 0; }
+.health__paused { flex-basis: 100%; background: var(--bad-bg); color: var(--bad-ink); border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
+.health__paused-title { margin: 0 0 var(--space-2); font-weight: 600; }
+.health__paused-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.health__paused-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); font-size: var(--fs-sm); }
 .panel { border-radius: 10px; padding: var(--space-5); border-color: var(--line); }
 .panel .view__head { margin-bottom: var(--space-3); }
 .panel__title { font-size: var(--fs-md); }
@@ -461,6 +465,8 @@ textarea.pf-v6-c-form-control { min-height: 5rem; resize: vertical; }
 .dest-list__destinations { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .aud-dests, .aud-links { list-style: none; margin: 0 0 var(--space-3); padding: 0; display: grid; gap: var(--space-3); }
 .aud-dest { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-alt); }
+.board-note { margin-top: var(--space-1); font-size: var(--fs-sm); }
+.board-note__error { color: var(--bad-ink); }
 .aud-dest__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .aud-link { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .dest-note { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--fs-sm); }
@@ -547,3 +553,13 @@ textarea.pf-v6-c-form-control { min-height: 5rem; resize: vertical; }
 /* Per-reminder messages (spec §77) */
 .reminders__messages { display: grid; gap: var(--space-3); }
 .reminders__message { display: grid; gap: var(--space-1); }
+
+/* ── Players and Gift codes (spec §79, §80) ───────────── */
+.notice { background: var(--info-bg); color: var(--info-ink); border-radius: var(--radius); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4); }
+.check-group { border: 0; padding: 0; margin: 0 0 var(--space-3); min-width: 0; }
+.check-group .check { display: flex; min-height: var(--tap); align-items: center; gap: var(--space-2); }
+.code-input { max-width: 22rem; font-family: var(--font-mono, ui-monospace, monospace); letter-spacing: 0.04em; }
+.run-card { display: grid; gap: var(--space-2); }
+.run-card__title { font-weight: 600; }
+.run-card__bar { width: 100%; max-width: 32rem; height: 12px; accent-color: var(--accent); }
+.run-card__counts { color: var(--muted); font-size: var(--fs-sm); }

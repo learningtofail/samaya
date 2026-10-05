@@ -128,5 +128,6 @@ function destinationHtml(d, slug) {
   const role = d.role_id
     ? ` <span class="samaya-muted dest-role" data-server="${d.server_id}" data-slug="${escapeHtml(slug)}" data-role="${escapeHtml(d.role_id)}">${escapeHtml(d.role_id)}</span>`
     : '';
-  return `<span class="dest">${serverBadgeHtml(d.server_name, true)} <span class="dest-channel" data-server="${d.server_id}" data-slug="${escapeHtml(slug)}" data-channel="${escapeHtml(d.channel_id)}">${escapeHtml(d.channel_id)}</span>${role}</span>`;
+  const paused = d.paused_at ? ` ${pfLabel('Paused', 'pf-m-red')}` : '';  // spec §81
+  return `<span class="dest">${serverBadgeHtml(d.server_name, true)} <span class="dest-channel" data-server="${d.server_id}" data-slug="${escapeHtml(slug)}" data-channel="${escapeHtml(d.channel_id)}">${escapeHtml(d.channel_id)}</span>${role}${paused}</span>`;
 }

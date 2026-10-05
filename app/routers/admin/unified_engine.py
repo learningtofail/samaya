@@ -15,7 +15,7 @@ from sqlalchemy.orm import aliased
 
 from models import get_db
 from models.db import (
-    Delivery, Event, EventAlliance, EventAudience, EventOccurrence, EventReminder, Tenant, User,
+    AudienceDestination, Audience, Delivery, Event, EventAlliance, EventAudience, EventOccurrence, EventReminder, Tenant, User,
 )
 from services.audit import log_change
 from services.db_errors import raise_friendly_integrity_error
@@ -90,6 +90,8 @@ def _delivery_dict(d: Delivery, occ: EventOccurrence, event: Event, tenant: Tena
         "detail":             d.detail,
         "discord_event_id":   d.discord_event_id,
         "posted_at_utc":      _iso(d.posted_at_utc),
+        "message_deleted_at": _iso(d.message_deleted_at),
+        "cleanup_error":      d.cleanup_error,
         "audience_label":     d.destination.audience.label if d.destination is not None else None,
         "channel_id":         d.channel_id or None,
         "guild_id":           d.guild_id or None,
@@ -147,7 +149,8 @@ async def list_occurrences(
     start = date_from or datetime.now(timezone.utc).date()
     end = date_to or start + timedelta(days=28)
     tenant_ids = [t.id for t in tenants]
-    kingdom_ids = {t.kingdom_id for t in tenants}
+    slug_for_kingdom = {t.kingdom_id: t.slug for t in reversed(tenants)}  # any alliance of the Kingdom works for a write
+    kingdom_ids = set(slug_for_kingdom)
     in_audience = select(EventAlliance.event_id).where(EventAlliance.tenant_id.in_(tenant_ids))
     rows = await db.execute(
         select(EventOccurrence, Event)
@@ -285,6 +288,7 @@ async def split_event(
         location=event.location, start_time_utc=event.start_time_utc, duration_hours=event.duration_hours,
         recurrence_kind=event.recurrence_kind, interval_days=event.interval_days,
         anchor_date=payload.from_date, until_date=event.until_date, mention_role=event.mention_role,
+        clean_up_reminders=event.clean_up_reminders,
         active=event.active, cover_image_data=event.cover_image_data,
     )
     new_event.reminders = [EventReminder(minutes_before=r.minutes_before, message=r.message) for r in event.reminders]
@@ -445,9 +449,21 @@ async def delivery_health(
                                                     Delivery.due_at_utc <= now)
     )).scalar_one()
     overdue = round((now - ensure_utc(oldest)).total_seconds() / 60) if oldest is not None else 0
+    slug_for_kingdom = {t.kingdom_id: t.slug for t in reversed(tenants)}  # any alliance of the Kingdom works for a write
+    kingdom_ids = set(slug_for_kingdom)
+    paused = (await db.execute(
+        select(AudienceDestination).join(Audience, Audience.id == AudienceDestination.audience_id)
+        .where(Audience.kingdom_id.in_(kingdom_ids), AudienceDestination.paused_at.is_not(None))
+        .order_by(AudienceDestination.paused_at)
+    )).scalars().unique().all()
     return {
         "window_days": 7,
         "counts": counts,
         "oldest_pending_overdue_minutes": overdue,
-        "healthy": counts.get("error", 0) == 0 and overdue <= 5,
+        "paused_destinations": [
+            {"id": d.id, "audience": d.audience.label, "server_name": d.server.name, "channel_id": d.channel_id,
+             "reason": d.pause_reason, "paused_at": ensure_utc(d.paused_at).isoformat(), "slug": slug_for_kingdom[d.audience.kingdom_id]}
+            for d in paused
+        ],
+        "healthy": counts.get("error", 0) == 0 and overdue <= 5 and not paused,
     }
