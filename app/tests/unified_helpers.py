@@ -24,6 +24,11 @@ class FakeDiscord:
         self.send_error = ""
         self.cancel_error = ""
         self.raise_on_send_to: set[str] = set()
+        # Spec §82/§83: channel messages that have ids.
+        self.messages: dict[tuple[str, str], str] = {}
+        self.post_error = ""
+        self.edit_error = ""
+        self.delete_error = ""
         self._next = 0
 
     def count(self, name: str) -> int:
@@ -59,6 +64,34 @@ class FakeDiscord:
         if channel_id in self.raise_on_send_to:
             raise RuntimeError("boom")
         return (False, self.send_error) if self.send_error else (True, "")
+
+    async def post_channel_message(self, token, channel_id, content, *, no_mentions=False):
+        self.calls.append(("send", channel_id, content))
+        if channel_id in self.raise_on_send_to:
+            raise RuntimeError("boom")
+        error = self.post_error or self.send_error
+        if error:
+            return "", error
+        self._next += 1
+        message_id = f"m{self._next}"
+        self.messages[(channel_id, message_id)] = content
+        return message_id, ""
+
+    async def edit_channel_message(self, token, channel_id, message_id, content, *, no_mentions=False):
+        self.calls.append(("edit", channel_id, message_id, content))
+        if self.edit_error:
+            return False, self.edit_error
+        if (channel_id, message_id) not in self.messages:
+            return False, "MESSAGE_GONE"
+        self.messages[(channel_id, message_id)] = content
+        return True, ""
+
+    async def delete_channel_message(self, token, channel_id, message_id):
+        self.calls.append(("delete", channel_id, message_id))
+        if self.delete_error:
+            return False, self.delete_error
+        self.messages.pop((channel_id, message_id), None)
+        return True, ""
 
 
 async def _type_id(s, kingdom_id: int) -> int:

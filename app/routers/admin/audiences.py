@@ -7,11 +7,14 @@ Audiences and their destinations. An alliance uses an Audience through a link
 Every change regenerates the pending deliveries of the Kingdom's events, so
 the schedule follows the new setup.
 """
+from datetime import datetime, timezone
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from models import get_db
 from models.db import (
@@ -19,7 +22,9 @@ from models.db import (
 )
 from services.audit import log_change
 from services.db_errors import raise_friendly_integrity_error
+from services.discord_client import get_discord
 from services.event_engine import resync_kingdom_events
+from services.schedule_board import refresh_destination
 
 from .deps import (
     check_kingdom_coordinator, get_current_tenant, get_current_tenants, get_current_user, require_not_viewer,
@@ -49,6 +54,17 @@ class DestinationIn(BaseModel):
     server_id:  int
     channel_id: str = Field(min_length=1, max_length=32)
     role_id:    str = Field(default="", max_length=32)
+    # Spec §82: an optional schedule board for this destination.
+    board_scope:     Literal["kingdom", "alliance"] | None = None
+    board_tenant_id: int | None = None
+
+    @model_validator(mode="after")
+    def _board(self):
+        if self.board_scope == "alliance" and self.board_tenant_id is None:
+            raise ValueError("Choose the alliance for the schedule board")
+        if self.board_scope != "alliance" and self.board_tenant_id is not None:
+            raise ValueError("Only an alliance board takes an alliance")
+        return self
 
     _ids = field_validator("channel_id", "role_id")(lambda cls, v: _digits(v))
 
@@ -105,7 +121,10 @@ def _audience_dict(a: Audience, tenants: dict[int, Tenant]) -> dict:
         "destinations": [
             {"id": d.id, "server_id": d.server_id, "server_name": d.server.name, "guild_id": d.server.guild_id,
              "channel_id": d.channel_id, "role_id": d.role_id,
-             "paused_at": d.paused_at.isoformat() if d.paused_at else None, "pause_reason": d.pause_reason}
+             "paused_at": d.paused_at.isoformat() if d.paused_at else None, "pause_reason": d.pause_reason,
+             "board_scope": d.board_scope, "board_tenant_id": d.board_tenant_id, "board_error": d.board_error,
+             "board_posted": bool(d.board_message_id),
+             "board_refreshed_at": d.board_refreshed_at.isoformat() if d.board_refreshed_at else None}
             for d in a.destinations
         ],
         "links": links,
@@ -115,7 +134,8 @@ def _audience_dict(a: Audience, tenants: dict[int, Tenant]) -> dict:
 def _snapshot(a: Audience) -> dict:
     return {
         "label": a.label, "leadership_only": a.leadership_only,
-        "destinations": sorted((d.server_id, d.channel_id, d.role_id) for d in a.destinations),
+        "destinations": sorted((d.server_id, d.channel_id, d.role_id, d.board_scope or "", d.board_tenant_id or 0)
+                               for d in a.destinations),
         "links": sorted((x.tenant_id, x.post_by_default) for x in a.links),
     }
 
@@ -145,6 +165,10 @@ async def _check_servers(db: AsyncSession, kingdom_id: int, destinations: list[D
         server = await db.get(DiscordServer, server_id)
         if server is None or server.kingdom_id != kingdom_id:
             raise HTTPException(status_code=422, detail="Every server must belong to this Kingdom")
+    for tenant_id in {d.board_tenant_id for d in destinations if d.board_tenant_id is not None}:
+        tenant = await db.get(Tenant, tenant_id)
+        if tenant is None or tenant.kingdom_id != kingdom_id:
+            raise HTTPException(status_code=422, detail="A schedule board can only show an alliance of this Kingdom")
 
 
 async def _check_link_tenants(db: AsyncSession, kingdom_id: int, tenant_ids: list[int]) -> None:
@@ -165,9 +189,15 @@ async def _set_destinations(db: AsyncSession, audience: Audience, wanted: list[D
     for d in wanted:
         key = (d.server_id, d.channel_id, d.role_id)
         if key not in existing:
-            audience.destinations.append(
-                AudienceDestination(server_id=d.server_id, channel_id=d.channel_id, role_id=d.role_id))
+            audience.destinations.append(AudienceDestination(
+                server_id=d.server_id, channel_id=d.channel_id, role_id=d.role_id,
+                board_scope=d.board_scope, board_tenant_id=d.board_tenant_id))
             existing[key] = audience.destinations[-1]
+            continue
+        row = existing[key]
+        if (row.board_scope, row.board_tenant_id) != (d.board_scope, d.board_tenant_id):
+            # The message stays and is edited in place; clearing the hash forces a render.
+            row.board_scope, row.board_tenant_id, row.board_hash, row.board_error = d.board_scope, d.board_tenant_id, None, None
 
 
 async def _set_links(db: AsyncSession, audience_id: int, links: list[LinkIn]) -> None:
@@ -301,6 +331,34 @@ async def resume_destination(
         )
         await db.commit()
     return {"id": dest.id, "paused_at": None, "pause_reason": None}
+
+
+@router.post("/audience-destinations/{destination_id}/board/refresh")
+async def refresh_board(
+    destination_id: int,
+    tenant: Tenant = Depends(require_not_viewer),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    discord=Depends(get_discord),
+):
+    """Spec §82.5: renders and posts or edits this destination's schedule board now."""
+    await check_kingdom_coordinator(db, user, tenant.kingdom_id, _COORDINATOR_ONLY)
+    dest = await db.get(AudienceDestination, destination_id)
+    if dest is None or dest.audience.kingdom_id != tenant.kingdom_id:
+        raise HTTPException(status_code=404, detail="Destination not found")
+    if dest.board_scope is None:
+        raise HTTPException(status_code=409, detail="This destination has no schedule board")
+    factory = async_sessionmaker(db.bind, class_=AsyncSession, expire_on_commit=False)
+    outcome = await refresh_destination(factory, discord, dest.id, datetime.now(timezone.utc), force=True)
+    await log_change(
+        db, user_id=user.id, tenant_id=tenant.id, table_name="audience_destinations", row_id=dest.id,
+        action="update", after={"board_refresh": outcome},
+    )
+    await db.commit()
+    fresh = (await db.execute(select(AudienceDestination).where(AudienceDestination.id == dest.id)
+                              .execution_options(populate_existing=True))).scalar_one()
+    return {"outcome": outcome, "board_error": fresh.board_error, "board_posted": bool(fresh.board_message_id),
+            "board_refreshed_at": fresh.board_refreshed_at.isoformat() if fresh.board_refreshed_at else None}
 
 
 @router.delete("/audiences/{audience_id}", status_code=204)

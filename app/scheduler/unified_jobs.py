@@ -9,6 +9,7 @@ from models import AsyncSessionLocal
 from services import discord_api, giftcode_client
 from services.event_engine import run_delivery_tick, run_generation
 from services.giftcode_engine import prune_redemptions, run_tick
+from services.schedule_board import run_board_refresh
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,18 @@ async def delivery_tick_job() -> None:
             logger.info("delivery tick: %s", counts)
     except Exception:
         logger.exception("delivery tick failed")
+
+
+async def board_tick_job() -> None:
+    """Spec §82: edits each schedule board whose text changed. Separate from the delivery tick so a board
+    problem can never delay a reminder."""
+    try:
+        counts = await run_board_refresh(AsyncSessionLocal, discord_api)
+        changed = {k: v for k, v in counts.items() if k not in ("unchanged", "off", "skipped")}
+        if changed:
+            logger.info("schedule boards: %s", changed)
+    except Exception:
+        logger.exception("schedule board tick failed")
 
 
 async def generation_job() -> None:

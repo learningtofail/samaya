@@ -3125,3 +3125,43 @@ Threshold, reset on success, non-access errors ignored, merged send counts once,
 
 O1. Notify somewhere other than the console (a message to a leadership channel, or an email)? Not in this version.
 O2. Is 3 the right threshold? It is one constant.
+
+## 82. Schedule board
+
+Status: built with this section (alliance management roadmap item 3, §80.4).
+
+### 82.1 Goal
+
+One Discord message per chosen channel that always shows the next 7 days, edited in place so the channel does not fill with reminders to scroll through. It reads the same public rows as the website, so a leadership-only event is never on a board.
+
+### 82.2 Decisions
+
+1. A board belongs to an **Audience destination** (server, channel). Setting: `board_scope` = off (null), `kingdom` (every public event of the Kingdom, one line per occurrence with the alliances that take part) or `alliance` (that alliance's own schedule, as on its page). Set in the Audience editor by Kingdom coordinators.
+2. Content: a title line, then days (UTC, today through today plus 6) each with lines `HH:MM UTC` and name and a Discord relative time (`<t:unix:R>`), cancelled occurrences struck through. Past lines of the current day stay until midnight UTC. If the text would pass about 1900 characters it ends with "and N more" and the website is the full list. No per-viewer time zones: the relative time is the viewer-local part.
+3. Names are escaped for Discord Markdown and the message is sent with `allowed_mentions: {parse: []}`, so an event name can never ping anyone.
+4. Refresh: every minute the engine renders each enabled board and compares a hash of the text with the stored one. Same hash: nothing is sent. Different (an event changed, or midnight UTC passed): the message is edited. So event changes and the daily roll both refresh within about a minute without hooks in the event code. A manual **Refresh now** forces a render.
+5. Message id stored per destination. First time, or after the message was deleted in Discord (edit answers "Unknown Message"): post a new message and store its id. Turning the board off deletes the message (404 counts as done) and clears the id. Removing a destination row does not call Discord, so turn the board off first; the form says so.
+6. Failures never touch reminders. A board error is stored (`board_error`), shown on the destination in Setup, and cleared by the next success. After an error the board is retried every 10 minutes (a manual Refresh now ignores that wait). Boards on a paused destination (§81) are skipped. At most 20 boards per tick.
+7. Posting is claim-free: the id is committed right after Discord answers. A crash between the two could post a second message; the old one is then deleted by hand. Single worker only, as everywhere.
+8. Not built: a board of leadership-only events, a per-alliance title or colour, pinning (needs another permission), a board in more than one language.
+
+### 82.3 Data (Alembic `a1f0c0de0015`, additive, downgrade drops the columns)
+
+`audience_destinations`: `board_scope` Text null (CHECK null or `kingdom` or `alliance`), `board_tenant_id` Integer null (FK `tenants`, `SET NULL`; `alliance` with a null tenant means the alliance was removed and shows as an error), `board_message_id` Text null, `board_hash` String(64) null, `board_refreshed_at` timestamptz null, `board_error` Text null.
+
+### 82.4 Discord
+
+Three new client calls: `post_channel_message` (returns the message id), `edit_channel_message` (an Unknown Message answer is reported as `MESSAGE_GONE`), `delete_channel_message`. `FakeDiscord` gets the same three.
+
+### 82.5 API
+
+`DestinationIn` takes `board_scope` and `board_tenant_id` (alliance must be in the Kingdom; `kingdom` takes no alliance). Destinations in `/api/audiences` return the scope, tenant, `board_refreshed_at` and `board_error`. `POST /api/audience-destinations/{id}/board/refresh` (coordinators) renders now and returns the destination. Both writes are audited.
+
+### 82.6 Tests
+
+Render (days, UTC, cancelled, truncation, escaping, empty, leadership-only absent), hash skip, edit on change, recreate when the message is gone, off deletes, failure isolation from reminders, paused skip, permissions, API validation, audit.
+
+### 82.7 Open questions
+
+O1. Pin the board message? Needs Manage Messages; not in this version.
+O2. Should a board offer a language other than English? Not yet.

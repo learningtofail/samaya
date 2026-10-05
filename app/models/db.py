@@ -706,6 +706,13 @@ class AudienceDestination(Base):
     consecutive_failures = Column(Integer, nullable=False, default=0, server_default="0")
     paused_at            = Column(DateTime(timezone=True))
     pause_reason         = Column(Text)
+    # Spec §82: an optional schedule board, one Discord message edited in place.
+    board_scope        = Column(Text)  # null (off), "kingdom" or "alliance"
+    board_tenant_id    = Column(Integer, ForeignKey("tenants.id", ondelete="SET NULL"))
+    board_message_id   = Column(Text)
+    board_hash         = Column(String(64))
+    board_refreshed_at = Column(DateTime(timezone=True))
+    board_error        = Column(Text)
 
     server   = relationship("DiscordServer", lazy="joined")
     audience = relationship("Audience", lazy="joined", back_populates="destinations")
@@ -713,6 +720,8 @@ class AudienceDestination(Base):
     __table_args__ = (
         UniqueConstraint("audience_id", "server_id", "channel_id", "role_id", name="uq_audience_destination"),
         CheckConstraint("channel_id <> ''", name="ck_audience_destination_channel_set"),
+        CheckConstraint("board_scope IS NULL OR board_scope IN ('kingdom', 'alliance')",
+                        name="ck_audience_destination_board_scope"),
     )
 
 
