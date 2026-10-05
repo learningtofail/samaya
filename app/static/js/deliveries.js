@@ -77,9 +77,24 @@ function renderDeliveryHealth(h) {
     <ul class="health__counts" aria-label="Deliveries due in the last ${h.window_days} days">
       ${order.map(([key, label, color]) => `<li class="health__count">${pfLabel(label, color)} <strong>${counts[key] || 0}</strong></li>`).join('')}
     </ul>
+    ${pausedDestinationsHtml(h.paused_destinations || [])}
     <p class="health__note">Last ${h.window_days} days. ${overdue > 5
     ? `The oldest pending delivery is ${overdue} minutes overdue, which means the engine is not sending.`
     : 'Nothing is waiting longer than it should.'}</p>`;
+}
+
+// Spec §81: destinations Samaya stopped calling after repeated 403/404 answers.
+function pausedDestinationsHtml(paused) {
+  if (!paused.length) return '';
+  const canResume = canWriteAnywhere();
+  const items = paused.map((d) => `<li class="health__paused-item">
+      <span><strong>${escapeHtml(d.audience)}</strong> on ${escapeHtml(d.server_name)}, channel ${escapeHtml(d.channel_id)}.
+      Paused ${escapeHtml(new Date(d.paused_at).toISOString().slice(0, 16).replace('T', ' '))} UTC. ${escapeHtml(d.reason || '')}</span>
+      ${canResume ? `<button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="resume" data-id="${d.id}" data-slug="${escapeHtml(d.slug)}">Resume</button>` : ''}
+    </li>`).join('');
+  return `<div class="health__paused" role="alert">
+    <p class="health__paused-title">Paused destinations. Reminders to these channels are not being sent. Fix the channel or the bot's permissions, then resume.</p>
+    <ul class="health__paused-list">${items}</ul></div>`;
 }
 
 function deliveryStatusLabel(status) {
@@ -136,6 +151,19 @@ const deliveryActions = {
     }
   },
 };
+bindActions(byId('deliveryHealth'), {
+  async resume(btn) {
+    btn.disabled = true;
+    try {
+      await api('POST', `/api/audience-destinations/${btn.dataset.id}/resume`, null, false, btn.dataset.slug);
+      toast('Destination resumed. Retry the skipped reminders from the list below if they are still due.');
+      loadDelivery();
+    } catch (e) {
+      toast(e.message, true);
+      btn.disabled = false;
+    }
+  },
+});
 bindActions(byId('deliveryUpcomingBody'), deliveryActions);
 bindActions(byId('deliveryPastBody'), deliveryActions);
 ['deliveryStatus', 'deliveryKind', 'deliveryEvent', 'deliveryDays'].forEach((id) => byId(id).addEventListener('change', loadDelivery));

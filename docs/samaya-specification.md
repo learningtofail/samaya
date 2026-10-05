@@ -3087,3 +3087,41 @@ O3. Linking a player to a Discord account, for DMs and pings: wanted at all, and
 O4. Who is told when a destination is paused: the console only, the alliance owner by DM, or a channel post.
 O5. Retention: the 90 days for redemption results and 12 months for bear data are proposals.
 O6. Whether to read Century Games' terms before item 1 (79.13 O4).
+
+## 81. Pausing failing destinations
+
+Status: built with this section (alliance management roadmap item 2, §80.4).
+
+### 81.1 Problem
+
+A destination whose channel was deleted, or whose permissions the bot lost, fails every reminder with a 403 or 404. Each failure is an error row the leader has to notice, and every one still costs a Discord call. After a few, Samaya should stop trying, say so where leaders already look, and start again only when someone says the cause is fixed.
+
+### 81.2 Decisions
+
+1. The unit is the **Audience destination** (server, channel, optional role), the same unit that posts. One destination pausing never affects another.
+2. Only a reminder send counts. An error whose text starts with `403` (missing permission) or `404` (channel not found) is an access failure. Network errors, 429, 5xx and 400 are not, because they say nothing about the destination. Discord Scheduled Event calls are guild-level (Manage Events) and are out of scope.
+3. After **3 consecutive** access failures the destination is paused. Any successful send resets the count to 0. Only the representative delivery of a merged send is counted, so one channel is one failure, not one per alliance.
+4. A paused destination is never called. Its due deliveries end as `error` with the detail `Paused: <reason>`, so the delivery log shows every skipped reminder (never silent) and **Retry** works once the destination is resumed. These skips do not count as failures.
+5. Resume is explicit: `POST /api/audience-destinations/{id}/resume`, by Kingdom coordinators (the people who may edit the Audience). It clears `paused_at`, `pause_reason` and the count, and writes an audit row. Changing a destination's server, channel or role creates a new row (§68), so a fixed channel starts clean.
+6. Where it shows: the delivery health card lists each paused destination (audience, server, channel, reason, since when, a Resume button) and the card's state becomes "Needs attention". The Audience editor in Setup marks the destination as paused. No Discord message and no email in this version (assumption for O1).
+
+### 81.3 Data (Alembic `a1f0c0de0014`, additive, downgrade drops the columns)
+
+`audience_destinations.consecutive_failures` Integer not null, default 0. `paused_at` timestamptz null. `pause_reason` Text null.
+
+### 81.4 Engine
+
+`_send_reminder` returns an `error` with the `Paused:` detail before any Discord call when `paused_at` is set. After the delivery is finished, `process_delivery` calls `record_destination_outcome` in its own session: `posted` resets the count; an access-failure error increments it and pauses at the threshold (`PAUSE_AFTER_FAILURES = 3`); every other outcome leaves it alone. The claim-before-call rule is unchanged.
+
+### 81.5 API
+
+`GET /api/delivery-health` adds `paused_destinations` (scoped to the Kingdoms of the selected alliances) and `healthy` is false while any exists. Audience destinations in `/api/audiences` carry `paused_at` and `pause_reason`. Resume: 404 for another Kingdom's destination, 403 for non-coordinators and viewers, a no-op 200 when not paused.
+
+### 81.6 Tests
+
+Threshold, reset on success, non-access errors ignored, merged send counts once, paused skip makes no Discord call and is not counted, resume then retry posts, permissions (viewer, other Kingdom), audit row, health payload, no change to public routes.
+
+### 81.7 Open questions
+
+O1. Notify somewhere other than the console (a message to a leadership channel, or an email)? Not in this version.
+O2. Is 3 the right threshold? It is one constant.

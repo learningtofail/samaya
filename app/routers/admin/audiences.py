@@ -104,7 +104,8 @@ def _audience_dict(a: Audience, tenants: dict[int, Tenant]) -> dict:
         "id": a.id, "kingdom_id": a.kingdom_id, "label": a.label, "leadership_only": a.leadership_only,
         "destinations": [
             {"id": d.id, "server_id": d.server_id, "server_name": d.server.name, "guild_id": d.server.guild_id,
-             "channel_id": d.channel_id, "role_id": d.role_id}
+             "channel_id": d.channel_id, "role_id": d.role_id,
+             "paused_at": d.paused_at.isoformat() if d.paused_at else None, "pause_reason": d.pause_reason}
             for d in a.destinations
         ],
         "links": links,
@@ -273,6 +274,33 @@ async def update_audience(
     await resync_kingdom_events(db, tenant.kingdom_id)
     await db.commit()
     return _audience_dict(await _reload(db, audience.id), await _tenant_index(db))
+
+
+@router.post("/audience-destinations/{destination_id}/resume")
+async def resume_destination(
+    destination_id: int,
+    tenant: Tenant = Depends(require_not_viewer),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Spec §81.2: puts a paused destination back in service once its cause is fixed."""
+    await check_kingdom_coordinator(db, user, tenant.kingdom_id, _COORDINATOR_ONLY)
+    dest = await db.get(AudienceDestination, destination_id)
+    if dest is None or dest.audience.kingdom_id != tenant.kingdom_id:
+        raise HTTPException(status_code=404, detail="Destination not found")
+    if dest.paused_at is not None:
+        before = {"paused_at": dest.paused_at.isoformat(), "pause_reason": dest.pause_reason,
+                  "consecutive_failures": dest.consecutive_failures}
+        dest.paused_at = None
+        dest.pause_reason = None
+        dest.consecutive_failures = 0
+        await log_change(
+            db, user_id=user.id, tenant_id=tenant.id, table_name="audience_destinations", row_id=dest.id,
+            action="update", before=before,
+            after={"paused_at": None, "pause_reason": None, "consecutive_failures": 0},
+        )
+        await db.commit()
+    return {"id": dest.id, "paused_at": None, "pause_reason": None}
 
 
 @router.delete("/audiences/{audience_id}", status_code=204)

@@ -50,6 +50,9 @@ DISCORD_EVENT_FLOOR = timedelta(minutes=15)
 #: A `sending` delivery older than this is declared lost (see module docstring).
 STALE_CLAIM_AFTER = timedelta(minutes=10)
 AT_START_GRACE = timedelta(minutes=5)
+# Spec §81: this many consecutive 403/404 answers pause a destination.
+PAUSE_AFTER_FAILURES = 3
+PAUSED_PREFIX = "Paused: "
 
 
 def _reminder_expired(minutes: int, start: datetime, now: datetime) -> bool:
@@ -496,6 +499,9 @@ async def _send_reminder(
         return "error", "No destination configured for this alliance"
     if dest.audience.leadership_only != event.leadership_only:
         return "cancelled", "This audience does not take this kind of event"
+    if dest.paused_at is not None:
+        return "error", (f"{PAUSED_PREFIX}{dest.pause_reason or 'repeated access failures'}. "
+                         "Fix the cause, then resume the destination in Setup or the delivery log.")
     server = dest.server
     token = server.bot_token or platform_bot_token()
     if not token:
@@ -559,6 +565,36 @@ async def _finish(session_factory, delivery_id: int, status: str, detail: str | 
         await session.commit()
 
 
+def is_access_failure(detail: str | None) -> bool:
+    """403 (missing permission) and 404 (channel gone) say something about the destination (spec §81.2)."""
+    return bool(detail) and detail[:3] in ("403", "404")
+
+
+async def record_destination_outcome(session_factory, destination_id: int, status: str,
+                                     detail: str | None, now: datetime) -> bool:
+    """Counts consecutive access failures and pauses at the threshold (spec §81.4).
+    A post resets the count; every other outcome leaves it alone. Returns True when this call paused it."""
+    if status != "posted" and not (status == "error" and is_access_failure(detail)):
+        return False
+    async with session_factory() as session:
+        dest = await session.get(AudienceDestination, destination_id)
+        if dest is None or dest.paused_at is not None:
+            return False
+        if status == "posted":
+            if dest.consecutive_failures:
+                dest.consecutive_failures = 0
+                await session.commit()
+            return False
+        dest.consecutive_failures = (dest.consecutive_failures or 0) + 1
+        paused = dest.consecutive_failures >= PAUSE_AFTER_FAILURES
+        if paused:
+            dest.paused_at = now
+            dest.pause_reason = f"{dest.consecutive_failures} failures in a row; last answer: {detail}"[:255]
+            logger.warning("destination %s paused: %s", destination_id, dest.pause_reason)
+        await session.commit()
+        return paused
+
+
 async def process_delivery(session_factory, discord, delivery_id: int, now: datetime) -> str | None:
     """Claims and sends one delivery. Returns the final status, or None when
     another worker already claimed it. Never raises."""
@@ -567,6 +603,7 @@ async def process_delivery(session_factory, discord, delivery_id: int, now: date
             return None
 
     status, detail, discord_event_id, merged_into_id = "error", "Unexpected failure before sending", None, None
+    reminder_destination_id: int | None = None
     try:
         async with session_factory() as session:
             delivery = await session.get(Delivery, delivery_id)
@@ -585,11 +622,17 @@ async def process_delivery(session_factory, discord, delivery_id: int, now: date
                 status, detail = await _send_discord_event(session, discord, delivery, event, occ, tenant, now)
                 discord_event_id, merged_into_id = delivery.discord_event_id, delivery.merged_into_id
             else:
+                reminder_destination_id = delivery.destination_id
                 status, detail = await _send_reminder(session, discord, delivery, event, occ, tenant, now)
     except Exception as exc:  # one delivery's failure must not stop the tick
         logger.exception("delivery %s failed", delivery_id)
         status, detail = "error", f"{type(exc).__name__}: {exc}"
     await _finish(session_factory, delivery_id, status, detail, discord_event_id, now, merged_into_id)
+    if reminder_destination_id is not None:
+        try:
+            await record_destination_outcome(session_factory, reminder_destination_id, status, detail, now)
+        except Exception:  # bookkeeping must never fail a tick
+            logger.exception("could not record the outcome for destination %s", reminder_destination_id)
     return status
 
 

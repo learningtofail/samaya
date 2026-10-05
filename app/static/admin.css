@@ -418,6 +418,10 @@ textarea.pf-v6-c-form-control { min-height: 5rem; resize: vertical; }
 .health__counts { gap: var(--space-4); margin: 0; }
 .health__count { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--fs-md); }
 .health__note { margin: 0; }
+.health__paused { flex-basis: 100%; background: var(--bad-bg); color: var(--bad-ink); border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
+.health__paused-title { margin: 0 0 var(--space-2); font-weight: 600; }
+.health__paused-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.health__paused-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); font-size: var(--fs-sm); }
 .panel { border-radius: 10px; padding: var(--space-5); border-color: var(--line); }
 .panel .view__head { margin-bottom: var(--space-3); }
 .panel__title { font-size: var(--fs-md); }

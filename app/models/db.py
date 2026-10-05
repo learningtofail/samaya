@@ -701,6 +701,11 @@ class AudienceDestination(Base):
     server_id   = Column(Integer, ForeignKey("discord_servers.id"), nullable=False)
     channel_id  = Column(Text, nullable=False)
     role_id     = Column(Text, nullable=False, default="", server_default="")
+    # Spec §81: a destination that keeps answering 403/404 is paused until a
+    # coordinator resumes it.
+    consecutive_failures = Column(Integer, nullable=False, default=0, server_default="0")
+    paused_at            = Column(DateTime(timezone=True))
+    pause_reason         = Column(Text)
 
     server   = relationship("DiscordServer", lazy="joined")
     audience = relationship("Audience", lazy="joined", back_populates="destinations")
