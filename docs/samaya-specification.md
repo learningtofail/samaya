@@ -2880,3 +2880,120 @@ Recorded 2026-10-04 so the reasoning behind the decisions is not lost.
 | What does the owner need to do next? | Answer O10 to O13 in 78.17, run the three checks (the Caddy forwarded-header grep in 78.11, the `/api/events` size in 78.5, and the events-without-reminders query in 78.19), and decide whether to run the measurement plan in 78.19 |
 
 Open and unverified, collected from the whole section: Safari's behaviour on a push with no visible notification; the real push hostnames of Edge and Samsung Internet; the maintenance state of `http-ece` and `py-vapid`; the Topic length rule against the RFC text; how Google Calendar and Outlook treat `VALARM` in a subscribed feed; whether install, service workers and push work in Discord's in-app browser; how Caddy and Cloudflare handle the forwarded headers; whether the restic backup includes `.env`; Cloudflare's analytics fields; and the Kingshot player facts the reviewers took from third-party guides.
+
+## 79. Gift code redemption
+
+Status: proposed, design only, nothing built. Depends on nothing in §78. Reference implementation studied: `github.com/justncodes/ks-giftcode` v2.0.0 (2026-07-25, GPLv3, one Python file). The protocol facts below come from that script and from nothing else. They are unverified against the live API and must be checked with one real redemption before any build is trusted.
+
+### 79.1 Goal, non-goals and a scope warning
+
+A coordinator pastes a gift code, and Samaya redeems it for every player on their alliance's roster, then shows who got it, who already had it, and whose kingdom number is wrong. The reason to do it inside Samaya is that alliances, access control, the admin console and the audit log already exist.
+
+Not in this section: finding codes automatically, player nicknames (the API no longer returns them), a public page, player self-registration, Discord result posts, and any tracking beyond redemption outcomes.
+
+Scope warning. On 2026-10-01 the owner asked to rethink Samaya's scope and said player tracking is not to be designed yet. A roster of player IDs is the first data about individual players that Samaya would hold, and redemption is unrelated to event scheduling. The alternative that keeps Samaya unchanged is to run the reference script, or the owner's earlier gift code bot, as a separate container with its own storage (79.12). That is the lowest-risk option and a legitimate answer to O1.
+
+### 79.2 Decisions
+
+| # | Decision |
+|---|---|
+| 1 | One roster per alliance (Tenant). Entries are a player ID and an optional kingdom override. No names. An optional note of up to 40 characters is allowed. |
+| 2 | The game kingdom number lives on the Kingdom (`kingdoms.game_number`, nullable). A roster entry's `kid` overrides it for transferred players. Redemption without a resolvable kingdom is refused before any request. |
+| 3 | A run is one code for the alliances the user picks. Results are one row per distinct player ID, so a player on two rosters is redeemed once. |
+| 4 | A run is resumable. State is in the database, a tick job advances it, and a restart loses nothing. Redemption is idempotent on the game's side (`RECEIVED`), so a row left `in_flight` by a crash is simply retried. |
+| 5 | One run advances at a time. At least 1 second plus up to 0.5 seconds of jitter between requests, because the API limits per player and the reference script uses that pace. |
+| 6 | An honest client. A fixed `User-Agent` of `Samaya/{version} (+https://ks138.taraka.dev)` and no header rotation. The reference script rotates browser, version and platform headers "to avoid bot detection". Samaya does not copy that. If the server blocks the client, the run stops and says so, and nobody works around it. This may get blocked sooner than the reference script (O3). |
+| 7 | The signing key and base URL are configuration (`KS_GIFTCODE_SIGN_KEY`, `KS_GIFTCODE_BASE_URL`), never committed. The key was extracted from the game's web client, can change without notice, and has already differed between the owner's earlier bot and this script. Feature off when the key is unset. |
+| 8 | Drift is detected, not guessed. Three players in a row answering `SIGN ERROR`, `NOT LOGIN` or an unknown message stops the run as `api_changed`. |
+| 9 | Player IDs never appear in any public payload, ICS feed or Discord message. Every roster change and run start is audited. |
+| 10 | Redemption is a game-account action taken on behalf of players who put their ID on a list. The coordinator is responsible for having their members' agreement. Samaya does not verify ownership of an ID, and cannot, since the API returns no nickname. |
+| 11 | Clean reimplementation, not a copy. The protocol is about 60 lines (79.5). The reference repo is credited in the module docstring. GPLv3 would attach to copied code only if Samaya were distributed, which it is not, but a rewrite avoids the question. Not legal advice. |
+
+### 79.3 Data model (one Alembic revision, additive, downgrade drops the tables and column)
+
+The revision id is chosen at build time as the next free one after whatever has merged. §78 reserves `a1f0c0de0013` and `a1f0c0de0014`, so this one may not be `0013`. Models go in `models/db.py` so `alembic check` sees them.
+
+`kingdoms.game_number` Integer, nullable.
+
+`roster_players`: `id`, `tenant_id` (FK to tenants, `ondelete CASCADE`), `fid` String(20), `kid` Integer nullable, `note` String(40) nullable, `created_by` (FK to users, `SET NULL`), `created_at`. Unique on `(tenant_id, fid)`. CHECK that `fid` is digits only. Delete children explicitly in application code as well, because the test SQLite has foreign keys off.
+
+`redemption_runs`: `id`, `code` Text, `status` (`queued`, `running`, `done`, `stopped`, `cancelled`), `stop_reason` Text nullable (`code_expired`, `code_invalid`, `claim_limit`, `api_changed`, `unreachable`, `cancelled`), `created_by`, `created_at`, `started_at`, `finished_at`.
+
+`redemption_results`: `id`, `run_id` (FK, `CASCADE`), `tenant_id` (the first alliance that listed the player), `fid`, `kid`, `status` (`pending`, `in_flight`, `cooling`, then the final classified key), `message`, `attempts`, `cooldowns`, `next_attempt_at`, `updated_at`. Unique on `(run_id, fid)`.
+
+Retention: results and runs older than 90 days are deleted by the daily generation job. Deleting a Tenant cascades its roster.
+
+### 79.4 Outcomes the client must classify
+
+From the reference script. The `err_code` is checked together with the message.
+
+| `msg` | `err_code` | Meaning | Action |
+|---|---|---|---|
+| `SUCCESS`, `SAME TYPE EXCHANGE` | none, 40011 | Redeemed | final, counts as success |
+| `RECEIVED` | 40008 | Already redeemed | final, harmless |
+| `TIME ERROR` | 40007 | Code expired | stop the whole run |
+| `CDK NOT FOUND` | 40014 | Wrong code | stop the whole run |
+| `USED` | 40005 | Claim limit reached | stop the whole run |
+| `TOO FREQUENT` | 40019 | Per-player limit | park that player 60 seconds, at most 3 times |
+| `TIMEOUT RETRY` | 40004 | Server asks for a retry | retry up to 3 times with growing delay |
+| `USER INFO ERROR` | 40020 | Wrong kingdom for this ID | final, listed for the coordinator to fix |
+| not exist | 40001 | No such player | final |
+| `STOVE_LV ERROR`, `RECHARGE_MONEY ERROR`, `RECHARGE_MONEY_VIP ERROR` | 40006, 40017, 40018 | Player does not meet the code's requirement | final |
+| anything else | any | Unknown | final as an error, counts toward drift (decision 8) |
+
+Transport failures (HTTP 429, 502, 503, 504, timeout) retry 3 times with growing delay. Ten players in a row unreachable stops the run as `unreachable`.
+
+### 79.5 Module layout
+
+`services/giftcode_client.py`: `sign(payload, key)` is the lowercase hex MD5 of the keys sorted alphabetically and joined as `k=v&k=v`, followed by the key, and the signed request is form-encoded `fid`, `cdk`, `kid`, `time` (Unix seconds) plus `sign`, POSTed to `{base}/api/gift_code`. `classify(response_json)` is pure. `GiftcodeClient` takes an injected `httpx.AsyncClient` (`follow_redirects=False`, `trust_env=False`, 10 second connect and 30 second read timeouts) so tests use a fake transport and CI never touches the network.
+
+`services/giftcode_engine.py`: `create_run`, `run_tick(session_factory, client, now)` (claim by update before the call, commit, then call, process until a 50 second deadline, yield), `recover_stale_claims` (`in_flight` older than 5 minutes returns to `pending`), `cancel_run`. Registered in `scheduler/` as `giftcode_tick_job`, every minute, `max_instances=1`, only when the feature is configured.
+
+`routers/admin/giftcodes.py` and `schemas`: roster and runs (79.6). Wired into `admin/__init__.py`.
+
+### 79.6 API (all under `/admin/api`, tenant by `X-Tenant-Slug` as elsewhere)
+
+| Route | Who | Behaviour |
+|---|---|---|
+| `GET /roster` | not viewer | The alliance's entries |
+| `POST /roster` | not viewer | Bulk add from pasted text. A line is `fid` or `fid,kid`, `#` comments ignored, a two-number row is `fid,kid` when the second is 6 digits or fewer (the reference rule). Returns added, duplicates and rejected lines. Cap 500 entries per alliance |
+| `DELETE /roster/{id}` | not viewer | Remove one |
+| `POST /giftcode-runs` | not viewer | Body: `code` (trimmed, 3 to 40 characters, letters and digits), `tenant_ids` the user can access. Refuses while another run is active (409), when the feature is off (503), or when a roster has no kingdom (422 naming the players). Players already `SUCCESS` or `RECEIVED` for the same code in an earlier run are marked `RECEIVED` without a request |
+| `GET /giftcode-runs`, `GET /giftcode-runs/{id}` | not viewer | Progress, counts per status, wrong-kingdom list |
+| `POST /giftcode-runs/{id}/cancel` | not viewer | Remaining rows become `cancelled`, the run `cancelled` |
+
+Audit rows: roster add and remove (counts, never the IDs in the log message), run start and cancel.
+
+### 79.7 Admin UI
+
+One new tab, "Gift codes", in the existing no-build console: a roster card (paste box, table with delete, count), a Redeem card (code field, alliance checkboxes, Start), and a run list that polls every 3 seconds while a run is active and every 30 otherwise. A finished run shows five numbers (redeemed, already had it, wrong kingdom, requirement not met, other) and a wrong-kingdom list with each ID and the kingdom that was rejected. The tab ends in the collapsed `about-page` explainer. BEM classes, no inline styles or handlers, `classList` for hiding, `focusModal()` for any dialog. Strings in English only, like the rest of the console.
+
+### 79.8 Security and privacy
+
+Payloads are built from validated digits and a validated code, never concatenated from free text. The code is not secret, so it is stored and shown. Responses never echo the signing key. Log lines carry run id and counts, not player IDs. The roster API is the only place IDs are returned, and only to users with access to that alliance. A test asserts that no `fid` reaches `/api/events`, `/events.ics` or any other public route.
+
+### 79.9 Tests
+
+Signature against a vector computed from the formula in a test, so a change to the algorithm is deliberate. Classifier table above, one case per row. Engine with a fake client: success, already redeemed, cooldown then success, three cooldowns then give up, fatal status stops the rest, drift stop, unreachable stop, crash recovery (`in_flight` returns to `pending`), cross-alliance dedupe, earlier-run skip, deadline yield and resume. API: permissions with `make_user_and_client`, viewer 403, another alliance's roster 403, bulk parse edge cases, 409 and 503 paths, audit rows. Public leakage test (79.8). Migration: `alembic upgrade head`, `alembic check`, downgrade.
+
+### 79.10 Effort
+
+About 3 sessions: models, migration, client and classifier with tests; engine, scheduler job and API with tests; UI, explainer, `CLAUDE.md` and Part I updates. The live check (one real redemption with the owner's own ID and a real code) is a manual acceptance step and cannot be automated.
+
+### 79.11 Operations
+
+Env vars in `.env`: `KS_GIFTCODE_SIGN_KEY` and optionally `KS_GIFTCODE_BASE_URL` (default `https://kingshot-giftcode.centurygame.com`). Add both to `.env.example` without values. Back up `.env` with the rest of the host config. Production already has outbound HTTPS. The egress IP is the host's, so a burst that earns a rate limit affects only this feature. Deploy order: pull, build, `alembic upgrade head`, set the key, restart. Rollback: unset the key (feature off, tables stay), or `alembic downgrade` to the previous head. If redemption starts failing, check `stop_reason` first: `api_changed` means the reference repo's changelog is the place to look.
+
+### 79.12 Alternatives
+
+A. A sidecar container running the reference script from a mounted CSV, started by hand or by cron. No Samaya changes, no roster inside Samaya, no UI, GPLv3 code kept in its own container. Effort under 1 hour.
+B. The owner's earlier Discord bot or the community `kingshot-project/Kingshot-Discord-Bot` (named in the reference README). Players register themselves in Discord. Not evaluated here.
+C. This section.
+
+### 79.13 Open questions
+
+O1. Does this belong in Samaya given the 2026-10-01 scope rethink, or is alternative A enough?
+O2. Roster owner: alliance coordinators paste IDs (this design), or players self-register later. Self-registration needs a way to stop one person listing another's ID.
+O3. Accept the honest client (decision 6) and the higher risk of being blocked?
+O4. Should Century Games' terms be read before building? Not reviewed here, and automating redemptions for other people's accounts is the kind of thing a game's terms may restrict.
+O5. Should a run post a summary to a Discord channel when it ends? Deferred, as are button interactions.
