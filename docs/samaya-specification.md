@@ -2891,13 +2891,13 @@ A coordinator pastes a gift code, and Samaya redeems it for every player on thei
 
 Not in this section: finding codes automatically, player nicknames (the API no longer returns them), a public page, player self-registration, Discord result posts, and any tracking beyond redemption outcomes.
 
-Scope warning. On 2026-10-01 the owner asked to rethink Samaya's scope and said player tracking is not to be designed yet. A roster of player IDs is the first data about individual players that Samaya would hold, and redemption is unrelated to event scheduling. The alternative that keeps Samaya unchanged is to run the reference script, or the owner's earlier gift code bot, as a separate container with its own storage (79.12). That is the lowest-risk option and a legitimate answer to O1.
+Scope. Resolved 2026-10-05: the owner confirmed Samaya is heading toward a full alliance management suite, which supersedes the 2026-10-01 note that player tracking is not to be designed yet. A list of player IDs is the first per-player data Samaya holds, so §80 defines it once as a shared player registry and §79 builds on it. Alternative A in 79.12 stays as the zero-code fallback.
 
 ### 79.2 Decisions
 
 | # | Decision |
 |---|---|
-| 1 | One roster per alliance (Tenant). Entries are a player ID and an optional kingdom override. No names. An optional note of up to 40 characters is allowed. |
+| 1 | The roster is the player registry of §80.3: a player has an ID, an optional kingdom override and a current alliance. Redemption reads it and never writes to it except through the bulk add in 79.6. |
 | 2 | The game kingdom number lives on the Kingdom (`kingdoms.game_number`, nullable). A roster entry's `kid` overrides it for transferred players. Redemption without a resolvable kingdom is refused before any request. |
 | 3 | A run is one code for the alliances the user picks. Results are one row per distinct player ID, so a player on two rosters is redeemed once. |
 | 4 | A run is resumable. State is in the database, a tick job advances it, and a restart loses nothing. Redemption is idempotent on the game's side (`RECEIVED`), so a row left `in_flight` by a crash is simply retried. |
@@ -2915,7 +2915,7 @@ The revision id is chosen at build time as the next free one after whatever has 
 
 `kingdoms.game_number` Integer, nullable.
 
-`roster_players`: `id`, `tenant_id` (FK to tenants, `ondelete CASCADE`), `fid` String(20), `kid` Integer nullable, `note` String(40) nullable, `created_by` (FK to users, `SET NULL`), `created_at`. Unique on `(tenant_id, fid)`. CHECK that `fid` is digits only. Delete children explicitly in application code as well, because the test SQLite has foreign keys off.
+`players`: defined in §80.3 and created by the same revision. Redemption rows reference it with `player_id` (FK, `CASCADE`) next to `fid`, so a deleted player takes their results with them. Delete children explicitly in application code as well, because the test SQLite has foreign keys off.
 
 `redemption_runs`: `id`, `code` Text, `status` (`queued`, `running`, `done`, `stopped`, `cancelled`), `stop_reason` Text nullable (`code_expired`, `code_invalid`, `claim_limit`, `api_changed`, `unreachable`, `cancelled`), `created_by`, `created_at`, `started_at`, `finished_at`.
 
@@ -2992,8 +2992,87 @@ C. This section.
 
 ### 79.13 Open questions
 
-O1. Does this belong in Samaya given the 2026-10-01 scope rethink, or is alternative A enough?
-O2. Roster owner: alliance coordinators paste IDs (this design), or players self-register later. Self-registration needs a way to stop one person listing another's ID.
+O1. Closed 2026-10-05: in scope, as part of §80.
+O2. Roster owner: alliance coordinators paste IDs (this design), or players self-register later. Self-registration needs a way to stop one person listing another's ID (80.3).
 O3. Accept the honest client (decision 6) and the higher risk of being blocked?
 O4. Should Century Games' terms be read before building? Not reviewed here, and automating redemptions for other people's accounts is the kind of thing a game's terms may restrict.
 O5. Should a run post a summary to a Discord channel when it ends? Deferred, as are button interactions.
+
+## 80. Alliance management roadmap
+
+Status: proposed, design only, nothing built. Direction confirmed by the owner on 2026-10-05: Samaya is heading toward a full alliance management suite, and every feature is Samaya's own implementation. Inputs: a read-only review of `kingshot-project/Kingshot-Discord-Bot` (custom license, discord.py, SQLite, about 72,000 lines, last commit 2026-10-04) by three readers, then a spot check by me. Nothing is copied. The bot is evidence of what leaders ask for and of what goes wrong, not a source of code. Findings about the bot are from reading code and have not been run.
+
+### 80.1 What the review established
+
+| Finding | Consequence for Samaya |
+|---|---|
+| The game's player lookup endpoint is gone. The bot's `/w` now reads only its own database, and the `ks-giftcode` changelog says the same. | Names, furnace level and power cannot be fetched. They are typed, imported or read from screenshots. Samaya stores a typed name at most. |
+| Nothing verifies who owns a player ID. In the bot anyone can register any ID, first come first served. | Samaya cannot verify either. Leaders write the registry. Self-registration is a later, approval-gated feature (80.3). |
+| The bot's `/w` answers publicly for any ID in the database and its autocomplete lists every nickname and ID. Alliance-scoped admins are not scoped everywhere. | Samaya has no unauthenticated player lookup and scopes every player read to an alliance the user can access. |
+| Its reminder loop skips a reminder that was due during an outage and rolls the schedule forward. | Samaya's engine already treats this deliberately (never late, never stale, §66.4). Keep that. |
+| Its minister booking is admin-only, has no reminders and no database uniqueness on a slot. | Samaya adds a unique constraint and uses its own reminder engine. |
+| Bear damage records only players who dealt damage, so it cannot report who skipped. | With a roster, Samaya can report absentees. That is a real advantage. |
+| OCR carries unverified patterns (parts still say "Whiteout"), fuzzy matching that can credit the wrong player, and an optional third-party OCR service that receives screenshots. | No OCR in this roadmap. Pasted lists first (80.5). |
+| It stores backup passwords in plaintext, sends a shared API key over plain HTTP and probes the game server to guess kingdoms. | Not adopted. Samaya's secrets stay in `.env`. No probing. |
+
+### 80.2 Principles for every player-facing feature
+
+1. One shared registry (80.3). No feature keeps its own list of players.
+2. Player data is written and read by authenticated leaders only, scoped to alliances they can access. Kingdom coordinators see all alliances. Viewers read, never write.
+3. No player ID, name or per-player statistic appears in any public payload, ICS feed, push payload or Discord message unless a leader explicitly posts a report. A test asserts the first part for every new public route.
+4. No public shaming surfaces. Absence and damage rankings are leadership views. A leader may post a summary, which is their decision.
+5. Every bulk write and every export is audited with counts, never with the IDs in the log message.
+6. Retention is stated per table and enforced by the daily job. Removing a player removes their rows everywhere.
+7. Each feature is off until configured, and none changes the behavior of the event engine.
+8. Samaya states in the console that it does not verify ID ownership and that leaders attest their members agreed to be listed.
+
+### 80.3 The player registry
+
+One new table, created by the first revision that needs it (§79's).
+
+`players`: `id`, `kingdom_id` (FK to kingdoms, `CASCADE`), `fid` String(20) with a digits-only CHECK, `kid` Integer nullable (overrides the Kingdom's `game_number` for a transferred player), `tenant_id` (FK to tenants, `SET NULL`, the current alliance), `name` String(60) nullable (typed, optional), `note` String(40) nullable, `created_by` (FK to users, `SET NULL`), `created_at`, `updated_at`. Unique on `(kingdom_id, fid)`. A player is in at most one alliance at a time. Moving a player is a write with an audit row.
+
+Not stored: a Discord ID. Linking a player to a Discord account is what makes DMs and personal pings possible, and it is also what makes the table dangerous. It is deferred to its own decision (O3) and will need an approval step because the game gives no way to prove ownership.
+
+API: list, bulk add (pasted `fid` or `fid,kid[,name]` lines, cap 500 per alliance per request), edit, move, delete, CSV export (audited, `fid,kid,name,alliance`). Admin UI: a "Players" tab, the home of the roster that §79 describes. Import accepts the bot's CSV shape so an alliance can bring its list across.
+
+### 80.4 Features, ranked by value over effort
+
+Effort is a guess in sessions (inference), counting tests and the admin UI.
+
+| # | Feature | Source of the idea | What it is in Samaya | Effort |
+|---|---|---|---|---|
+| 1 | Player registry and gift code redemption | Most prominent feature in the bot, both readers agree | §79 on top of 80.3 | 3 to 3.5 |
+| 2 | Pause failing destinations | The bot's quarantine. Your own 403 "bot needs Send Messages" failures on 2026-10-04 | After N consecutive permission failures (403 on a channel) a destination is paused, shown in the delivery health card with the reason, and resumed by a button or automatically when a probe succeeds. Never silent: the coordinator is told in the console. Needs a decision on who is notified (O4) | 1 |
+| 3 | Schedule board | The bot's pinned live boards, rated among the most valued | One message per chosen channel that Samaya edits in place: next 7 days by day, refreshed daily and when an event changes. Reuses `public_rows`. Needs the message id stored per destination and edit-or-recreate handling when someone deletes it. Timezone shown as UTC with a relative time per line (no per-viewer timezone) | 2 |
+| 4 | Self-cleaning reminders | The bot deletes earlier reminders when later ones go out | Optional per event: after a later reminder posts, or after the event ends, delete the earlier Discord messages. Needs Manage Messages and the stored message ids. Failure to delete is logged and never blocks sending | 1 |
+| 5 | Minister appointment slots | The bot's Construction, Research and Training day slots | See 80.5. Leader-booked in v1, a public read-only slot table, reminders through the existing engine | 2 to 3 |
+| 6 | Bear hunt damage | The bot's most developed tracker | See 80.5. Pasted `fid,damage` per hunt, leaderboards, trend per player, and the absentee list the bot cannot produce | 2 |
+| 7 | Attendance | The bot's attendance sessions | Manual checklist per event occurrence (present, absent, excused, walk-in), per-player history for leaders. A no-show ranking stays a leadership view (principle 4) | 2 |
+| 8 | Kingshot event presets | The bot ships a library of the game's events | A seed list of event types (name, color, default duration, default reminders) a coordinator can import. Durations and cycles are game facts that must be checked in game before they ship (inference: the bot's own comments flag some as unverified) | 0.5 |
+| 9 | First-run checklist | The bot's setup wizard | A dismissible checklist in the console: Kingdom, alliance, server, destination, first event. No wizard flow | 0.5 |
+
+Roughly 14 to 16 sessions for everything. The sensible stopping points are after 1 and after 4.
+
+### 80.5 Designs for the two data features
+
+Minister slots. The game mechanic as the bot models it: three appointment types, each a 24 hour grid in 30 minute slots (a 15 minute variant exists), one holder per slot and one slot per player per type. Verify the mechanic in game before building. Data: `appointment_slots` with `kingdom_id`, `kind`, `day` (date), `slot_start` (UTC), `player_id`; unique on `(kingdom_id, kind, day, slot_start)` and on `(kingdom_id, kind, day, player_id)`, enforced by the database. Kingdom coordinators book. The public page shows a read-only table of slots with open ones marked, never a player ID, with the player's typed name only if the leader enabled "show names". A slot reminder is a delivery to the Kingdom's appointment destination, sent at a lead time before the slot, naming the slot and, only if a leader chose it, the typed name. No DMs and no mentions until O3 is decided.
+
+Bear damage. A hunt is `(kingdom_id, tenant_id, date, trap, rallies, total_damage)` and its rows are `(hunt_id, player_id, damage)`. A leader pastes `fid,damage` lines after a hunt. Reports: top players, a player's damage over time and change against their previous hunt on the same trap, alliance total over time, and members on the roster with no row (absent or zero). Everything stays behind the console. Retention 12 months. No screenshots are accepted or stored.
+
+### 80.6 Not on the roadmap
+
+OCR of any kind, the kingdom probe and scan, a public player lookup, the shared gift code distribution service, theme galleries (Samaya has §71), backups by DM, self-updating, a button-driven menu bot, and anything that stores a screenshot. Backup stays `ops/backup.sh` plus restic.
+
+### 80.7 Sequencing and cross-cutting work
+
+Order: 1, 2, 3, 4, then 5 to 7 in the order the alliance actually asks for them. Items 2 to 4 touch the delivery engine and need its tests extended (at-most-once, the stale rules). Items 1, 5, 6 and 7 add a permission surface and each gets the same tests: viewer 403, other alliance 403, nothing in public routes, audit rows written. Alembic revisions are numbered at build time after whatever has merged, and §78 reserves `0013` and `0014`. Each feature gets its own spec section before it is built, as this one has for gift codes.
+
+### 80.8 Open questions
+
+O1. The owner's order of interest after item 1, and whether 2 to 4 should come before 5 to 7.
+O2. Whether alliance coordinators or only Kingdom coordinators book minister slots.
+O3. Linking a player to a Discord account, for DMs and pings: wanted at all, and with what approval step.
+O4. Who is told when a destination is paused: the console only, the alliance owner by DM, or a channel post.
+O5. Retention: the 90 days for redemption results and 12 months for bear data are proposals.
+O6. Whether to read Century Games' terms before item 1 (79.13 O4).
