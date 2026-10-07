@@ -24,6 +24,21 @@ class FakeDiscord:
         self.send_error = ""
         self.cancel_error = ""
         self.raise_on_send_to: set[str] = set()
+        # Spec §82/§83: channel messages that have ids.
+        self.messages: dict[tuple[str, str], str] = {}
+        self.post_error = ""
+        self.edit_error = ""
+        self.delete_error = ""
+        self.components: dict[tuple[str, str], list] = {}  # spec §84: the latest components per message
+        # Spec §87: roles and role membership.
+        self.guild_roles: dict[str, dict[str, dict]] = {}   # guild_id -> role_id -> role
+        self.bot_top: int | None = 100
+        self.role_context_error = ""
+        self.member_roles: dict[tuple[str, str], set[str]] = {}  # (guild_id, user_id) -> role ids
+        self.role_error = ""
+        self.create_role_error = ""
+        self.interaction_edits: list[tuple[str, str, str]] = []
+        self.interaction_edit_error = ""
         self._next = 0
 
     def count(self, name: str) -> int:
@@ -59,6 +74,87 @@ class FakeDiscord:
         if channel_id in self.raise_on_send_to:
             raise RuntimeError("boom")
         return (False, self.send_error) if self.send_error else (True, "")
+
+    async def post_channel_message(self, token, channel_id, content, *, no_mentions=False, components=None):
+        self.calls.append(("send", channel_id, content))
+        if channel_id in self.raise_on_send_to:
+            raise RuntimeError("boom")
+        error = self.post_error or self.send_error
+        if error:
+            return "", error
+        self._next += 1
+        message_id = f"m{self._next}"
+        self.messages[(channel_id, message_id)] = content
+        self.components[(channel_id, message_id)] = components or []
+        return message_id, ""
+
+    async def edit_channel_message(self, token, channel_id, message_id, content, *, no_mentions=False, components=None):
+        self.calls.append(("edit", channel_id, message_id, content))
+        if self.edit_error:
+            return False, self.edit_error
+        if (channel_id, message_id) not in self.messages:
+            return False, "MESSAGE_GONE"
+        self.messages[(channel_id, message_id)] = content
+        if components is not None:
+            self.components[(channel_id, message_id)] = components
+        return True, ""
+
+    async def delete_channel_message(self, token, channel_id, message_id):
+        self.calls.append(("delete", channel_id, message_id))
+        if self.delete_error:
+            return False, self.delete_error
+        self.messages.pop((channel_id, message_id), None)
+        return True, ""
+
+    # --- spec §87
+    def add_role(self, guild_id, role_id, name="Role", permissions=0, managed=False, position=1):
+        self.guild_roles.setdefault(guild_id, {})[role_id] = {
+            "id": role_id, "name": name, "color": 0, "permissions": str(permissions),
+            "managed": managed, "position": position}
+
+    async def get_role_context(self, token, guild_id):
+        self.calls.append(("role_context", guild_id))
+        if self.role_context_error:
+            return {}, None, self.role_context_error
+        return dict(self.guild_roles.get(guild_id, {})), self.bot_top, ""
+
+    async def add_member_role(self, token, guild_id, user_id, role_id, reason=""):
+        self.calls.append(("add_role", guild_id, user_id, role_id))
+        if self.role_error:
+            return False, self.role_error
+        self.member_roles.setdefault((guild_id, user_id), set()).add(role_id)
+        return True, ""
+
+    async def remove_member_role(self, token, guild_id, user_id, role_id, reason=""):
+        self.calls.append(("remove_role", guild_id, user_id, role_id))
+        if self.role_error:
+            return False, self.role_error
+        self.member_roles.setdefault((guild_id, user_id), set()).discard(role_id)
+        return True, ""
+
+    async def create_role(self, token, guild_id, name, reason=""):
+        self.calls.append(("create_role", guild_id, name))
+        if self.create_role_error:
+            return None, self.create_role_error
+        self._next += 1
+        role_id = f"r{self._next}"
+        self.add_role(guild_id, role_id, name)
+        return {"id": role_id, "name": name}, ""
+
+    async def rename_role(self, token, guild_id, role_id, name, reason=""):
+        self.calls.append(("rename_role", guild_id, role_id, name))
+        if self.role_error:
+            return False, self.role_error
+        if role_id in self.guild_roles.get(guild_id, {}):
+            self.guild_roles[guild_id][role_id]["name"] = name
+        return True, ""
+
+    async def edit_interaction_response(self, application_id, interaction_token, content):
+        self.calls.append(("edit_interaction", application_id))
+        self.interaction_edits.append((application_id, interaction_token, content))
+        if self.interaction_edit_error:
+            return False, self.interaction_edit_error
+        return True, ""
 
 
 async def _type_id(s, kingdom_id: int) -> int:

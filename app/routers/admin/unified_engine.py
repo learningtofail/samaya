@@ -15,7 +15,7 @@ from sqlalchemy.orm import aliased
 
 from models import get_db
 from models.db import (
-    Delivery, Event, EventAlliance, EventAudience, EventOccurrence, EventReminder, Tenant, User,
+    AudienceDestination, Audience, Delivery, Event, EventAlliance, EventAudience, EventOccurrence, EventReminder, Tenant, User,
 )
 from services.audit import log_change
 from services.db_errors import raise_friendly_integrity_error
@@ -25,6 +25,7 @@ from services.event_engine import (
     remove_posted_discord_events, sync_event_occurrences, apply_event_change, cancel_pending_deliveries,
 )
 from services.recurrence import occurs_on
+from services.signup import copy_event_signup, rsvp_counts
 from services.time_utils import ensure_utc
 
 from .deps import get_current_tenants, get_current_user, require_not_viewer
@@ -47,7 +48,7 @@ def _iso(dt: datetime | None) -> str | None:
 
 
 def _occurrence_dict(occ: EventOccurrence, event: Event, delivery_counts: dict[str, int] | None = None,
-                     overview: dict | None = None) -> dict:
+                     overview: dict | None = None, going: int = 0) -> dict:
     end = effective_end(occ)
     return {
         **(overview or {}),
@@ -64,6 +65,8 @@ def _occurrence_dict(occ: EventOccurrence, event: Event, delivery_counts: dict[s
         "is_moved":             occ.start_datetime_utc_override is not None,
         "message_override":     occ.message_override,
         "delivery_counts":      delivery_counts or {},
+        "rsvp_enabled":         event.rsvp_enabled,
+        "rsvp_count":           going,  # spec §87.10: a count only, admin console only
     }
 
 
@@ -90,6 +93,8 @@ def _delivery_dict(d: Delivery, occ: EventOccurrence, event: Event, tenant: Tena
         "detail":             d.detail,
         "discord_event_id":   d.discord_event_id,
         "posted_at_utc":      _iso(d.posted_at_utc),
+        "message_deleted_at": _iso(d.message_deleted_at),
+        "cleanup_error":      d.cleanup_error,
         "audience_label":     d.destination.audience.label if d.destination is not None else None,
         "channel_id":         d.channel_id or None,
         "guild_id":           d.guild_id or None,
@@ -147,7 +152,8 @@ async def list_occurrences(
     start = date_from or datetime.now(timezone.utc).date()
     end = date_to or start + timedelta(days=28)
     tenant_ids = [t.id for t in tenants]
-    kingdom_ids = {t.kingdom_id for t in tenants}
+    slug_for_kingdom = {t.kingdom_id: t.slug for t in reversed(tenants)}  # any alliance of the Kingdom works for a write
+    kingdom_ids = set(slug_for_kingdom)
     in_audience = select(EventAlliance.event_id).where(EventAlliance.tenant_id.in_(tenant_ids))
     rows = await db.execute(
         select(EventOccurrence, Event)
@@ -176,7 +182,9 @@ async def list_occurrences(
     for _, e in pairs:
         if e.id not in overviews:
             overviews[e.id] = await event_overview(db, await _load_event(db, e.id))
-    return [_occurrence_dict(o, e, counts.get(o.id), overviews[e.id]) for o, e in pairs]
+    going = await rsvp_counts(db, [(o.event_id, o.occurrence_date) for o, _ in pairs])
+    return [_occurrence_dict(o, e, counts.get(o.id), overviews[e.id], going.get((o.event_id, o.occurrence_date), 0))
+            for o, e in pairs]
 
 
 @router.patch("/occurrences/{occurrence_id}")
@@ -285,6 +293,9 @@ async def split_event(
         location=event.location, start_time_utc=event.start_time_utc, duration_hours=event.duration_hours,
         recurrence_kind=event.recurrence_kind, interval_days=event.interval_days,
         anchor_date=payload.from_date, until_date=event.until_date, mention_role=event.mention_role,
+        clean_up_reminders=event.clean_up_reminders,
+        signup_enabled=event.signup_enabled, signup_mention=event.signup_mention, rsvp_enabled=event.rsvp_enabled,
+        signup_group_id=event.signup_group_id,
         active=event.active, cover_image_data=event.cover_image_data,
     )
     new_event.reminders = [EventReminder(minutes_before=r.minutes_before, message=r.message) for r in event.reminders]
@@ -302,6 +313,7 @@ async def split_event(
         await db.rollback()
         raise_friendly_integrity_error(e, {})
 
+    await copy_event_signup(db, event.id, new_event, payload.from_date)  # spec §87: roles and later RSVPs follow the new series
     changes = payload.changes
     await apply_event_patch(db, user, new_event, owner, changes, new_event.scope)
     if changes.anchor_date is None:
@@ -445,9 +457,21 @@ async def delivery_health(
                                                     Delivery.due_at_utc <= now)
     )).scalar_one()
     overdue = round((now - ensure_utc(oldest)).total_seconds() / 60) if oldest is not None else 0
+    slug_for_kingdom = {t.kingdom_id: t.slug for t in reversed(tenants)}  # any alliance of the Kingdom works for a write
+    kingdom_ids = set(slug_for_kingdom)
+    paused = (await db.execute(
+        select(AudienceDestination).join(Audience, Audience.id == AudienceDestination.audience_id)
+        .where(Audience.kingdom_id.in_(kingdom_ids), AudienceDestination.paused_at.is_not(None))
+        .order_by(AudienceDestination.paused_at)
+    )).scalars().unique().all()
     return {
         "window_days": 7,
         "counts": counts,
         "oldest_pending_overdue_minutes": overdue,
-        "healthy": counts.get("error", 0) == 0 and overdue <= 5,
+        "paused_destinations": [
+            {"id": d.id, "audience": d.audience.label, "server_name": d.server.name, "channel_id": d.channel_id,
+             "reason": d.pause_reason, "paused_at": ensure_utc(d.paused_at).isoformat(), "slug": slug_for_kingdom[d.audience.kingdom_id]}
+            for d in paused
+        ],
+        "healthy": counts.get("error", 0) == 0 and overdue <= 5 and not paused,
     }

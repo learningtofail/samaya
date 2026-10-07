@@ -128,5 +128,6 @@ restoring from `ops/backup.sh`'s nightly dump.
 - All times UTC
 - Discord bot tokens, guild IDs and each alliance's notification channel and role are managed in the admin console's Setup tab (bot credentials: superadmin only; the notification destination: alliance owner or superadmin)
 - The first superadmin(s) come from `SUPERADMIN_DISCORD_IDS` in `.env` (comma-separated Discord user IDs) — there's no other way to bootstrap platform admin access
+- Gift code redemption (spec §79) is off until `KS_GIFTCODE_SIGN_KEY` is set in `/opt/taraka/.env` (the game's request signing key; never commit it). Then restart the app and set each Kingdom's game number in Setup. `KS_GIFTCODE_BASE_URL` and `KS_GIFTCODE_USER_AGENT` are optional. Run `alembic upgrade head` first (adds the player tables)
 - Backup: add /opt/taraka/postgres/ to restic with pg_dump pre-hook
 - Docs: Samaya Self-Hosted Architecture PRD v2.0 (Google Drive) — predates the multi-tenant/auth rework; `CLAUDE.md` is the current source of truth for repo structure

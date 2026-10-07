@@ -132,6 +132,7 @@ function editKingdom(k) {
   byId('kgId').value = k.id;
   byId('kgName').value = k.name;
   byId('kgSlug').value = k.slug;
+  byId('kgGameNumber').value = k.game_number || '';
   byId('kgPublicTitle').value = k.public_site_title || '';
   byId('kgAdminTitle').value = k.admin_console_title || '';
   byId('kgColor').value = k.color || KINGDOM_DEFAULT_COLOR;
@@ -177,6 +178,9 @@ async function saveKingdomModal() {
   const payload = {};
   if (name !== k.name) payload.name = name;
   if (slug !== k.slug) payload.slug = slug;
+  const gameNumber = byId('kgGameNumber').value.trim() === '' ? null : parseInt(byId('kgGameNumber').value, 10);
+  if (gameNumber !== null && !(gameNumber >= 1)) { toast('The game kingdom number must be a positive whole number', true); return; }
+  if (gameNumber !== (k.game_number || null)) payload.game_number = gameNumber;
   const publicTitle = byId('kgPublicTitle').value.trim();
   const adminTitle = byId('kgAdminTitle').value.trim();
   if (publicTitle !== (k.public_site_title || '')) payload.public_site_title = publicTitle;

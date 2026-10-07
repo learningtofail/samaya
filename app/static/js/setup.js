@@ -56,6 +56,20 @@ function audienceAlliancesHtml(a) {
   return a.links.map((l) => `<div>${escapeHtml(l.alliance)} ${l.post_by_default ? pfLabel('Default', 'pf-m-green') : '<span class="samaya-muted">optional</span>'}</div>`).join('');
 }
 
+// Spec §82: what a destination's schedule board is doing, and a Refresh now button for coordinators.
+function boardNoteHtml(d, a) {
+  if (!d.board_scope) return '';
+  const alliance = TENANTS.find((t) => t.id === d.board_tenant_id);
+  const scope = d.board_scope === 'kingdom' ? 'whole Kingdom' : (alliance ? alliance.name : 'removed alliance');
+  const state = d.board_error
+    ? `<span class="samaya-muted board-note__error">${escapeHtml(d.board_error)}</span>`
+    : (d.board_posted ? '<span class="samaya-muted">posted</span>' : '<span class="samaya-muted">posts within a minute</span>');
+  const refresh = isKingdomCoordinator(a.kingdom_id)
+    ? ` <button type="button" class="pf-v6-c-button pf-m-link pf-m-small" data-action="refresh-board" data-id="${d.id}" data-kingdom="${a.kingdom_id}">Refresh now</button>`
+    : '';
+  return `<div class="board-note">${pfLabel('Board: ' + scope, 'pf-m-blue')} ${state}${refresh}</div>`;
+}
+
 function renderAudiencesPanel() {
   const kingdoms = manageableKingdomIds();
   byId('btnCreateAudience').classList.toggle('hidden', !kingdoms.length);
@@ -70,7 +84,7 @@ function renderAudiencesPanel() {
         : '<span class="samaya-muted">Read only</span>';
       return `<tr class="pf-v6-c-table__tr">
         <td class="pf-v6-c-table__td" data-label="Audience"><strong>${escapeHtml(a.label)}</strong><div class="label-stack">${audienceFlagsHtml(a)}</div></td>
-        <td class="pf-v6-c-table__td" data-label="Destinations">${a.destinations.map((d) => `<div>${destinationHtml(d, slug)}</div>`).join('')}</td>
+        <td class="pf-v6-c-table__td" data-label="Destinations">${a.destinations.map((d) => `<div>${destinationHtml(d, slug)}${boardNoteHtml(d, a)}</div>`).join('')}</td>
         <td class="pf-v6-c-table__td" data-label="Used by">${audienceAlliancesHtml(a)}</td>
         <td class="pf-v6-c-table__td" data-label="Actions">${actions}</td>
       </tr>`;
@@ -91,6 +105,22 @@ function audienceFormKingdom() {
   return existing ? existing.kingdom_id : parseInt(byId('audKingdom').value, 10);
 }
 
+function boardOptions(kingdomId) {
+  return [{ value: '', label: 'Off' }, { value: 'kingdom', label: 'Whole Kingdom' }].concat(
+    TENANTS.filter((t) => t.kingdom_id === kingdomId).map((t) => ({ value: `alliance:${t.id}`, label: `${t.name} only` })));
+}
+
+function boardValue(d) {
+  if (!d || !d.board_scope) return '';
+  return d.board_scope === 'alliance' ? `alliance:${d.board_tenant_id}` : 'kingdom';
+}
+
+function boardPayload(value) {
+  if (!value) return { board_scope: null, board_tenant_id: null };
+  if (value === 'kingdom') return { board_scope: 'kingdom', board_tenant_id: null };
+  return { board_scope: 'alliance', board_tenant_id: parseInt(value.split(':')[1], 10) };
+}
+
 function addAudienceDestinationRow(servers, kingdomId, d) {
   const n = ++AUD_ROW_SEQ;
   const slug = slugForKingdom(kingdomId);
@@ -105,9 +135,12 @@ function addAudienceDestinationRow(servers, kingdomId, d) {
     </div>
     <select class="pf-v6-c-form-control" id="audDst${n}Server">${optionsHtml(servers.map((s) => ({ value: s.id, label: s.name })), serverId)}</select>
     <div id="audDst${n}Channel"></div>
-    <div id="audDst${n}Role"></div>`;
+    <div id="audDst${n}Role"></div>
+    <label class="pf-v6-c-form__label" for="audDst${n}Board"><span class="pf-v6-c-form__label-text">Schedule board</span></label>
+    <select class="pf-v6-c-form-control" id="audDst${n}Board">${optionsHtml(boardOptions(kingdomId), boardValue(d))}</select>
+    <p class="pf-v6-c-form__helper-text">One message the bot edits in place with the next 7 days. Turn it off before removing this destination, so the message is deleted too.</p>`;
   byId('audDestinations').appendChild(li);
-  const row = { server: li.querySelector('select'), channel: null, role: null };
+  const row = { server: li.querySelector('select'), channel: null, role: null, board: byId(`audDst${n}Board`) };
   const mount = (channel, role) => {
     const sid = row.server.value;
     row.channel = mountDiscordPicker(byId(`audDst${n}Channel`), {
@@ -201,7 +234,7 @@ function collectAudienceDestinations() {
     const role = row.role.value();
     if (!channel) { toast('Choose a channel for every destination.', true); return null; }
     if (!/^\d+$/.test(channel) || (role && !/^\d+$/.test(role))) { toast('Channel and role IDs are digits only.', true); return null; }
-    out.push({ server_id: parseInt(row.server.value, 10), channel_id: channel, role_id: role });
+    out.push({ server_id: parseInt(row.server.value, 10), channel_id: channel, role_id: role, ...boardPayload(row.board.value) });
   }
   return out;
 }
@@ -232,6 +265,15 @@ async function saveAudienceModal() {
 byId('btnCreateAudience').addEventListener('click', () => openAudienceForm(null));
 byId('btnSaveAudienceModal').addEventListener('click', saveAudienceModal);
 bindActions(byId('audiencesBody'), {
+  async 'refresh-board'(btn) {
+    btn.disabled = true;
+    try {
+      const res = await api('POST', `/api/audience-destinations/${btn.dataset.id}/board/refresh`, null, false,
+        slugForKingdom(parseInt(btn.dataset.kingdom, 10)));
+      toast(res.board_error ? `Board not updated: ${res.board_error}` : `Board ${res.outcome}.`, !!res.board_error);
+      loadSetupAudiences();
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
+  },
   edit(btn) {
     const a = SETUP_AUDIENCES.find((x) => x.id === parseInt(btn.dataset.id, 10));
     if (a) openAudienceForm(a);

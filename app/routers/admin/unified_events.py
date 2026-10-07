@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from models import get_db
 from models.db import (
-    Event, EventAlliance, EventAudience, EventReminder, EventType, Tenant, User,
+    Event, EventAlliance, EventAudience, EventReminder, EventType, SignupGroup, Tenant, User,
 )
 from services.audit import log_change
 from services.db_errors import raise_friendly_integrity_error
@@ -24,6 +24,7 @@ from services.event_engine import (
     apply_event_change, event_overview, remove_event_from_discord, sync_event_occurrences,
 )
 from services.images import EVENT_COVER, process_data_uri_async
+from services.signup import drop_event_signup, signup_overview, type_signup_roles
 from services.validators import check_recurrence_shape
 
 from .deps import (
@@ -88,6 +89,11 @@ def _event_dict(e: Event) -> dict:
         "anchor_date":       str(e.anchor_date),
         "until_date":        str(e.until_date) if e.until_date else None,
         "mention_role":      e.mention_role,
+        "clean_up_reminders": e.clean_up_reminders,
+        "signup_enabled":    e.signup_enabled,
+        "signup_mention":    e.signup_mention,
+        "rsvp_enabled":      e.rsvp_enabled,
+        "signup_group_id":   e.signup_group_id,
         "active":            e.active,
         "cover_image_data":  e.cover_image_data or None,
         "reminder_minutes":  sorted((r.minutes_before for r in e.reminders), reverse=True),
@@ -110,6 +116,7 @@ async def _event_body(db: AsyncSession, e: Event) -> dict:
     """The event plus its live delivery overview (spec §67.6)."""
     body = _event_dict(e)
     body.update(await event_overview(db, e))
+    body.update(await signup_overview(db, e, body.get("servers") or []))
     return body
 
 
@@ -120,7 +127,9 @@ def _event_audit_snapshot(e: Event) -> dict:
         "duration_hours": float(e.duration_hours) if e.duration_hours is not None else None,
         "recurrence_kind": e.recurrence_kind, "interval_days": e.interval_days,
         "anchor_date": str(e.anchor_date), "until_date": str(e.until_date) if e.until_date else None,
-        "mention_role": e.mention_role, "active": e.active,
+        "mention_role": e.mention_role, "clean_up_reminders": e.clean_up_reminders, "active": e.active,
+        "signup_enabled": e.signup_enabled, "signup_mention": e.signup_mention, "rsvp_enabled": e.rsvp_enabled,
+        "signup_group_id": e.signup_group_id,
         "reminder_minutes": sorted((r.minutes_before for r in e.reminders), reverse=True),
         "reminder_messages": {str(r.minutes_before): r.message for r in e.reminders if r.message},
         "alliance_tenant_ids": sorted(a.tenant_id for a in e.alliances),
@@ -144,7 +153,12 @@ async def list_event_types(tenant: Tenant = Depends(get_current_tenant), db: Asy
     result = await db.execute(
         select(EventType).where(EventType.kingdom_id == tenant.kingdom_id).order_by(EventType.sort_order, EventType.name)
     )
-    return [_event_type_dict(t) for t in result.scalars().all()]
+    out = []
+    for t in result.scalars().all():
+        body = _event_type_dict(t)
+        body["signup_roles"] = await type_signup_roles(db, t.id)  # spec §87: the fallback Notify me roles
+        out.append(body)
+    return out
 
 
 @router.post("/event-types", status_code=201)
@@ -402,6 +416,24 @@ async def _require_write_access(db: AsyncSession, user: User, tenant: Tenant, ev
     raise HTTPException(status_code=404, detail="Event not found")
 
 
+async def _get_group_in_kingdom(db: AsyncSession, group_id: int, kingdom_id: int) -> SignupGroup:
+    group = await db.get(SignupGroup, group_id)
+    if group is None or group.kingdom_id != kingdom_id:
+        raise HTTPException(status_code=422, detail="That attendance group does not belong to this Kingdom")
+    return group
+
+
+def _settle_buttons_for_leadership(event: Event, signup_asked: bool | None, rsvp_asked: bool | None) -> None:
+    """Leadership-only events never get buttons (spec §87.2 decision 4). Asking for one is a 422; otherwise
+    both are quietly forced off."""
+    if not event.leadership_only:
+        return
+    if signup_asked or rsvp_asked:
+        raise HTTPException(status_code=422, detail="A leadership-only event cannot have Notify me or I'm in buttons")
+    event.signup_enabled = False
+    event.rsvp_enabled = False
+
+
 async def apply_event_patch(
     db: AsyncSession, user: User, event: Event, owner: Tenant, payload: EventPatch, before_scope: str,
 ) -> None:
@@ -415,10 +447,15 @@ async def apply_event_patch(
 
     if payload.type_id is not None:
         event.type_id = (await _get_type_in_kingdom(db, payload.type_id, owner.kingdom_id)).id
-    for field in ("name", "leadership_only", "active", "message", "location", "mention_role"):
+    for field in ("name", "leadership_only", "active", "message", "location", "mention_role", "clean_up_reminders",
+                  "signup_enabled", "signup_mention", "rsvp_enabled"):
         value = getattr(payload, field)
         if field in given and value is not None:
             setattr(event, field, value)
+    if "signup_group_id" in given:
+        event.signup_group_id = (await _get_group_in_kingdom(db, payload.signup_group_id, owner.kingdom_id)).id \
+            if payload.signup_group_id is not None else None
+    _settle_buttons_for_leadership(event, payload.signup_enabled, payload.rsvp_enabled)
     event.scope = new_scope
     if payload.start_time_utc is not None:
         event.start_time_utc = _parse_time(payload.start_time_utc)
@@ -617,9 +654,16 @@ async def create_event(
         anchor_date=anchor,
         until_date=until,
         mention_role=mention_role,
+        clean_up_reminders=bool(payload.clean_up_reminders),
+        signup_enabled=True if payload.signup_enabled is None else payload.signup_enabled,
+        signup_mention=bool(payload.signup_mention),
+        rsvp_enabled=True if payload.rsvp_enabled is None else payload.rsvp_enabled,
         active=True,
         cover_image_data=cover_image_data,
     )
+    if payload.signup_group_id is not None:
+        event.signup_group_id = (await _get_group_in_kingdom(db, payload.signup_group_id, tenant.kingdom_id)).id
+    _settle_buttons_for_leadership(event, payload.signup_enabled, payload.rsvp_enabled)
     event.alliances = await _resolve_alliance_rows(db, user, tenant, payload.scope, payload.alliances)
     _check_reminder_messages(reminder_minutes, payload.reminder_messages)
     event.reminders = _reminder_rows(reminder_minutes, payload.reminder_messages)
@@ -687,6 +731,7 @@ async def delete_event(
     await _require_write_access(db, user, tenant, event)
     before = _event_audit_snapshot(event)
     await remove_event_from_discord(db, discord, event.id)
+    await drop_event_signup(db, event.id)
     await db.delete(event)
     await log_change(
         db, user_id=user.id, tenant_id=tenant.id, table_name="events", row_id=event_id,

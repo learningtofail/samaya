@@ -2412,3 +2412,1120 @@ The largest whole unit is used (days, then hours, then minutes). The text has no
 ### 77.3 Fix found on the way
 
 An "at the start" (0 minute) reminder was always cancelled as "Event had already started": it comes due at the start time and the check was `start <= now`. It now gets a 5 minute grace period (`AT_START_GRACE`) so the one-minute tick, or a short outage, still posts it. Reminders before the start behave as before.
+
+## 78. Installable app and push notifications
+
+Requirement recorded 2026-10-04. Status: design only, nothing is built. Reviewed by independent reviewers before any code: twice on the technical design (78.18) and once from the players' side (78.19). The players' review found no evidence yet that players want push, so phases 2 and 3 are gated on measurement (78.4). The public events and feedback pages become an installable web app, and players can get push notifications for the events they choose, at lead times they choose, without an account.
+
+**Summary and reading order.** The idea: make the public schedule and feedback pages installable on a phone and let players opt in to push notifications for the events they choose, at lead times they choose, with no account. Status: design only, nothing built, and the owner has not yet decided whether to proceed (O10). The recommendation is to measure first and to consider calendar alarms and a Discord `/remind` DM as cheaper routes (78.4, 78.19). Read 78.2 for the decisions, 78.4 for the gate and phases, 78.8 and 78.9a for who gets which push, 78.12 for the player experience, 78.17 for the questions that need the owner, and 78.18 and 78.19 for what the reviews found. 78.20 records the questions asked while this was being designed.
+
+### 78.1 Goal and non-goals
+
+Goal: a player installs the schedule to their phone, picks what they care about once, and gets a notification at the times they asked for, even when Discord is muted.
+
+Non-goals for this section: accounts or sync across devices, email or SMS, native apps, notifications for the admin console, notifications about feedback tickets (the board is for developing Samaya only), and replacing Discord reminders. Discord stays the primary channel and is unchanged.
+
+### 78.2 Decisions
+
+1. **Anonymous.** There are no accounts. A push subscription is the identity. Its preferences live on the server keyed by the subscription, and nothing else about the person is stored.
+2. **One app, one service worker.** A single service worker registered at scope `/` serves both pages and holds the one push subscription. For `/admin`, `/auth`, `/invite`, `/webhooks`, `/health` and every non-GET request it does not call `respondWith` at all, so those requests never pass through it (78.6).
+3. **Push follows the public schedule, not Discord.** What a subscriber can receive is exactly what the public query returns (`services/public_events`). Leadership-only, inactive and cancelled occurrences are never pushed. Discord Audiences, channels and roles do not apply.
+4. **Players set their own lead times.** Push does not depend on an event's Discord reminder offsets, though "use each event's reminders" is the default mode (78.8).
+5. **No quiet hours in v1.** Phones already have Do Not Disturb and Focus, and server-side quiet hours would need time zone handling (`tzdata` is not in the image) for a feature the OS does better (78.16).
+6. **At most once, never late, never stale.** The engine claims a send before calling the push service, like Discord deliveries (§66.4). A push more than its late limit past its due time (15 minutes, or 30 for offsets of 60 minutes or more) is skipped. A push whose due time is earlier than the moment the subscriber, the event or the occurrence last changed is skipped too (78.8). Discord reminders still send late.
+7. **Standard Web Push through a service worker**, not Declarative Web Push, because it works across Chrome, Firefox and Safari (78.16).
+8. **Wording is built on the device** from structured data and the current time. Reminder text uses `Intl.RelativeTimeFormat` in the subscriber's language and needs no catalogue. The change pushes (decision 15) need a few short phrases, which `/sw.js` inlines from the `public.push.sw.*` keys of the enabled languages, so they follow the same review flags as the rest of the interface. The §77.4 default reminder text stays English and Discord only.
+9. **Management proof is the subscription's own auth secret.** The browser can always re-read it from its push subscription (78.11).
+10. **Endpoint allowlist.** The server only sends to known push-service hosts (78.13). Without it, any visitor could make the server call any URL.
+11. **A recurring event is followed by `series_id`, and sends are de-duplicated by `series_id` and date.** Occurrence ids are not stable: the engine deletes and recreates occurrences when an event is split, deactivated and reactivated or rescheduled (`_retire_occurrence`, `event_engine.py`). `series_id` survives all of these and is copied by a split.
+12. **Off unless configured.** Push needs VAPID keys and `SAMAYA_PUSH_ENABLED=1`, read at call time. Otherwise the bell is hidden, the jobs are not registered and the API answers `enabled: false`.
+13. **A separate scheduler job**, so a stall in Discord delivery cannot block push and the reverse.
+14. **An async sender that the app controls.** `httpx` for transport, with `follow_redirects=False` and `trust_env=False`, and `http-ece` plus `py-vapid` (the libraries `pywebpush` itself builds on) for RFC 8291 encryption and the VAPID token. `pywebpush` is not used: it is synchronous (it would freeze the single event loop, which also runs the Discord tick and every web request) and its transport follows redirects and proxy environment variables by default (inference; check at build). The maintenance state and `cryptography` compatibility of `http-ece` and `py-vapid` are not verified and must be checked first (78.17 O5), with the RFC 8291 test vectors in the tests.
+15. **Change pushes are part of the core.** A player who follows an event needs to hear that it moved or was cancelled, not only reminders (78.9a). Today a move or cancel updates or removes the Discord Scheduled Event and sends no channel message (§66.3), so this is new behaviour.
+16. **Gated on evidence.** Phases 2 and 3 are built only after the measurements in 78.4 show that players want push. Phase 0 stands on its own.
+17. **Silent failure is not acceptable.** The player always sees whether notifications are working on this device, and every case the page cannot support (in-app browser, iPhone outside the Home Screen, blocked permission) says so and offers a fallback instead of hiding the control (78.12).
+18. **The coordinator's reminders are the only control over what is pushed.** An event with no reminders sends no push in the default mode. There is no per-event push switch and no urgent override in v1 (78.16).
+
+### 78.3 Facts the design relies on
+
+| Fact | Status |
+|---|---|
+| A push service must accept a message of at least 4096 bytes (the encrypted body); larger may get 413. Encryption is RFC 8291 (`aes128gcm`) | Established (web.dev Web Push protocol guide, RFC 8030) |
+| `TTL` is seconds the push service keeps an undelivered message and may be reduced by the service; `Urgency` is `very-low`, `low`, `normal` (default) or `high`; `Topic` lets a new message replace a pending one with the same topic (at most 32 characters of the URL-safe base64 alphabet) | Established (web.dev); the Topic length rule is from the reviewer's recall of RFC 8030, to be confirmed against the RFC |
+| 404 means the subscription expired and 410 means it was unsubscribed; both mean delete it. 429 carries `Retry-After` | Established (web.dev) |
+| VAPID: the JWT audience is the push service origin, expiry is at most 24 hours, and the subject is a `mailto:` or URL | Established (web.dev) |
+| FCM answers 403 when a subscription was made with a different VAPID key, so a key rotation leaves dead rows that never return 404 or 410 | Reported (webpush-java issue 212); handled by the disable rule in 78.9 |
+| iOS and iPadOS deliver web push only to web apps added to the Home Screen (display `standalone`), from iOS 16.4. Safari 18.4 adds Declarative Web Push for Home Screen web apps. macOS Safari has had web push since 16.1 | Established for Home Screen and 18.4 (WebKit blog, fetched); 16.4 and `standalone` reported by a reviewer from the WebKit iOS post, to be confirmed on a real device |
+| Safari expects every push to end in a visible notification, so the service worker always calls `showNotification` | Widely held, not verified. The design always shows one |
+| `Intl.RelativeTimeFormat` with `numeric: 'always'` gives "in 30 minutes" style text and `format(0, 'second')` with `numeric: 'auto'` gives the "now" wording in `en`, `fr`, `es`, `de`, `tr`, `ru`, `ar` and `zh-Hans`. `format(0, 'minute')` gives "this minute" and must not be used for the start | Verified by running Node on 2026-10-04 for all eight locales |
+| The `/api/events` response was about 23 MB | Observed 2026-10-03. The cause in 78.5 is established by reading the code (every occurrence row carries the cover data URI), not yet by measuring a response |
+| Behind Cloudflare, a client can send its own `X-Forwarded-For` and Cloudflare appends to it, so the leftmost entry that `rate_limit._client_ip` trusts is client-controlled. Whether Caddy overwrites the header, which would put every visitor in one bucket, is unknown | Plausible, unverified for this deployment (78.11, O9) |
+
+### 78.4 Gate and phases
+
+**Gate.** The players' review (78.19) found no evidence that players want push, and found cheaper routes to the same job (calendar alarms and Discord DMs). Before phase 2, in this order:
+
+1. **Measure** (about half a session, no feature): the schedule page's device, browser and referrer split from Cloudflare's analytics or the edge logs, a count of taps on the Add to Calendar menu by vendor, and a one-question poll in Discord (poll text in 78.19).
+2. **Test calendar alarms** (one hour): subscribe a test feed that carries `VALARM` in Google Calendar, Apple Calendar and Outlook and note what fires. Adding `VALARM` to the feed is about 30 lines. The outcome decides whether it is worth its own small section.
+3. **Decide on a Discord `/remind` DM command** as an alternative or a first step (78.19). It needs no install and no permission prompt.
+
+Decision rule the reviewers propose, which is a judgement and not a fact: proceed to phase 2 when at least 40 percent of schedule visits are on Android or desktop outside Discord's in-app browser and at least 25 percent of at least 30 poll respondents prefer a phone notification over a DM or a calendar alarm; stop when 15 percent or fewer want any notification outside Discord, or more than 60 percent of visits are iPhones inside Discord's in-app browser. The owner decides (O10). Phase 0 is independent of the gate.
+
+| Phase | Delivers | Needs |
+|---|---|---|
+| 0 | Public payload diet: covers served by URL (78.5). Page weight alone justifies it | Migration `a1f0c0de0017`, Caddy line `/event-covers/*` |
+| 1 | Installable app shell: manifest, icons, service worker, offline fallback (78.6). Needs phase 0 | Icons (O1), Caddy lines `/manifest.webmanifest` and `/sw.js` |
+| 2 | Push core: subscribe, follow alliances and the Kingdom, reminders, change pushes, status and fallbacks, the test button (78.7 to 78.12) | The gate, VAPID keys, migration `a1f0c0de0018`, the client IP fix (O9). No Caddy line: `/api/*` is already routed |
+| 3 | Preferences: own lead times, type mutes, per-event follow and mute, pause (78.8, 78.12) | Phase 2 |
+
+Each phase ships and works alone. Rough effort in working sessions: measurement and calendar test about 1, phase 0 about 1 to 1.5, phase 1 about 1, phase 2 about 5 (it now includes change pushes and the status and fallback work), phase 3 about 1 to 2, so about 9 to 10 end to end, or about 8 without phase 0. The owner asked for custom lead times and per-event control, so phase 3 stays in the plan, last.
+
+### 78.5 Phase 0: public payload diet
+
+`routers/events._row_dict` puts `event.cover_image_data`, a data URI, in every occurrence row, so a recurring event with a cover repeats the image once per occurrence in the 28-day window. That is the likely source of the 23 MB `/api/events` response. Stored covers are re-encoded by `services/images.py` (`EVENT_COVER`, 1600x800 JPEG), so each is typically a few hundred kilobytes as base64 (inference); the 8 MB figure in `validators.py` is the upload limit, not the stored size. Check on `lxc-taraka`:
+
+    curl -s https://ks138.taraka.dev/api/events | wc -c
+
+Fix:
+- Migration `a1f0c0de0017` adds a nullable `events.cover_sha256` (`String(64)`), backfilled from the existing covers. Event create, patch and the split set it whenever the cover changes.
+- New public route `GET /event-covers/{event_id}.jpg?v={first 12 characters of the sha}` decodes the stored data URI. It answers 404 for an inactive or leadership-only event, using the same predicate as the public query (78.9), so a leadership-only cover is never public. `Cache-Control: public, max-age=86400` and an `ETag`.
+- Public rows carry `cover_url` (null without a cover) in place of `cover_image_data`. `events-public.js` reads `cover_url` where it now reads `cover_image_data` for the Discord preview (about line 776). Admin responses keep the data URI, so the admin form is unchanged.
+- Caddy needs `reverse_proxy /event-covers/* 127.0.0.1:8000`. `/api/events` is already routed.
+
+This is a prerequisite only for caching `/api/events` offline. It also makes every page load lighter, so it is recommended whether or not the app work proceeds. Without it, phase 1 does not cache the API (78.6).
+
+### 78.6 Phase 1: installable app shell
+
+**Routes** (public, GET, no auth):
+
+| Route | Serves |
+|---|---|
+| `/manifest.webmanifest` | Generated per request from the Kingdom: `name`, `short_name`, `lang`, `start_url` `/events?source=pwa`, `scope` `/`, `display` `standalone`, `theme_color` from `kingdoms.color` when it is a valid hex (else the shipped color), `background_color`, icons 192 and 512 plus a maskable 512 |
+| `/sw.js` | `static/sw.js` with `Cache-Control: no-cache, max-age=0` and `Content-Type: text/javascript`. The route replaces the token `__STATIC_ASSET_VERSION__` with `STATIC_ASSET_VERSION`, so the script's bytes change on every static bump, which is what makes browsers install the new worker and drop old caches |
+| `/static/icons/*` | The icon files, under the existing static mount |
+
+The worker is served from `/sw.js`, not `/static/sw.js`, because a worker controls only paths under its own directory unless the server adds `Service-Worker-Allowed`.
+
+**Caddy and Cloudflare.** `/manifest.webmanifest` and `/sw.js` each need a `reverse_proxy` line and a `systemctl restart caddy` (README "Adding a new public route"); an unlisted path gets an empty 200 and the app never sees it. Cloudflare caches `.js` files by extension, and `/sw.js` is outside `/static`. Verify after deploy with `curl -sI https://ks138.taraka.dev/sw.js | grep -i cf-cache-status`, which must not say `HIT`. If it does, add a Cloudflare cache rule that bypasses `/sw.js`, because a stale worker means browsers never see the new version token.
+
+**App shortcuts (optional).** The manifest may list `shortcuts` that open `/events` and `/feedback` from a long press on the app icon. They are a few lines and need no new route. Android support is reported to be better than iOS, which is not verified here. A "Next event" shortcut is not specified because the page has no URL for it.
+
+**Pages.** `public_pages.render_public_page` adds `<link rel="manifest">`, `<meta name="theme-color">` and an `apple-touch-icon` link. A new classic script `static/pwa.js` (one IIFE, no globals, pure section exported under `__SAMAYA_TEST__`) registers the worker when `navigator.serviceWorker` exists and the URL has no `preview_theme`. It also holds the install prompt: on Chromium it keeps the `beforeinstallprompt` event for an "Install app" button; on iOS Safari it shows "Share, then Add to Home Screen" when the page is not already in standalone mode (`matchMedia('(display-mode: standalone)')` or `navigator.standalone`).
+
+**Install flow.** On iOS the order is: install from Safari, open the Home Screen app, then subscribe there. Safari and the Home Screen app keep separate state, and one tap in a Safari tab cannot subscribe. The install screen says so, and it offers the calendar menu and the Discord `/schedule` command at the same time, so an iPhone player who stops there still has a way to get the schedule. The page also detects an in-app browser (78.12) and says to open it in Chrome or Safari instead of showing install steps that cannot work.
+
+**Fetch handler.**
+
+| Request | Strategy |
+|---|---|
+| Navigation to `/events`, `/events/{slug}`, `/feedback` | Network first with a 4 second timeout, then the cached copy, then `/static/offline.html` |
+| `/api/events`, `/api/events/{slug}`, `/api/alliances`, `/api/kingdom-branding` | Network first, falling back to cache. After phase 0 only; before it the API is not cached. The page shows "Offline, last updated hh:mm" when it renders from cache |
+| `/static/*`, `/theme/*.css`, `/theme-assets/*`, `/event-covers/*` | Stale while revalidate |
+| `/admin*`, `/auth*`, `/invite*`, `/webhooks*`, `/health`, ICS feeds, any non-GET | No `respondWith`; the browser handles them |
+
+Cache rules: never `put` a response that has `Cache-Control: no-store` (this covers the superadmin's `?preview_theme=` pages, `public_pages.mark_preview`), a request whose URL has `preview_theme`, or a non-200 status. Caches are named `samaya-static-{STATIC_ASSET_VERSION}` and `samaya-data-v1` (at most 30 entries); `activate` deletes any other cache.
+
+A worker's `fetch(event.request)` carries cookies like any same-origin request, so the language and theme cookies work as usual while online. The cache lives on one device and network first overwrites the stored page on every successful load, so the offline copy is the last page that device saw, in the language it saw it. `ignoreVary` is used so that copy matches despite `Vary: Accept-Language, Cookie`. `offline.html` is plain English and sits outside the i18n pipeline (78.16).
+
+Installed scope is `/`, so the admin console also opens inside the app window when a coordinator follows a link. This is acceptable and recorded as an open point (O7).
+
+### 78.7 Data model (migration `a1f0c0de0018`)
+
+Additive. The downgrade drops the three tables and the column, which loses subscriptions (players resubscribe). Models go in `models/db.py`, so `alembic check` sees them. Guarded creation as in the earlier revisions, verified on Postgres 16 with upgrade, `alembic check`, downgrade and re-upgrade. Every datetime read goes through `ensure_utc`. JSON columns are declared `JSON(none_as_null=True)`, so Python `None` is SQL NULL and the CHECKs below mean what they say.
+
+**`push_subscriptions`**
+
+| Column | Notes |
+|---|---|
+| `id` | primary key |
+| `endpoint_hash` | `String(64)`, unique, sha256 hex of the endpoint; the public handle (not `CHAR`, which pads on Postgres) |
+| `endpoint`, `p256dh`, `auth` | the browser's subscription; `auth` is also the management proof (78.11) and is stored as is because encryption needs it |
+| `locale` | an enabled locale, for the service worker's `Intl` calls |
+| `lead_mode` | `event_defaults` (default) or `custom` |
+| `custom_offsets` | JSON list of minutes; CHECK `lead_mode = 'event_defaults' OR custom_offsets IS NOT NULL` |
+| `kingdom_wide`, `announcements` | booleans, both default true |
+| `tz` | the player's display time zone: an IANA name or `UTC`, at most 64 characters, matching a simple pattern. The server never interprets it; the service worker falls back to UTC if the name is unknown. Pre-filled from the page's own display time zone (`samaya_display_tz`), because the worker cannot read the page's storage |
+| `paused_until` | nullable; no push is sent while it is in the future (78.12) |
+| `created_at`, `prefs_updated_at`, `last_seen_at`, `last_success_at`, `last_failure_at`, `failure_count`, `disabled_at` | housekeeping. `prefs_updated_at` is set on every write to the preferences or rules |
+
+**`push_rules`**: `id`, `subscription_id` (cascade), `kind` (`alliance`, `type`, `series`), `ref` (Text, not null: a tenant id, an event type id or a `series_id`), `label` (Text, the event name shown in the panel, at most 120 characters), `action` (`follow` or `mute`), `offsets` (JSON, nullable). Unique on (`subscription_id`, `kind`, `ref`). CHECKs: `alliance` is only `follow`, `type` is only `mute`, `offsets` only on `series`. `ref` carries no foreign key, so a deleted alliance or type leaves a harmless rule that goes away with the subscription. One text column instead of a nullable id and a nullable text keeps the unique constraint honest, since a UNIQUE over NULLs does not stop duplicates on Postgres.
+
+**`push_sends`**: `id`, `subscription_id` (cascade), `series_id`, `occurrence_date`, `kind` (`reminder`, `moved`, `cancelled`), `token` (an integer: the offset in minutes for a reminder, the new start in minutes since the epoch for `moved`, 0 for `cancelled`), `occurrence_id` (nullable, no foreign key, informational only), `due_at_utc`, `status` (`sending`, `sent`, `failed`, `expired`), `detail`, `claimed_at_utc`. Unique on (`subscription_id`, `series_id`, `occurrence_date`, `kind`, `token`), which is the at-most-once guarantee. It does not use the occurrence id, so recreating an occurrence cannot repeat a push (decision 11). Index on (`status`, `claimed_at_utc`).
+
+**`event_occurrences` columns**: `changed_at` (nullable), set by `PATCH /api/occurrences/{id}` (cancel, restore, move, message) and by generation when it changes a start time; it feeds the stale rule in 78.8, since a moved occurrence changes the occurrence row and not `events.updated_at`. `change_kind` (nullable, `moved` or `cancelled`) and `change_from_utc` (nullable, the start subscribers were last told) are set by the same two places and cleared once the change push has been processed (78.9a).
+
+**Cascade.** The test database does not enable SQLite foreign keys (no `PRAGMA foreign_keys` in `conftest.py`), so the service deletes a subscription's rules and sends explicitly in code, and `ON DELETE CASCADE` is only the Postgres backstop. Tests cover both.
+
+**Retention** (daily job, 03:10 UTC): delete `push_sends` older than 30 days; delete a subscription when the latest of `last_seen_at`, `last_success_at` and `created_at` is older than 120 days, or `disabled_at` is older than 7 days; delete `series` rules whose series has no occurrence today or later, so finished one-off events do not fill the cap.
+
+**Caps** (enforced in the API): 5,000 subscriptions in total (it matches the in-memory evaluation in 78.9; a larger audience needs a different design, O4); per subscription 50 alliance rules, 100 type mutes, 200 series rules, 5 offsets in any one list, each offset 0 to 10,080 minutes. At the global cap the API first prunes subscriptions that never had a successful send and are over 7 days old, then answers 503. The count-then-insert check can overshoot by a few under concurrent requests, which is acceptable.
+
+### 78.8 Who gets which push
+
+For one public occurrence and one subscriber, in order:
+
+0. The occurrence is not cancelled and the event is public and active (guaranteed by the public query), and the subscriber is not paused (`paused_until`).
+1. A `series` rule with `mute` for the event's `series_id`: no push.
+2. A `series` rule with `follow`: push, skipping steps 3 to 5.
+3. A `type` rule with `mute` for the event's type: no push.
+4. The event is an announcement (no duration) and `announcements` is false: no push.
+5. A kingdom-wide event needs `kingdom_wide` true. An alliance event needs an `alliance` rule for any alliance in the event's audience. The combined view returns one row per audience alliance, so the occurrence matches if any of its rows does. This deployment has one Kingdom (`get_public_kingdom`), so "kingdom-wide" needs no Kingdom reference.
+
+Precedence is series, then type, then alliance. New events and new event types match automatically when they fit the rules, with no re-subscribe. A series follow cannot reach a leadership-only or inactive event, because step 0 comes first.
+
+**Lead times for a match**, first that applies: the series rule's `offsets`; else the subscriber's `custom_offsets` when `lead_mode` is `custom`; else the event's own reminder minutes. Offsets above 10,080 are ignored for push. An event with no reminders and no custom times sends nothing in the default mode. This is deliberate: the coordinator's reminders are the control over what is pushed (decision 18). The seeded event type has no default reminders (migration 0001), so a coordinator who never set any on an event sends no push for it. To keep that from looking like a broken app, the panel tells a new subscriber how many reminders fall in the next 7 days ("You will get about 6 notifications in the next 7 days", or "No upcoming event has reminders yet"), and the event form tells the coordinator that its reminders are also sent to subscribers of the app.
+
+**Not stale.** A (subscriber, occurrence, offset) is eligible only when its `due` time is later than the latest of the subscriber's `created_at` and `prefs_updated_at`, the event's `updated_at`, and the occurrence's `generated_at` and `changed_at`. Without this, a player who subscribes at 19:10 would receive the 19:00 push, adding a new lead time would fire the ones already past, and moving or creating an event would fire "30 minutes until" with 20 minutes left. The Discord engine has the same guard (`_new_delivery_state` cancels a reminder whose time had already passed when it was generated).
+
+One push per (subscriber, series, date, offset), however many alliances or rules matched.
+
+| Subscriber | Event | Result |
+|---|---|---|
+| Follows MOD, defaults | Bear Hunt, MOD, reminders 60 and 0 | Pushes at 60 minutes and at the start |
+| Follows MOD, custom `[45, 5]` | Same | Pushes at 45 and 5 minutes |
+| Follows MOD, mutes type Arena | Arena, MOD | Nothing |
+| Follows MOD, follows series Trap | Trap, owned by another alliance | Pushes (step 2) |
+| Follows nothing, `kingdom_wide` true | Kingdom-wide KvK | Pushes at the event's reminder minutes |
+| Follows MOD, mutes series Bear Hunt, follows type Bear Hunt | Bear Hunt, MOD | Nothing (series mute wins) |
+| Any | Leadership-only or cancelled occurrence | Never |
+| Subscribes at 19:10 | 20:00 event with a 60 minute offset | Not pushed (due 19:00 is before the subscription) |
+| Any | A 20:00 event moved to 19:20 at 19:05 | The 30 minute push is not sent (due 18:50 is before the move); a 5 minute push at 19:15 is |
+
+### 78.9 Engine
+
+New `services/push_engine.py` with an injectable async sender (`get_pusher()`, like `get_discord()`), so tests use a `FakePush`. The sender interface is `async send(subscription, payload, ttl, urgency, topic) -> PushResult`. The production sender is decision 14.
+
+**Public query.** The rule "leadership-only and inactive events appear nowhere public" stays in one place. `services/public_events.py` factors its filter into one shared predicate and adds `public_occurrences_for_push(db, first, last)`, which applies that predicate and `status != 'cancelled'` and returns occurrences with their events and audience alliances, with `Event.cover_image_data` deferred. It skips what the push engine does not need (`Delivery` rows, destinations, the full tenant map). `public_rows` is not called every minute: it runs about six queries and loads every event whole, including the cover.
+
+**Jobs.** `register_push_jobs(scheduler)` adds `push_tick_job` (every minute, `max_instances=1`, `coalesce=True`, `misfire_grace_time=30`) and the daily prune job, only when `push_enabled()` is true (read at call time from the environment, so tests can toggle it without running the lifespan).
+
+`run_push_tick(session_factory, pusher, now=None)`:
+
+1. **Exit early** when there are no enabled subscribers.
+2. **Offsets in use.** The union of every enabled subscriber's offsets and every event's reminder minutes, computed once.
+3. **Candidates.** Occurrences for UTC dates `today - 1` to `today + 7`, kept when `effective_start` is within `[now - AT_START_GRACE, now + 10,080 minutes]` and some offset in use puts a due time in `(now - late_limit, now]`. The date window keys on `occurrence_date`, so an occurrence moved by more than a day from its original date can fall outside it, the same limit the public page has.
+4. **Matching and eligibility.** For each candidate, each enabled subscriber is evaluated with 78.8, including the not-stale rule. Subscribers and rules are loaded into memory once per tick. A pair is due when `due = start - offset` satisfies `now - late_limit < due <= now` and the reminder has not expired under the Discord engine's rule (`_reminder_expired`, made public: an at-the-start push has the 5 minute grace and every other offset is dropped once the event has started). `late_limit` is 15 minutes for offsets under 60 minutes and 30 minutes for offsets of 60 minutes or more, because a 1 hour reminder that arrives 20 minutes late on a phone with aggressive battery settings is still useful, and never after the event has started. A pair whose due time is older than that is counted as `late` and logged at WARNING.
+5. **Claim.** Insert the `push_sends` row as `sending` and commit before any network call. A unique violation means the pair was already claimed and it is skipped. The insert is done as try, catch `IntegrityError`, so it runs on SQLite in tests and on Postgres. One commit per claim; the claim cost is measured in phase 2 against a target of 500 claims in under 2 seconds on `lxc-taraka`.
+6. **Send.** At most 500 sends per tick, ordered by due time, with 20 in flight, a 5 second timeout each and a 45 second deadline for the whole tick. At the deadline no new send starts and the unstarted pairs are counted as `deferred`; they are picked up by the next tick while still inside their 15 minute window. The sender never blocks the event loop.
+7. **Record.** `sent`, `failed` or `expired`, then update the subscriber.
+
+`TTL` is the seconds until the push would be skipped as late (`late_limit` after its due time, 5 minutes for an at-the-start push), at least 60 and at most 1,800. `Urgency` is `high` at 15 minutes or less and `normal` otherwise. `Topic` is the first 32 characters of the base64url sha256 of `series:date:offset`, so a duplicate replaces rather than stacks. `VAPID_SUBJECT` supplies the subject.
+
+**Responses.**
+
+| Push service answer | Result |
+|---|---|
+| 201 | `sent`, `last_success_at` set, `failure_count` reset to 0 |
+| 404 or 410 | `expired`, the subscription and its rules and sends are deleted |
+| 429 | `failed`, no retry (at most once), no penalty to the subscriber |
+| Other 4xx (including FCM's 403 after a key change), 5xx, timeout, network error | `failed`, `failure_count` plus 1, `last_failure_at` set |
+
+A subscriber is disabled (`disabled_at` set) when `failure_count` is 10 or more and `last_success_at` is null or older than 3 days, so a push-service outage cannot disable healthy subscribers. A `sending` row older than 10 minutes becomes `failed` with "interrupted; it may or may not have been delivered", as for Discord. If the process dies between the claim and the send, that push is lost and never repeated.
+
+Cancelled, moved and deactivated occurrences behave correctly because eligibility is recomputed from the current start every tick, and a change the subscriber should hear about is sent as a change push (78.9a). A push already sent for an offset is not repeated when the event is later moved, which matches a posted Discord delivery (§66.4a).
+
+Cost: one query for subscribers and rules, one push query over nine UTC dates, and at most 500 outbound requests per tick. At 5,000 subscribers and a handful of candidate occurrences per tick this is well inside a minute.
+
+### 78.9a Change pushes
+
+A follower must hear that an event moved or was cancelled. Without it the not-stale rule (78.8) silently drops the old reminder after a move, and a player who already received the 60 minute push is left expecting an event that is off.
+
+- **Recording.** `PATCH /api/occurrences/{id}` (move, cancel) and `sync_event_occurrences` (when it changes a start time) set `change_kind` and `changed_at`, and set `change_from_utc` to the effective start before the change only when it is empty. A later edit before the push is processed therefore keeps the first "was" time.
+- **Processing.** Each tick handles occurrences whose `change_kind` is set and whose `changed_at` is at least 2 minutes old, so a coordinator who edits twice in a row sends one push, then clears `change_kind` and `change_from_utc`. It reads through the shared public predicate (78.9) without its cancelled-occurrence filter.
+- **Scope.** Only the next occurrence of each series, and only when its old or new start is within the next 48 hours. Editing the time of a whole recurring event therefore sends one push per followed series, not one per occurrence in the 28 day window.
+- **Moved.** Sent when the start shifts by 30 minutes or more, or crosses the UTC date, and only while the original start is still in the future. If the event is moved back to where it was, nothing is sent. Title "Bear Hunt moved", body "Now 21:00 EDT, was 20:00 EDT".
+- **Cancelled.** Sent only when a reminder push for that occurrence has already gone out, or the start is within 24 hours; otherwise no one has anything to retract. Title "Bear Hunt cancelled", body "20:00 EDT will not take place". A restored occurrence sends nothing in v1; its normal reminders resume.
+- **Who.** Matching is 78.8 steps 0 to 5 without lead times. The not-stale rule does not apply, because the change is the reason. Paused subscribers get nothing.
+- **At most once.** The `push_sends` key carries `kind` and `token`, so a change push is claimed like a reminder and does not use up any reminder offset.
+- **Not built:** pushes for new events (a discovery feature and a spam risk when a series is bulk-created) and urgent announcement pushes (78.16).
+
+### 78.10 Payload and notification
+
+Plaintext JSON, version 1, at most 1,536 bytes (the encrypted body must stay under 4,096):
+
+    {"v":1,"kind":"reminder","occurrence_id":123,"series":"<32 hex>","name":"Bear Hunt","minutes":30,
+     "start":"2026-10-04T20:00:00+00:00","was":null,"tz":"America/Toronto","locale":"en",
+     "url":"/events?occ=123&from=push","title":"Bear Hunt","body":"16:00 EDT, in 30 minutes"}
+
+`kind` is `reminder`, `moved` or `cancelled`; `was` is the previous start for `moved`. `name` and `title` are cut at 120 characters, `title` and `body` are the English fallback, and the worker shows the name cut to about 40 characters so the time stays on the visible line. The service worker builds the shown text itself. Title is the event name, wrapped in first-strong isolates (U+2068 and U+2069) so a Latin name inside an Arabic or Chinese notification keeps its order. The body starts with the start time in the subscriber's `tz` as `HH:MM` with a short zone name, 24 hour like the page and with Western digits (the locale is built with `-u-nu-latn`, as `I18N.latnLocale` does on the page), then a comma and the relative time. For a reminder it computes `remaining = round((start - now) / 60 s)` and uses `minutes` when `abs(remaining - minutes) <= 2` and `remaining` otherwise, so a late delivery does not claim the wrong time; a result of 0 or less, or `minutes` of 0, reads as "now". The largest whole unit is used (days, then hours, then minutes, as §77.4) with `numeric: 'always'`, and "now" is `format(0, 'second')` with `numeric: 'auto'` (78.3). If `Intl` throws for the locale or the time zone, the English fallback and UTC are used. The notification options carry `lang` and `dir` for the subscriber's locale. Change pushes use the `public.push.sw.*` phrases inlined into `/sw.js` (decision 8).
+
+The notification always shows (78.3). It uses `tag` `occ-{id}` with `renotify: true`, so the 5 minute push replaces the 60 minute one for the same occurrence and still alerts; this is a deliberate choice. It has a 192 px icon and a monochrome badge and no action buttons (iOS ignores them).
+
+**Click.** `notificationclick` focuses an open window of the app or opens one, and navigates only to a same-origin path from the allowlist (`/events`, `/events/*`, `/feedback`). Anything else opens `/events`. `?occ=` is a hint: when the page has that occurrence it scrolls to it and highlights it, and otherwise ignores it. `from=push` makes the page show a dismissible banner, "Notifications are on for this device, because you follow MOD" (the alliance, event or Kingdom rule that matched is not known to the page, so it says "because of your settings" when it cannot name one), with a Manage button that opens the panel. This is the way to turn a notification off, since the notification itself has no buttons.
+
+**Keeping a subscription alive.** A browser can replace its subscription (expiry, a key change). The worker does not rely on `pushsubscriptionchange`, which Safari does not fire reliably and which has no storage to read the old credentials from. Instead the page reconciles on every load: it keeps the subscription's `hash` and `auth` in `localStorage`, and when `getSubscription()` yields a different endpoint, or the key from `/api/push/config` differs from the subscription's `applicationServerKey`, it reads the old preferences with the old credentials, registers the new subscription with them and deletes the old one. If the old one is gone the person starts again from defaults. A subscriber who never opens the page after a browser-side change is lost until they do; the `last_success_at` age shows it in the health card.
+
+### 78.11 API (public, JSON, no cookies)
+
+All under `/api/push`. `/api/*` is already routed by Caddy, so there is no new Caddy line. Management routes put the subscription's `hash` in the path and its `auth` secret in `X-Push-Auth`, compared with `hmac.compare_digest`. An unknown hash and a wrong secret both answer 404, and a miss compares against a dummy value so timing does not tell them apart. Every management response carries `Cache-Control: no-store`.
+
+| Route | Purpose |
+|---|---|
+| `GET /config` | `{enabled, public_key}`. `Cache-Control: max-age=300` |
+| `POST /subscriptions` | Body: the browser's `PushSubscription` JSON, `locale`, and the preferences. Validates the endpoint (78.13). 201 on create. If the hash already exists, 200 and an update only when the body's `auth` equals the stored one; otherwise 409 and no change. A different `auth` for a known endpoint cannot overwrite it |
+| `GET /subscriptions/{hash}` | The stored preferences and rules, `last_success_at` (when a push service last accepted a message), `last_failure_at` and whether the subscription is disabled; updates `last_seen_at` at most once a day. The panel's status line (78.12) uses these |
+| `PUT /subscriptions/{hash}` | Replaces the preferences and rules in one call (the panel sends the whole state, including `locale`, `tz` and `paused_until`), validated against the caps in 78.7 |
+| `PATCH /subscriptions/{hash}/series` | Adds, changes or clears one series rule (the per-row bell) |
+| `POST /subscriptions/{hash}/test` | Sends a test push. 3 per subscription per hour |
+| `DELETE /subscriptions/{hash}` | Deletes the subscription and everything under it (the erasure path) |
+
+**Rate limits** use `services/rate_limit.RateLimiter`, one instance per route: 10 subscribes per client per hour and 60 in total per hour, and a lighter limit on the other routes. They depend on the client IP being right. Today `_client_ip` trusts the leftmost `X-Forwarded-For`. Behind Cloudflare that value can be set by the client, which bypasses any per-IP limit; if Caddy instead replaces the header with the tunnel's address, every visitor shares one bucket. Which of these applies is unknown. Before phase 2: run `grep -n 'trusted_proxies\|X-Forwarded-For\|header_up' /etc/caddy/Caddyfile` on `lxc-taraka`, and key the limiter on `Cf-Connecting-Ip` (which Cloudflare sets and the README says is the only path to the app), with the forwarded header as a fallback and a test that a client-sent header does not change the key. The limiter also gets eviction of empty histories, since it never frees keys today. This fix also covers the existing ticket board limiter, which has the same exposure (O9).
+
+Superadmin: `GET /admin/api/push/health` returns subscriber counts, sends in the last 24 hours by status and the `late` and `deferred` counts, the time of the last tick and the oldest failed send, and the Delivery log tab shows it as a card. Admin responses never include endpoints or keys.
+
+### 78.12 Public page UI
+
+A new classic script `static/push.js` (one IIFE, no globals, pure section exported under `__SAMAYA_TEST__`), loaded on both pages. Strings live in `app/i18n/en.json` under `public.push.*` and in the seven machine-drafted catalogues. The i18n work includes the page prefixes in `render_public_page`, the file list in `test_i18n.py` (`PAGES`, which now covers only `events-public.js` and `feedback.js`; otherwise `test_no_unused_keys` fails), and the markup fallbacks. The ESLint config (`eslint.config.mjs`) uses an explicit globals list that lacks `navigator`, `Notification`, `self`, `caches` and `clients`, so those are added for `pwa.js`, `push.js` and `sw.js`. `STATIC_ASSET_VERSION` is bumped with each static change.
+
+**First screen: one decision.** The header button "Notifications" opens a panel whose first screen is the choice "Notify me about: my alliance, Kingdom-wide events" (the current alliance is pre-ticked on `/events/{slug}`), a sample notification ("Bear Hunt, 16:00 EDT, in 1 hour"), one sentence on what to expect and who delivers it (the browser's push service), and a "Turn on notifications" button. Everything else is under a "Customize" `details` element (phase 3). The permission prompt appears only from that button, never on page load and never automatically after installing.
+
+**Status is always visible.** A status line beside the header button and in the panel reads one of: Active (with "last sent" from the server), Paused until a time, Blocked in browser settings, Needs to be set up again on this device, or Not set up. It is computed on every page load from the permission state, the local subscription and the server's `GET` (78.11). A "Send me a test notification" button lets a player check on demand. A standing "Not getting notifications?" section explains battery settings on Android phones, iOS Focus and Low Power Mode, and the calendar menu and Discord `/schedule` as the fallback. It says plainly that notifications can arrive late on some phones.
+
+**Cases the page cannot support are never hidden.**
+- *In-app browsers* (Discord, Reddit, Instagram, WeChat, LINE and similar, detected by a missing `serviceWorker` or `PushManager` or a known user agent token): the button stays and shows "Open this page in Chrome or Safari to get notifications", with a copy-link button and the calendar and Discord fallbacks. Whether install and push work in Discord's own in-app browser on iOS and Android is not known; test it in the device matrix (78.15) and write the result here.
+- *iPhone outside the Home Screen:* the install steps (78.6) with the fallbacks beside them.
+- *Permission blocked:* steps for the player's own browser (Chrome on Android, Samsung Internet, Firefox, iOS Settings, desktop) or one link to them, plus the fallbacks.
+- *Unsupported browser:* a short message and the fallbacks, never an absent control.
+- *A new device or cleared site data:* the panel says "This device is starting fresh". Settings stay on the device that set them; a restore link or QR code is not built (78.16).
+
+**Customize (phase 3).**
+- *What*: a checkbox per event type (all ticked; unticking mutes the type) and "Announcements".
+- *When*: "Use each event's reminders" or "My own times". Presets are real checkboxes in a `fieldset` with a `legend` (at the start, 1 hour, 1 day, then 5 minutes, 15 minutes, 30 minutes, 3 hours), plus a number input with a visible label and a unit select (minutes, hours, days) that says "Enter 0 to 10,080 minutes" on error and shows "3 of 5 used".
+- *Language and zone*: a language select and a time zone select, pre-filled from the page; saving updates `locale` and `tz`, and the panel says which language the notification will use.
+- *Pause*: "Pause all for 1 day" and "for 1 week", stored as an absolute `paused_until`, with a visible "Resume".
+- *Expected volume*: a line such as "About 3 notifications a day with these settings", computed in the browser from the loaded schedule and the chosen lead times.
+- *Followed and muted events*: the list of series rules with their `label`, each clearable.
+- *Privacy*: one plain-language note, written for a young reader, with a link to the full notice (78.13).
+
+**Per-event control.** The bell cannot sit inside `.row-head`, which is a `<button>` in `events-public.js`, because a button inside a button is invalid. It sits beside the row head, or inside the expanded row detail as a "Notify me" button. It is a menu button (`aria-haspopup="menu"`, `aria-expanded`), labelled with the event name and its state, for example "Bear Hunt notifications: following", and its menu is a radio group (Always, Never, Use my settings), not an `aria-pressed` toggle. The wording says "Every Bear Hunt", not "series". It acts on the row's `series_id`, so the public row payload gains an opaque `series_id`. A "just this one" option is not built (78.16).
+
+**Accessibility.**
+- The panel reuses one shared modal helper with a real focus trap, `inert` on the background, focus moved to the dialog heading on open (so a screen reader reads the title first), a Done button, and a scroll region that is not clipped at 200 percent zoom. The existing `openModal` in `events-public.js` restores focus on close but has no trap.
+- Save results are announced: one persistent `role="status"` region ("Saved") and `role="alert"` for failures ("Could not save, your change was undone"). The page has no toast live region today, so a toast alone is not acceptable. Saves are optimistic and debounced 500 ms, and each outcome is announced.
+- Every new control is at least 44 px tall and wide, and the panel is checked at 200 percent text and 320 px width. WCAG 2.0 AA contrast is checked for every new token pair, including the disabled, blocked and error states, which are added to the theme contrast rules (`theme_rules.py`) so a theme cannot make them unreadable. State is never colour alone: "following" and "muted" carry an icon and text. Reduced motion is respected as on the rest of the page.
+- The offline banner is a translated string with `role="status"`.
+
+**Languages.** The seven non-English catalogues are machine-drafted (`_meta.reviewed: false`). `public.push.*` ships in English first. Where a catalogue is not reviewed, the panel falls back per key to English with a visible "This text is not yet reviewed" note. The permission explanation, the privacy note and the `public.push.sw.*` phrases must be read by a native speaker per language before that language's text is shown (O11).
+
+**State.** One object; the DOM reacts to it and never reads state from the DOM.
+
+### 78.13 Security, abuse and privacy
+
+- **Server-side request forgery.** The endpoint comes from an anonymous visitor and the server will call it. Parse it once, with one parser. Reject any backslash, `@`, whitespace or non-ASCII character. Lowercase the host and strip a trailing dot. Accept only `https`, port 443 (an explicit `:443` is accepted, any other port is not), a hostname (never an IP literal) on the allowlist, at most 2,048 characters. Rebuild the URL from the validated parts and send to exactly that string, so a parser difference between validator and sender cannot matter. A suffix rule matches one or more labels under the suffix, never the suffix alone. The sender sets `trust_env=False` (no proxy variables) and `follow_redirects=False`, with a 5 second timeout, and discards the response body. Starting list: `fcm.googleapis.com`, `updates.push.services.mozilla.com`, `web.push.apple.com` and `*.push.apple.com`; Edge's host (`*.notify.windows.com`) is added only if a real Edge subscription needs it. `PUSH_ENDPOINT_HOSTS` overrides the list. It is checked against real Chrome, Firefox, Safari and Edge subscriptions before release (O6).
+- **Key shapes.** `p256dh` decodes to 65 bytes and `auth` to 16, both base64url. Anything else is a 422.
+- **Spam.** The limits in 78.11, the global cap and the per-subscription caps in 78.7. The limiter is in memory, valid because there is one worker.
+- **Tampering.** Changing a subscription needs its `auth` secret, which only that browser and this server know, and a known endpoint cannot be overwritten without it (78.11). There is no cookie auth, so no CSRF surface; requests must be `application/json`. No CORS headers are sent. The secret is stored as is because encryption needs it, so a database or backup leak lets someone change the preferences of those subscriptions. It does not let them send a push, which needs the VAPID private key.
+- **Content.** Notifications are plain text, never HTML. Event names come from coordinators and are truncated.
+- **Service worker.** It is served from a fixed same-origin route, does not touch the paths listed in 78.6, never stores a `no-store` or preview response, and navigates only to allowlisted same-origin paths on click.
+- **Privacy.** The application database stores the endpoint and keys, locale, preferences and timestamps, and no IP address or user agent. The rate limiter keeps IPs in memory only. Server, Caddy and Cloudflare logs outside the app can hold IP and user agent, and the endpoint's host reveals the browser family. The app's logs never contain an endpoint or key; the access log does contain the subscription hash in the URL, which on its own grants nothing without the `auth` secret. An endpoint is a stable pseudonymous identifier, so treat it as personal information under GDPR, PIPEDA and Quebec Law 25: the panel's privacy note says what is stored and that the browser's push service (Google, Apple or Mozilla) delivers the notification, `DELETE` is the erasure path (a "Delete my data" button in the panel), and idle subscriptions are pruned after 120 days. The notice names a contact address (the same one as `VAPID_SUBJECT`) for deletion requests. For a Quebec audience the notice states the purpose, the recipients (Google, Apple, Mozilla and Microsoft push services as applicable), the retention period and that contact. The game is reported to carry an App Store rating of 9+ with chat, so some players are children (reported by a reviewer, not verified here): the note is written at a young reader's level, says that no name, email or location is collected, and the identifier is not used for anything but delivery. This is a statement of what the notice should say, not legal advice.
+- **VAPID private key** only in `.env`, never in git, logs or any API response.
+
+### 78.14 Operations
+
+- **Environment** (`.env.example` gains these): `SAMAYA_PUSH_ENABLED`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT` (a `mailto:` address, set by the owner), optional `PUSH_ENDPOINT_HOSTS`. The key generation command is documented in the README when this is built.
+- **Key rotation breaks every subscription**, because a browser binds a subscription to the public key it was made with, and FCM answers such sends with 403 rather than 404 or 410. The page's reconciliation (78.10) resubscribes on load. Do not rotate casually.
+- **Kill switch:** set `SAMAYA_PUSH_ENABLED=0` and restart. The bell disappears, the jobs are not registered, and subscriptions are kept. Pause the Uptime Kuma monitor first.
+- **Backup:** the new tables are inside the nightly `ops/backup.sh` dump. The VAPID keys live in `.env`; whether the restic backup of `/opt/taraka` includes `.env` must be checked (O8). Restore check: `SELECT count(*) FROM push_subscriptions`, then a test push.
+- **Monitoring:** an Uptime Kuma keyword monitor on `https://ks138.taraka.dev/api/push/config` expecting `"enabled":true`, plus the admin health card.
+- **Deploy order:** migrations, then the Caddy lines for the phase being shipped, then `systemctl restart caddy`, then the app. RISK: a Caddy restart drops connections for a moment, and an unlisted path answers an empty 200 rather than failing, so check each new path through the public hostname. Roll back by removing the lines and restarting again.
+- **Rollback:** code-only rollback leaves the tables unused. `alembic downgrade a1f0c0de0012` drops everything from §78 (both revisions) and deletes all subscriptions; `events.cover_sha256` goes with phase 0.
+
+### 78.15 Tests and verification
+
+- `tests/test_pwa_routes.py`: manifest content and Kingdom colour handling, `/sw.js` content type, no-cache header and version substitution, and a table test of the worker's routing (which paths get `respondWith`).
+- `tests/test_event_covers.py`: `cover_url` in public rows, no data URI anywhere public, 404 for leadership-only and inactive events, `cover_sha256` kept in step on create, patch and split, ETag.
+- `tests/test_push_subscriptions_api.py`: create, 200 and 409 on an existing hash, validation (endpoint host, key lengths), every cap and the cap pruning, management proof (wrong secret and unknown hash both 404), rate limits, delete, test push limit, `no-store` headers.
+- `tests/test_push_rules.py`: the 78.8 matrix including every row of the table, precedence, announcements, kingdom-wide, leadership-only and cancelled never, offsets precedence, offsets above 10,080, and the not-stale rule (new subscriber, new offset, event edit, occurrence move).
+- `tests/test_push_engine.py` with `FakePush` and an injected clock: due window, 15 minute late limit and the `late` count, at-the-start grace, at-most-once across two ticks and a simulated crash, no repeat after the occurrence is deleted and recreated (split, deactivate then reactivate), cancel, move and deactivate, one push for several matching alliances, the 500 per tick cap and the 45 second deadline with `deferred`, response handling (201, 404 and 410 delete, 429, 5xx counting and the disable rule), stale `sending` recovery, retention including finished one-off series rules, explicit child deletion with SQLite foreign keys off, and a slow `FakePush` that must not block another coroutine.
+- `tests/test_push_security.py`: endpoint allowlist cases (IP literal, userinfo, backslash, trailing dot, uppercase, port, lookalike suffix, `http`, non-ASCII), payload size under 1,536 bytes for a 120 character name with multibyte text, no endpoint or key in any app log line or admin response, nothing but `series_id` added to the public payload, a client-sent forwarded header not changing the limiter key.
+- `tests/test_push_changes.py`: the 78.9a rules (move threshold, date crossing, move back to the original, coalescing two edits into one, 48 hour scope, one push per series after a whole-event time edit, cancel only after a reminder or inside 24 hours, restore sends nothing, paused subscribers, at-most-once with `kind` and `token`).
+- `tests/test_push_jobs.py`: `register_push_jobs` adds nothing when disabled and both jobs when enabled.
+- `tests/test_migration_0017.py` and `test_migration_0018.py`: upgrade, `alembic check`, downgrade, re-upgrade on Postgres 16 (opt-in, like the 0004 and 0005 tests), plus the backfill of `cover_sha256`.
+- vitest: `push.js` pure functions (status line states, in-app browser and iPhone detection, expected-volume line, preference diffing, offset validation, page-load reconciliation), the body text with a time zone and Western digits in all eight locales, `sw.js` notification builder over all eight locales including "now" at the start, a late delivery and the English fallback, and the fetch-handler routing table.
+- **Players' acceptance checklist, by hand before release:** (1) Chrome Android with TalkBack: open the panel, turn on, change an option, hear "Saved", close and see focus return to the header button. (2) iPhone with VoiceOver from the Home Screen, and the same page in a Safari tab, where install steps and fallbacks must appear and nothing is silently missing. (3) Keyboard only on desktop: every control reachable, the focus trap works, Escape closes, the bell menu closes on Escape. (4) 200 percent zoom and 320 px width, no horizontal scroll and no clipped panel. (5) Arabic: the panel mirrors, a Latin event name reads in the right order, digits are Western. (6) Block the permission, reload: a clear status and steps. (7) Open the page from Discord's in-app browser on Android and on iOS: a clear message, not a missing button; record what works. (8) A Xiaomi or Samsung phone on default battery settings with the screen off: a test push scheduled 5 minutes ahead; record the delay. (9) iOS Focus on: record what the player sees. (10) Clear site data and reopen: the panel says it is starting fresh and the old row does not stay as a duplicate. (11) Slow 3G in DevTools: the installed app shows the schedule within a few seconds and covers load later; `/api/events` stays under about 200 KB gzipped for a typical Kingdom (a CI check after phase 0). (12) Unsubscribe and confirm the server row is gone and nothing more is sent.
+- **Device matrix, by hand before release:** Android Chrome in a tab and installed, iOS 16.4 or later from the Home Screen, desktop Chrome, desktop Firefox, desktop Safari. For each: subscribe, test push, a scheduled push five minutes ahead, click opens the right page, unsubscribe, permission denied path, and an offline load. Also record each browser's real endpoint host for the allowlist.
+- **After each deploy:** `curl -s -o /dev/null -w '%{http_code} %{size_download}B %{content_type}\n' https://ks138.taraka.dev/manifest.webmanifest` (a size of 0B means the Caddy line is missing), the same for `/sw.js` and `/event-covers/<id>.jpg?v=...`, `curl -sI https://ks138.taraka.dev/sw.js | grep -i cf-cache-status`, and `curl -s https://ks138.taraka.dev/api/push/config`.
+
+### 78.16 Not built
+
+Home screen widgets (not possible for a PWA on iPhone or Android, see 78.20), quiet hours (the OS does it), accounts and cross-device sync, a restore link or QR code for a lost device, email and SMS, Declarative Web Push (a later option once iOS 18.4 and later is the norm), `pushsubscriptionchange` handling and any worker-side storage (the page reconciles instead), notification action buttons, badge counts, a digest, linking a Discord identity, notifications for coordinators or about feedback tickets, a localised offline page, and a server-side message catalogue for push text.
+
+From the players' review (78.19), considered and deferred: a coordinator-written push note (the reminder text of §77 stays private to Discord); `events.push_enabled` and `event_types.push_default` (the coordinator controls push through reminders); a reach count per event and "sent to N" per occurrence in the admin console (the health card has the aggregate); pushes for new events and urgent announcements; "just this one" subscription to a single occurrence; a per-subscriber daily cap that collapses to one push per event (the panel's expected-volume line comes first); and an urgent override that bypasses a mute, which is rejected because it is what makes players revoke the permission. Use Discord for urgency.
+
+### 78.17 Open questions for the owner
+
+| # | Question | Why it matters |
+|---|---|---|
+| O1 | Which icon artwork, and may a crest be used? | Phase 1 needs 192, 512 and maskable PNGs. No art is generated or copied |
+| O2 | Do phase 0 (payload diet) first? | Needed for offline `/api/events`, recommended regardless. It adds a migration and a route |
+| O3 | Which address goes in `VAPID_SUBJECT`? | Push services use it to contact the sender. It stays in `.env`, not in git |
+| O4 | How many subscribers do you expect? | The design is sized for 5,000 with in-memory evaluation. Beyond that it needs a due-time index |
+| O5 | Are `http-ece` and `py-vapid` maintained and compatible with the pinned `cryptography`? | Decision 14 depends on it. If not, write a small sender against the RFC 8291 vectors |
+| O6 | Is the host allowlist complete? | Checked on real devices before release, since a wrong list silently blocks a browser |
+| O7 | Should installed-app scope exclude `/admin`? | Scope `/` lets admin links open in the app window; a narrower scope would send `/feedback` to a browser tab instead |
+| O8 | Does the restic backup include `/opt/taraka/.env`? | Losing the VAPID private key invalidates every subscription |
+| O9 | What does Caddy do with `X-Forwarded-For`, and is `Cf-Connecting-Ip` passed through? | The per-IP limits (this feature's and the ticket board's) are only as good as the client IP. Run the `grep` in 78.11 |
+| O10 | Follow the gate in 78.4, or build phase 2 regardless? | The review found no demand evidence and cheaper alternatives. Measuring costs about a session |
+| O11 | Who can read the push text in Arabic, French, German, Russian, Spanish, Turkish and Simplified Chinese? | The permission explanation and privacy note are the strings that decide whether a player consents. Without a reader, ship English only |
+| O12 | Test Discord's in-app browser on an iPhone and an Android phone: do install, service workers and push work there? | Players arrive from Discord links. The answer decides how much of the funnel exists |
+| O13 | Which Discord reminders do coordinators actually use, and what share of events have none? | In the default mode an event with no reminders sends no push. A one-line query is in 78.19 |
+
+### 78.18 Review record
+
+The first draft was reviewed 2026-10-04 by two independent reviewers with no stake in it, one on security and web push protocol, one on fit with the code and the engine. Each finding was checked against the code or a source before it was accepted. Items marked "corrected" were wrong or overstated in the review.
+
+| Finding | Outcome |
+|---|---|
+| Occurrence rows are deleted and recreated, which would cascade away `push_sends` and repeat a push | Confirmed in `_retire_occurrence`. Dedupe key is now `series_id`, date and offset; no occurrence foreign key (decision 11, 78.7) |
+| A synchronous sender (`pywebpush`) blocks the single event loop; 1,000 slow sends outlast the minute and tick coalescing | Confirmed. Async sender, 5 second timeout, 45 second deadline, 500 per tick, `misfire_grace_time` (decision 14, 78.9) |
+| A new subscriber, a new lead time or a moved event fires stale pushes; the spec wrongly said Discord behaves the same | Confirmed against `_new_delivery_state`. Not-stale rule and `event_occurrences.changed_at` (78.8) |
+| `public_rows` every minute loads every event with its cover and runs about six queries | Confirmed. A push-specific query sharing one predicate (78.9) |
+| `format(0, 'minute')` is "this minute", not "now" | Confirmed by running Node on eight locales. Use `format(0, 'second')` (78.10) |
+| Per-IP rate limiting is bypassable or collapses to one bucket; the limiter never evicts | Plausible, unverified here. Fix, check and eviction specified (78.11, O9). Also affects the ticket board |
+| Phase 0 needs a column and migration, and `events-public.js` reads the cover | Confirmed. `events.cover_sha256`, `a1f0c0de0017`, route and JS change (78.5) |
+| `/api/push/*` needs no Caddy line; phase 1 needs two lines, not three | Confirmed against the README route list (78.4, 78.6) |
+| `/sw.js` may be edge cached by Cloudflare | Plausible. `cf-cache-status` check and bypass rule (78.6) |
+| Upsert on POST lets anyone with an endpoint overwrite its keys | Accepted. 200 only with the matching `auth`, else 409 (78.11). The 409 reveals existence only to someone who already holds the endpoint, which is itself the secret |
+| The 8 character hash claim for logs is false because the path carries the whole hash | Accepted as a wording fix (78.13). The hash is a lookup handle that grants nothing without `auth`, so it stays in the path |
+| "No IP stored" overstated; GDPR, PIPEDA and Law 25 | Accepted. Wording, push-service recipients in the notice, `DELETE` as erasure (78.13) |
+| SSRF parser differentials, trailing dot, wildcard width, proxy variables | Accepted (78.13) |
+| Service worker caches `no-store` and preview pages; "cookies invisible to the worker" is false | Accepted. Cache rules and wording fixed (78.6). Corrected: the reviewer said `ignoreVary` serves the first cached language to everyone; the cache is per device and network first overwrites it on each load, so it holds the last page that device saw |
+| TTL up to an hour delivers an old "60 minutes" push at the start | Accepted. TTL tied to the late limit; wording computed from the time left (78.9, 78.10) |
+| `pushsubscriptionchange` has no storage and Safari does not fire it | Accepted. Dropped for page-load reconciliation (78.10, 78.16) |
+| JSON NULL versus CHECK; `CHAR(64)`; dead series rules fill the cap; idle receivers pruned at 120 days; datetime handling | Accepted (78.7) |
+| Cap of 20,000 contradicts in-memory evaluation sized for thousands | Accepted. Cap 5,000 (78.7) |
+| SQLite tests do not enforce foreign key cascades | Confirmed. Explicit deletion in code, both tested (78.7, 78.15) |
+| ESLint globals, `test_i18n.py` `PAGES`, and the lifespan not being run in tests | Accepted (78.12, 78.9 `register_push_jobs`) |
+| The auth secret is stored in cleartext; a Uptime Kuma monitor alarms on the kill switch; the single Kingdom assumption; Topic plus tag replaces the earlier notification | Accepted as documented (78.13, 78.14, 78.8, 78.10) |
+
+Not verified in review or here: Safari's behaviour on a push without a visible notification, the real push hostnames of Edge and Samsung Internet, the maintenance state of `http-ece` and `py-vapid`, the Topic length rule against the RFC text, and Cloudflare's and Caddy's actual handling of the forwarded headers.
+
+### 78.19 Players' perspective review
+
+Run 2026-10-04 before any build, from four independent lenses that did not see each other's work: player personas and journeys; notification content, volume, change handling and coordinator control; alternatives and real incremental value; accessibility, languages, devices and trust. Each separated FACT (with a source), INFERENCE and UNKNOWN. I checked the claims about this codebase myself and they hold: the ICS feed has no `VALARM`; a move or cancel sends no Discord channel message (`PATCH /occurrences/{id}`); the seeded event type has `default_reminder_minutes = []` (migration 0001); and a row's head in `events-public.js` is a `<button>`, so a bell cannot nest in it.
+
+**What the reviewers could and could not establish.** Reported from third-party guides, not verified by me: Kingshot launched on iOS 2025-02-22 and Android 2025-03-03 with the US the largest market; alliances hold up to 100 players; Bear Hunt runs every 2 days for 30 minutes; leaders recommend notice "a day before" and "an hour before" for recurring events and several days for strategic ones; time-critical calls go over in-game chat, and Discord timestamps are used to convert UTC (sources: gameszoom.com, kingshotalmanach.com, kingshotmastery.com, u7buy.com); the App Store lists the game at 9+ with chat. Unknown: the players' age, iOS and Android split, languages, how many use Discord notifications, any web push opt-in data for games, how Google Calendar and Outlook treat `VALARM` in a subscribed feed, and whether service workers, install and push work in Discord's in-app browser. The only opt-in figures found (91 percent Android and 44 percent iOS) are for native app push from a vendor blog, not web push.
+
+**The main finding.** Nothing shows that players want push, and two cheaper routes may do the job for more of them. The job is "do not miss Bear Hunt, even when Discord is muted".
+
+| Route | Cost to the player | Where it fails |
+|---|---|---|
+| Discord channel ping, Scheduled Event "Interested", Discord mobile push | None | The player muted the channel, the role or Discord |
+| Calendar subscription (exists, no alarms in the feed) | Find the menu, subscribe | No alarms today; Google polls subscribed feeds about every 12 to 24 hours, Apple about hourly, Outlook 1 to 4 hours, so a move arrives late (secondary sources) |
+| Calendar subscription with `VALARM` added | The same, then alarms | Apple honours them with a "Remove Alerts" option; Google and Outlook behaviour is unknown |
+| Discord `/remind` DM (not built) | One command, no install | The player blocked the bot or disabled DMs (Discord errors 50007 and 50278), and a muted DM is muted |
+| PWA push (this section) | Find it, install on iPhone, grant permission, configure | In-app browsers, iPhone outside the Home Screen, battery-killed phones, a denied permission, a lost device |
+
+Push adds three things the others lack: a lead time chosen by the player, a channel apart from Discord's mute state, and an immediate notice of a change. Its audience is therefore players who mute Discord and are willing to install and grant permission, a group nobody has measured.
+
+An illustrative reach model by one reviewer (60 Android, 30 iPhone, 10 desktop, 60 percent arriving through Discord's in-app browser) gives about 7 to 10 of 100 players receiving a push, 3 to 5 for calendar alarms and 15 to 20 for DMs. Every percentage in it is an assumption with no source, so it is evidence for the ordering the reviewer drew and not for any number. The ordering is an inference. Even doubling each push step leaves push behind DMs in that model.
+
+| Finding | Outcome |
+|---|---|
+| No demand evidence; phase 2 is a 5 to 6 session commitment | Accepted. Gate and measurement plan (78.4, decision 16) |
+| Calendar alarms and `/remind` DMs may beat push on reach per session | Accepted as options to decide before phase 2 (78.4). Not specified here; each needs its own section if chosen |
+| Phase 0 is justified by page weight alone, and is a prerequisite for a usable installed app on mobile data | Accepted (78.4, 78.15 size budget) |
+| Moves and cancellations are not pushed, so the not-stale rule leaves a follower with silence or a wrong time | Accepted. Change pushes in the core (78.9a, decision 15). New-event pushes deferred |
+| The pushed text lacks a clock time, and the worker cannot read the page's chosen time zone | Accepted. `tz` stored with the subscription, local time first in the body, 24 hour and Western digits (78.7, 78.10) |
+| A reviewer asked for a separate coordinator-written push note | Deferred (78.16). It adds coordinator work, and the name and time already say what and when |
+| A reviewer asked for `events.push_enabled`, `event_types.push_default`, reach counts and a daily cap | Deferred (78.16). Reminders are the control (decision 18); the panel shows expected volume; the health card has the aggregate |
+| A new subscriber may get nothing because the seeded type has no reminders | Accepted in part. No fallback offsets, because that would send pushes the coordinator never chose; instead the panel shows how many reminders fall in the next 7 days and the event form says reminders reach app subscribers (78.8, O13) |
+| The panel is too big for a new player; "series" is jargon | Accepted. One-decision first screen, Customize behind it, "Every Bear Hunt" wording (78.12) |
+| Cut custom lead times and per-event control from v1 | Not accepted as a cut. The owner asked for both. They stay, in phase 3, after the gate (78.4) |
+| Push can stop silently, and in-app browsers hide the control | Accepted. Always-visible status, "last sent", test button, help section, explicit in-app browser and iPhone handling (decision 17, 78.12) |
+| iPhone install is a funnel cliff | Accepted as a risk. The install screen carries the calendar and `/schedule` fallbacks; the phase 1 acceptance includes the Discord in-app browser test (78.6, O12) |
+| A late 1 hour push is still useful on slow-battery phones | Accepted. Late limit 30 minutes and TTL up to 30 minutes for offsets of 60 minutes or more (78.9) |
+| Accessibility gaps: no focus trap, no live region for saves, a button inside a button, chip entry, 44 px targets, new states in theme contrast | Accepted (78.12) |
+| Notification text: bidi isolates, `lang` and `dir`, Western digits in Arabic, the phone language can differ from the page | Accepted (78.10, 78.12). The `Intl` digit result for `ar` was checked in Node only; test on Android |
+| Machine-drafted permission and privacy text reduces consent | Accepted. English first, per-key fallback with a visible note, native reader per language (78.12, O11) |
+| Minors, Law 25 and the content of the notice | Accepted as notice requirements, not legal advice (78.13) |
+| No way to turn a notification off from the notification; no "why did I get this" | Accepted. `from=push` banner with Manage (78.10); Pause for a day or week (78.12) |
+| Shared devices, lost devices, iOS storage eviction | Accepted as documented limits: settings stay on the device, a restore link is not built; the panel says it is starting fresh (78.12, 78.16) |
+| An urgent override that bypasses mutes | Rejected. It drives players to revoke the permission. Use Discord for urgency (78.16) |
+| Per-subscription "last notification received" written by the worker | Replaced by the server's `last_success_at` in the status line, which keeps the rule against worker-side storage (78.10, 78.16). It means "a push service accepted it", not "the phone showed it" |
+
+**Measurement plan (about half a session, before phase 2).**
+1. Cloudflare Web Analytics, or the edge or Caddy logs, for `/events`: device type, operating system, browser and referrer, in particular the share arriving from Discord and the iPhone share. Cloudflare's own documentation should be checked for exactly what it reports; this is not verified.
+2. A counter on the Add to Calendar menu by vendor (Google, Apple, Outlook, `.ics`), which measures calendar demand and costs a few lines.
+3. A Discord poll, at least 30 respondents. Suggested text:
+
+   > Phone reminders for events: if Discord is muted, how would you want a heads-up? (pick one)
+   > 1. A Discord DM from the bot
+   > 2. A notification from the schedule web app (iPhone needs a Home Screen install)
+   > 3. A calendar alarm
+   > 4. Channel pings are enough
+   > 5. I do not want reminders
+   >
+   > And your device: iPhone / Android / PC.
+
+4. A one-hour calendar test: a feed with `VALARM` subscribed in Google Calendar, Apple Calendar and Outlook, noting which alarms fire.
+5. How many events have no reminders (they would send no push). On `lxc-taraka`:
+
+       cd /opt/taraka && docker compose exec db psql -U taraka -d kingshot_scheduler -c "SELECT e.id, e.name FROM events e LEFT JOIN event_reminders r ON r.event_id = e.id WHERE e.active AND NOT e.leadership_only GROUP BY e.id HAVING count(r.id) = 0;"
+
+The decision rule is in 78.4. The owner may build regardless; the rule records what the reviewers would want to see first.
+
+### 78.20 Questions asked while designing, and the answers
+
+Recorded 2026-10-04 so the reasoning behind the decisions is not lost.
+
+| Question | Answer |
+|---|---|
+| How much work is it to make the public pages a PWA with mobile notifications? | Phase 1 (installable shell) about 1 session. Push about 3 to 4 sessions at the first estimate, then about 5 after the reviews added change pushes and the status and fallback work. About 9 to 10 sessions end to end including measurement and the payload fix, about 8 without the payload fix (78.4) |
+| How would users control which events they are pinged for? | By alliance and Kingdom-wide events first, then by event type, a single recurring event ("Every Bear Hunt") and announcements, with precedence series, then type, then alliance (78.8). In the panel, behind a one-decision first screen (78.12) |
+| Can users set their own reminders instead of accepting the event's? | Yes. The default mode uses each event's reminders. A subscriber can switch to their own lead times (up to 5, 0 to 10,080 minutes), and a single event can carry its own times. Pushes are computed from the event start minus the subscriber's offset, independent of the Discord reminders (78.8). The first draft said push would fire only at offsets the event has; that was corrected the same day. Phase 3 (78.4) |
+| Can a PWA have home screen widgets on iPhone and Android? | No. A PWA cannot provide a home screen widget on iPhone or Android. Microsoft Edge on Windows 11 supports PWA widgets in the Widgets Board through a manifest `widgets` entry and Adaptive Cards. Chrome has an open request for Android widgets whose status could not be read. Sources: Progressier's help article, Microsoft Edge documentation, the Chromium issue tracker (a vendor page and two documentation pages; Apple's own documentation was not checked). Widgets need native apps, which do not fit a one-developer alpha. The nearer routes are `/next` in Discord, a calendar subscription (calendar widgets show subscribed events) and app shortcuts (78.6) |
+| Should we consider the players' perspective before building? | Yes, done: four independent reviews (78.19). Result: gate on measurement, add change pushes, make failure visible, simplify the first screen, and consider calendar alarms and Discord DMs first |
+| What went wrong with the first draft? | Occurrence ids are not stable, so de-duplication keyed on them would repeat pushes; a synchronous sender would have frozen the single event loop; a new subscriber or a moved event would have fired stale pushes; `Intl` gives "this minute", not "now", at zero minutes; and the draft claimed some Caddy lines that `/api/*` already covers (78.18) |
+| What does the owner need to do next? | Answer O10 to O13 in 78.17, run the three checks (the Caddy forwarded-header grep in 78.11, the `/api/events` size in 78.5, and the events-without-reminders query in 78.19), and decide whether to run the measurement plan in 78.19 |
+
+Open and unverified, collected from the whole section: Safari's behaviour on a push with no visible notification; the real push hostnames of Edge and Samsung Internet; the maintenance state of `http-ece` and `py-vapid`; the Topic length rule against the RFC text; how Google Calendar and Outlook treat `VALARM` in a subscribed feed; whether install, service workers and push work in Discord's in-app browser; how Caddy and Cloudflare handle the forwarded headers; whether the restic backup includes `.env`; Cloudflare's analytics fields; and the Kingshot player facts the reviewers took from third-party guides.
+
+## 79. Gift code redemption
+
+Status: proposed, design only, nothing built. Depends on nothing in §78. Reference implementation studied: `github.com/justncodes/ks-giftcode` v2.0.0 (2026-07-25, GPLv3, one Python file). The protocol facts below come from that script and from nothing else. They are unverified against the live API and must be checked with one real redemption before any build is trusted.
+
+### 79.1 Goal, non-goals and a scope warning
+
+A coordinator pastes a gift code, and Samaya redeems it for every player on their alliance's roster, then shows who got it, who already had it, and whose kingdom number is wrong. The reason to do it inside Samaya is that alliances, access control, the admin console and the audit log already exist.
+
+Not in this section: finding codes automatically, player nicknames (the API no longer returns them), a public page, player self-registration, Discord result posts, and any tracking beyond redemption outcomes.
+
+Scope. Resolved 2026-10-05: the owner confirmed Samaya is heading toward a full alliance management suite, which supersedes the 2026-10-01 note that player tracking is not to be designed yet. A list of player IDs is the first per-player data Samaya holds, so §80 defines it once as a shared player registry and §79 builds on it. Alternative A in 79.12 stays as the zero-code fallback.
+
+### 79.2 Decisions
+
+| # | Decision |
+|---|---|
+| 1 | The roster is the player registry of §80.3: a player has an ID, an optional kingdom override and a current alliance. Redemption reads it and never writes to it except through the bulk add in 79.6. |
+| 2 | The game kingdom number lives on the Kingdom (`kingdoms.game_number`, nullable). A roster entry's `kid` overrides it for transferred players. Redemption without a resolvable kingdom is refused before any request. |
+| 3 | A run is one code for the alliances the user picks. Results are one row per distinct player ID, so a player on two rosters is redeemed once. |
+| 4 | A run is resumable. State is in the database, a tick job advances it, and a restart loses nothing. Redemption is idempotent on the game's side (`RECEIVED`), so a row left `in_flight` by a crash is simply retried. |
+| 5 | One run advances at a time. At least 1 second plus up to 0.5 seconds of jitter between requests, because the API limits per player and the reference script uses that pace. |
+| 6 | An honest client. A fixed `User-Agent` of `Samaya/{version} (+https://ks138.taraka.dev)` and no header rotation. The reference script rotates browser, version and platform headers "to avoid bot detection". Samaya does not copy that. If the server blocks the client, the run stops and says so, and nobody works around it. This may get blocked sooner than the reference script (O3). |
+| 7 | The signing key and base URL are configuration (`KS_GIFTCODE_SIGN_KEY`, `KS_GIFTCODE_BASE_URL`), never committed. The key was extracted from the game's web client, can change without notice, and has already differed between the owner's earlier bot and this script. Feature off when the key is unset. |
+| 8 | Drift is detected, not guessed. Three players in a row answering `SIGN ERROR`, `NOT LOGIN` or an unknown message stops the run as `api_changed`. |
+| 9 | Player IDs never appear in any public payload, ICS feed or Discord message. Every roster change and run start is audited. |
+| 10 | Redemption is a game-account action taken on behalf of players who put their ID on a list. The coordinator is responsible for having their members' agreement. Samaya does not verify ownership of an ID, and cannot, since the API returns no nickname. |
+| 11 | Clean reimplementation, not a copy. The protocol is about 60 lines (79.5). The reference repo is credited in the module docstring. GPLv3 would attach to copied code only if Samaya were distributed, which it is not, but a rewrite avoids the question. Not legal advice. |
+
+### 79.3 Data model (one Alembic revision, additive, downgrade drops the tables and column)
+
+Built as `a1f0c0de0013`. §78's reservations moved to `0017` and `0018`, because §81 to §83 take `0014` to `0016`. Models go in `models/db.py` so `alembic check` sees them.
+
+`kingdoms.game_number` Integer, nullable.
+
+`players`: defined in §80.3 and created by the same revision. Redemption rows reference it with `player_id` (FK, `CASCADE`) next to `fid`, so a deleted player takes their results with them. Delete children explicitly in application code as well, because the test SQLite has foreign keys off.
+
+`redemption_runs`: `id`, `code` Text, `status` (`queued`, `running`, `done`, `stopped`, `cancelled`), `stop_reason` Text nullable (`code_expired`, `code_invalid`, `claim_limit`, `api_changed`, `unreachable`, `cancelled`), `created_by`, `created_at`, `started_at`, `finished_at`.
+
+`redemption_results`: `id`, `run_id` (FK, `CASCADE`), `tenant_id` (the first alliance that listed the player), `fid`, `kid`, `status` (`pending`, `in_flight`, `cooling`, then the final classified key), `message`, `attempts`, `cooldowns`, `next_attempt_at`, `updated_at`. Unique on `(run_id, fid)`.
+
+Retention: results and runs older than 90 days are deleted by the daily generation job. Deleting a Tenant cascades its roster.
+
+### 79.4 Outcomes the client must classify
+
+From the reference script. The `err_code` is checked together with the message.
+
+| `msg` | `err_code` | Meaning | Action |
+|---|---|---|---|
+| `SUCCESS`, `SAME TYPE EXCHANGE` | none, 40011 | Redeemed | final, counts as success |
+| `RECEIVED` | 40008 | Already redeemed | final, harmless |
+| `TIME ERROR` | 40007 | Code expired | stop the whole run |
+| `CDK NOT FOUND` | 40014 | Wrong code | stop the whole run |
+| `USED` | 40005 | Claim limit reached | stop the whole run |
+| `TOO FREQUENT` | 40019 | Per-player limit | park that player 60 seconds, at most 3 times |
+| `TIMEOUT RETRY` | 40004 | Server asks for a retry | retry up to 3 times with growing delay |
+| `USER INFO ERROR` | 40020 | Wrong kingdom for this ID | final, listed for the coordinator to fix |
+| not exist | 40001 | No such player | final |
+| `STOVE_LV ERROR`, `RECHARGE_MONEY ERROR`, `RECHARGE_MONEY_VIP ERROR` | 40006, 40017, 40018 | Player does not meet the code's requirement | final |
+| anything else | any | Unknown | final as an error, counts toward drift (decision 8) |
+
+Transport failures (HTTP 429, 502, 503, 504, timeout) retry 3 times with growing delay. Ten players in a row unreachable stops the run as `unreachable`.
+
+### 79.5 Module layout
+
+`services/giftcode_client.py`: `sign(payload, key)` is the lowercase hex MD5 of the keys sorted alphabetically and joined as `k=v&k=v`, followed by the key, and the signed request is form-encoded `fid`, `cdk`, `kid`, `time` (Unix seconds) plus `sign`, POSTed to `{base}/api/gift_code`. `classify(response_json)` is pure. `GiftcodeClient` takes an injected `httpx.AsyncClient` (`follow_redirects=False`, `trust_env=False`, 10 second connect and 30 second read timeouts) so tests use a fake transport and CI never touches the network.
+
+`services/giftcode_engine.py`: `create_run`, `run_tick(session_factory, client, now)` (claim by update before the call, commit, then call, process until a 50 second deadline, yield), `recover_stale_claims` (`in_flight` older than 5 minutes returns to `pending`), `cancel_run`. Registered in `scheduler/` as `giftcode_tick_job`, every minute, `max_instances=1`, only when the feature is configured.
+
+`routers/admin/giftcodes.py` and `schemas`: roster and runs (79.6). Wired into `admin/__init__.py`.
+
+### 79.6 API (all under `/admin/api`, tenant by `X-Tenant-Slug` as elsewhere)
+
+| Route | Who | Behaviour |
+|---|---|---|
+| `GET /roster` | not viewer | The alliance's entries |
+| `POST /roster` | not viewer | Bulk add from pasted text. A line is `fid` or `fid,kid`, `#` comments ignored, a two-number row is `fid,kid` when the second is 6 digits or fewer (the reference rule). Returns added, duplicates and rejected lines. Cap 500 entries per alliance |
+| `DELETE /roster/{id}` | not viewer | Remove one |
+| `POST /giftcode-runs` | not viewer | Body: `code` (trimmed, 3 to 40 characters, letters and digits), `tenant_ids` the user can access. Refuses while another run is active (409), when the feature is off (503), or when a roster has no kingdom (422 naming the players). Players already `SUCCESS` or `RECEIVED` for the same code in an earlier run are marked `RECEIVED` without a request |
+| `GET /giftcode-runs`, `GET /giftcode-runs/{id}` | not viewer | Progress, counts per status, wrong-kingdom list |
+| `POST /giftcode-runs/{id}/cancel` | not viewer | Remaining rows become `cancelled`, the run `cancelled` |
+
+Audit rows: roster add and remove (counts, never the IDs in the log message), run start and cancel.
+
+### 79.7 Admin UI
+
+One new tab, "Gift codes", in the existing no-build console: a roster card (paste box, table with delete, count), a Redeem card (code field, alliance checkboxes, Start), and a run list that polls every 3 seconds while a run is active and every 30 otherwise. A finished run shows five numbers (redeemed, already had it, wrong kingdom, requirement not met, other) and a wrong-kingdom list with each ID and the kingdom that was rejected. The tab ends in the collapsed `about-page` explainer. BEM classes, no inline styles or handlers, `classList` for hiding, `focusModal()` for any dialog. Strings in English only, like the rest of the console.
+
+### 79.8 Security and privacy
+
+Payloads are built from validated digits and a validated code, never concatenated from free text. The code is not secret, so it is stored and shown. Responses never echo the signing key. Log lines carry run id and counts, not player IDs. The roster API is the only place IDs are returned, and only to users with access to that alliance. A test asserts that no `fid` reaches `/api/events`, `/events.ics` or any other public route.
+
+### 79.9 Tests
+
+Signature against a vector computed from the formula in a test, so a change to the algorithm is deliberate. Classifier table above, one case per row. Engine with a fake client: success, already redeemed, cooldown then success, three cooldowns then give up, fatal status stops the rest, drift stop, unreachable stop, crash recovery (`in_flight` returns to `pending`), cross-alliance dedupe, earlier-run skip, deadline yield and resume. API: permissions with `make_user_and_client`, viewer 403, another alliance's roster 403, bulk parse edge cases, 409 and 503 paths, audit rows. Public leakage test (79.8). Migration: `alembic upgrade head`, `alembic check`, downgrade.
+
+### 79.10 Effort
+
+About 3 sessions: models, migration, client and classifier with tests; engine, scheduler job and API with tests; UI, explainer, `CLAUDE.md` and Part I updates. The live check (one real redemption with the owner's own ID and a real code) is a manual acceptance step and cannot be automated.
+
+### 79.11 Operations
+
+Env vars in `.env`: `KS_GIFTCODE_SIGN_KEY` and optionally `KS_GIFTCODE_BASE_URL` (default `https://kingshot-giftcode.centurygame.com`). Add both to `.env.example` without values. Back up `.env` with the rest of the host config. Production already has outbound HTTPS. The egress IP is the host's, so a burst that earns a rate limit affects only this feature. Deploy order: pull, build, `alembic upgrade head`, set the key, restart. Rollback: unset the key (feature off, tables stay), or `alembic downgrade` to the previous head. If redemption starts failing, check `stop_reason` first: `api_changed` means the reference repo's changelog is the place to look.
+
+### 79.12 Alternatives
+
+A. A sidecar container running the reference script from a mounted CSV, started by hand or by cron. No Samaya changes, no roster inside Samaya, no UI, GPLv3 code kept in its own container. Effort under 1 hour.
+B. The owner's earlier Discord bot or the community `kingshot-project/Kingshot-Discord-Bot` (named in the reference README). Players register themselves in Discord. Not evaluated here.
+C. This section.
+
+### 79.13 Open questions
+
+O1. Closed 2026-10-05: in scope, as part of §80.
+O2. Roster owner: alliance coordinators paste IDs (this design), or players self-register later. Self-registration needs a way to stop one person listing another's ID (80.3).
+O3. Accept the honest client (decision 6) and the higher risk of being blocked?
+O4. Should Century Games' terms be read before building? Not reviewed here, and automating redemptions for other people's accounts is the kind of thing a game's terms may restrict.
+O5. Should a run post a summary to a Discord channel when it ends? Deferred, as are button interactions.
+
+### 79.14 As built (2026-10-05)
+
+Built with the player registry of §80.3 as Alembic `a1f0c0de0013` (verified on Postgres 16: upgrade, `alembic check`, downgrade, re-upgrade). Where the build differs from the design above:
+
+- `players.tenant_id` is `CASCADE`, so removing an alliance removes its roster. `players` is unique per Kingdom on `(kingdom_id, fid)`, so a player cannot be listed by two alliances. There is no cross-alliance dedupe step.
+- The `fid` CHECK only requires a non-empty value. The 5 to 20 digit rule lives in `services/player_import.py`.
+- `redemption_results.player_id` is a `CASCADE` foreign key, as designed. `redemption_results.tenant_id` is the player's alliance at run creation.
+- Added stop reason `blocked`: the API answered 401 or 403, which ends the run like `unreachable` but is reported differently.
+- Added env var for the user agent next to `KS_GIFTCODE_SIGN_KEY` and `KS_GIFTCODE_BASE_URL`; see `.env.example`. The feature stays off, with a 503 from the API, until the sign key is set. The key is never committed.
+- Verified end to end against a local fake game server (success, already received, wrong kingdom, signing). The real game API is unverified: only a redemption of the owner's own account with a live code can confirm it. O3 and O4 stay open.
+
+## 80. Alliance management roadmap
+
+Status: proposed, design only, nothing built. Direction confirmed by the owner on 2026-10-05: Samaya is heading toward a full alliance management suite, and every feature is Samaya's own implementation. Inputs: a read-only review of `kingshot-project/Kingshot-Discord-Bot` (custom license, discord.py, SQLite, about 72,000 lines, last commit 2026-10-04) by three readers, then a spot check by me. Nothing is copied. The bot is evidence of what leaders ask for and of what goes wrong, not a source of code. Findings about the bot are from reading code and have not been run.
+
+### 80.1 What the review established
+
+| Finding | Consequence for Samaya |
+|---|---|
+| The game's player lookup endpoint is gone. The bot's `/w` now reads only its own database, and the `ks-giftcode` changelog says the same. | Names, furnace level and power cannot be fetched. They are typed, imported or read from screenshots. Samaya stores a typed name at most. |
+| Nothing verifies who owns a player ID. In the bot anyone can register any ID, first come first served. | Samaya cannot verify either. Leaders write the registry. Self-registration is a later, approval-gated feature (80.3). |
+| The bot's `/w` answers publicly for any ID in the database and its autocomplete lists every nickname and ID. Alliance-scoped admins are not scoped everywhere. | Samaya has no unauthenticated player lookup and scopes every player read to an alliance the user can access. |
+| Its reminder loop skips a reminder that was due during an outage and rolls the schedule forward. | Samaya's engine already treats this deliberately (never late, never stale, §66.4). Keep that. |
+| Its minister booking is admin-only, has no reminders and no database uniqueness on a slot. | Samaya adds a unique constraint and uses its own reminder engine. |
+| Bear damage records only players who dealt damage, so it cannot report who skipped. | With a roster, Samaya can report absentees. That is a real advantage. |
+| OCR carries unverified patterns (parts still say "Whiteout"), fuzzy matching that can credit the wrong player, and an optional third-party OCR service that receives screenshots. | No OCR in this roadmap. Pasted lists first (80.5). |
+| It stores backup passwords in plaintext, sends a shared API key over plain HTTP and probes the game server to guess kingdoms. | Not adopted. Samaya's secrets stay in `.env`. No probing. |
+
+### 80.2 Principles for every player-facing feature
+
+1. One shared registry (80.3). No feature keeps its own list of players.
+2. Player data is written and read by authenticated leaders only, scoped to alliances they can access. Kingdom coordinators see all alliances. Viewers read, never write.
+3. No player ID, name or per-player statistic appears in any public payload, ICS feed, push payload or Discord message unless a leader explicitly posts a report. A test asserts the first part for every new public route.
+4. No public shaming surfaces. Absence and damage rankings are leadership views. A leader may post a summary, which is their decision.
+5. Every bulk write and every export is audited with counts, never with the IDs in the log message.
+6. Retention is stated per table and enforced by the daily job. Removing a player removes their rows everywhere.
+7. Each feature is off until configured, and none changes the behavior of the event engine.
+8. Samaya states in the console that it does not verify ID ownership and that leaders attest their members agreed to be listed.
+
+### 80.3 The player registry
+
+One new table, created by the first revision that needs it (§79's).
+
+`players`: `id`, `kingdom_id` (FK to kingdoms, `CASCADE`), `fid` String(20) with a digits-only CHECK, `kid` Integer nullable (overrides the Kingdom's `game_number` for a transferred player), `tenant_id` (FK to tenants, `SET NULL`, the current alliance), `name` String(60) nullable (typed, optional), `note` String(40) nullable, `created_by` (FK to users, `SET NULL`), `created_at`, `updated_at`. Unique on `(kingdom_id, fid)`. A player is in at most one alliance at a time. Moving a player is a write with an audit row.
+
+Not stored: a Discord ID. Linking a player to a Discord account is what makes DMs and personal pings possible, and it is also what makes the table dangerous. It is deferred to its own decision (O3) and will need an approval step because the game gives no way to prove ownership.
+
+API: list, bulk add (pasted `fid` or `fid,kid[,name]` lines, cap 500 per alliance per request), edit, move, delete, CSV export (audited, `fid,kid,name,alliance`). Admin UI: a "Players" tab, the home of the roster that §79 describes. Import accepts the bot's CSV shape so an alliance can bring its list across.
+
+### 80.4 Features, ranked by value over effort
+
+Effort is a guess in sessions (inference), counting tests and the admin UI.
+
+| # | Feature | Source of the idea | What it is in Samaya | Effort |
+|---|---|---|---|---|
+| 1 | Player registry and gift code redemption | Most prominent feature in the bot, both readers agree | §79 on top of 80.3 | 3 to 3.5 |
+| 2 | Pause failing destinations | The bot's quarantine. Your own 403 "bot needs Send Messages" failures on 2026-10-04 | After N consecutive permission failures (403 on a channel) a destination is paused, shown in the delivery health card with the reason, and resumed by a button or automatically when a probe succeeds. Never silent: the coordinator is told in the console. Needs a decision on who is notified (O4) | 1 |
+| 3 | Schedule board | The bot's pinned live boards, rated among the most valued | One message per chosen channel that Samaya edits in place: next 7 days by day, refreshed daily and when an event changes. Reuses `public_rows`. Needs the message id stored per destination and edit-or-recreate handling when someone deletes it. Timezone shown as UTC with a relative time per line (no per-viewer timezone) | 2 |
+| 4 | Self-cleaning reminders | The bot deletes earlier reminders when later ones go out | Optional per event: after a later reminder posts, or after the event ends, delete the earlier Discord messages. Needs Manage Messages and the stored message ids. Failure to delete is logged and never blocks sending | 1 |
+| 5 | Minister appointment slots | The bot's Construction, Research and Training day slots | See 80.5. Leader-booked in v1, a public read-only slot table, reminders through the existing engine | 2 to 3 |
+| 6 | Bear hunt damage | The bot's most developed tracker | See 80.5. Pasted `fid,damage` per hunt, leaderboards, trend per player, and the absentee list the bot cannot produce | 2 |
+| 7 | Attendance | The bot's attendance sessions | Manual checklist per event occurrence (present, absent, excused, walk-in), per-player history for leaders. A no-show ranking stays a leadership view (principle 4) | 2 |
+| 8 | Kingshot event presets | The bot ships a library of the game's events | A seed list of event types (name, color, default duration, default reminders) a coordinator can import. Durations and cycles are game facts that must be checked in game before they ship (inference: the bot's own comments flag some as unverified) | 0.5 |
+| 9 | First-run checklist | The bot's setup wizard | A dismissible checklist in the console: Kingdom, alliance, server, destination, first event. No wizard flow | 0.5 |
+
+Roughly 14 to 16 sessions for everything. The sensible stopping points are after 1 and after 4.
+
+### 80.5 Designs for the two data features
+
+Minister slots. The game mechanic as the bot models it: three appointment types, each a 24 hour grid in 30 minute slots (a 15 minute variant exists), one holder per slot and one slot per player per type. Verify the mechanic in game before building. Data: `appointment_slots` with `kingdom_id`, `kind`, `day` (date), `slot_start` (UTC), `player_id`; unique on `(kingdom_id, kind, day, slot_start)` and on `(kingdom_id, kind, day, player_id)`, enforced by the database. Kingdom coordinators book. The public page shows a read-only table of slots with open ones marked, never a player ID, with the player's typed name only if the leader enabled "show names". A slot reminder is a delivery to the Kingdom's appointment destination, sent at a lead time before the slot, naming the slot and, only if a leader chose it, the typed name. No DMs and no mentions until O3 is decided.
+
+Bear damage. A hunt is `(kingdom_id, tenant_id, date, trap, rallies, total_damage)` and its rows are `(hunt_id, player_id, damage)`. A leader pastes `fid,damage` lines after a hunt. Reports: top players, a player's damage over time and change against their previous hunt on the same trap, alliance total over time, and members on the roster with no row (absent or zero). Everything stays behind the console. Retention 12 months. No screenshots are accepted or stored.
+
+### 80.6 Not on the roadmap
+
+OCR of any kind, the kingdom probe and scan, a public player lookup, the shared gift code distribution service, theme galleries (Samaya has §71), backups by DM, self-updating, a button-driven menu bot, and anything that stores a screenshot. Backup stays `ops/backup.sh` plus restic.
+
+### 80.7 Sequencing and cross-cutting work
+
+Order: 1, 2, 3, 4, then 5 to 7 in the order the alliance actually asks for them. Items 2 to 4 touch the delivery engine and need its tests extended (at-most-once, the stale rules). Items 1, 5, 6 and 7 add a permission surface and each gets the same tests: viewer 403, other alliance 403, nothing in public routes, audit rows written. Alembic revisions are numbered at build time after whatever has merged, and §78's reservations now sit at `0017` and `0018`. Each feature gets its own spec section before it is built, as this one has for gift codes.
+
+### 80.8 Open questions
+
+O1. The owner's order of interest after item 1, and whether 2 to 4 should come before 5 to 7.
+O2. Whether alliance coordinators or only Kingdom coordinators book minister slots.
+O3. Linking a player to a Discord account, for DMs and pings: wanted at all, and with what approval step.
+O4. Who is told when a destination is paused: the console only, the alliance owner by DM, or a channel post.
+O5. Retention: the 90 days for redemption results and 12 months for bear data are proposals.
+O6. Whether to read Century Games' terms before item 1 (79.13 O4).
+
+## 81. Pausing failing destinations
+
+Status: built with this section (alliance management roadmap item 2, §80.4).
+
+### 81.1 Problem
+
+A destination whose channel was deleted, or whose permissions the bot lost, fails every reminder with a 403 or 404. Each failure is an error row the leader has to notice, and every one still costs a Discord call. After a few, Samaya should stop trying, say so where leaders already look, and start again only when someone says the cause is fixed.
+
+### 81.2 Decisions
+
+1. The unit is the **Audience destination** (server, channel, optional role), the same unit that posts. One destination pausing never affects another.
+2. Only a reminder send counts. An error whose text starts with `403` (missing permission) or `404` (channel not found) is an access failure. Network errors, 429, 5xx and 400 are not, because they say nothing about the destination. Discord Scheduled Event calls are guild-level (Manage Events) and are out of scope.
+3. After **3 consecutive** access failures the destination is paused. Any successful send resets the count to 0. Only the representative delivery of a merged send is counted, so one channel is one failure, not one per alliance.
+4. A paused destination is never called. Its due deliveries end as `error` with the detail `Paused: <reason>`, so the delivery log shows every skipped reminder (never silent) and **Retry** works once the destination is resumed. These skips do not count as failures.
+5. Resume is explicit: `POST /api/audience-destinations/{id}/resume`, by Kingdom coordinators (the people who may edit the Audience). It clears `paused_at`, `pause_reason` and the count, and writes an audit row. Changing a destination's server, channel or role creates a new row (§68), so a fixed channel starts clean.
+6. Where it shows: the delivery health card lists each paused destination (audience, server, channel, reason, since when, a Resume button) and the card's state becomes "Needs attention". The Audience editor in Setup marks the destination as paused. No Discord message and no email in this version (assumption for O1).
+
+### 81.3 Data (Alembic `a1f0c0de0014`, additive, downgrade drops the columns)
+
+`audience_destinations.consecutive_failures` Integer not null, default 0. `paused_at` timestamptz null. `pause_reason` Text null.
+
+### 81.4 Engine
+
+`_send_reminder` returns an `error` with the `Paused:` detail before any Discord call when `paused_at` is set. After the delivery is finished, `process_delivery` calls `record_destination_outcome` in its own session: `posted` resets the count; an access-failure error increments it and pauses at the threshold (`PAUSE_AFTER_FAILURES = 3`); every other outcome leaves it alone. The claim-before-call rule is unchanged.
+
+### 81.5 API
+
+`GET /api/delivery-health` adds `paused_destinations` (scoped to the Kingdoms of the selected alliances) and `healthy` is false while any exists. Audience destinations in `/api/audiences` carry `paused_at` and `pause_reason`. Resume: 404 for another Kingdom's destination, 403 for non-coordinators and viewers, a no-op 200 when not paused.
+
+### 81.6 Tests
+
+Threshold, reset on success, non-access errors ignored, merged send counts once, paused skip makes no Discord call and is not counted, resume then retry posts, permissions (viewer, other Kingdom), audit row, health payload, no change to public routes.
+
+### 81.7 Open questions
+
+O1. Notify somewhere other than the console (a message to a leadership channel, or an email)? Not in this version.
+O2. Is 3 the right threshold? It is one constant.
+
+## 82. Schedule board
+
+Status: built with this section (alliance management roadmap item 3, §80.4).
+
+### 82.1 Goal
+
+One Discord message per chosen channel that always shows the next 7 days, edited in place so the channel does not fill with reminders to scroll through. It reads the same public rows as the website, so a leadership-only event is never on a board.
+
+### 82.2 Decisions
+
+1. A board belongs to an **Audience destination** (server, channel). Setting: `board_scope` = off (null), `kingdom` (every public event of the Kingdom, one line per occurrence with the alliances that take part) or `alliance` (that alliance's own schedule, as on its page). Set in the Audience editor by Kingdom coordinators.
+2. Content: a title line, then days (UTC, today through today plus 6) each with lines `HH:MM UTC` and name and a Discord relative time (`<t:unix:R>`), cancelled occurrences struck through. Past lines of the current day stay until midnight UTC. If the text would pass about 1900 characters it ends with "and N more" and the website is the full list. No per-viewer time zones: the relative time is the viewer-local part.
+3. Names are escaped for Discord Markdown and the message is sent with `allowed_mentions: {parse: []}`, so an event name can never ping anyone.
+4. Refresh: every minute the engine renders each enabled board and compares a hash of the text with the stored one. Same hash: nothing is sent. Different (an event changed, or midnight UTC passed): the message is edited. So event changes and the daily roll both refresh within about a minute without hooks in the event code. A manual **Refresh now** forces a render.
+5. Message id stored per destination. First time, or after the message was deleted in Discord (edit answers "Unknown Message"): post a new message and store its id. Turning the board off deletes the message (404 counts as done) and clears the id. Removing a destination row does not call Discord, so turn the board off first; the form says so.
+6. Failures never touch reminders. A board error is stored (`board_error`), shown on the destination in Setup, and cleared by the next success. After an error the board is retried every 10 minutes (a manual Refresh now ignores that wait). Boards on a paused destination (§81) are skipped. At most 20 boards per tick.
+7. Posting is claim-free: the id is committed right after Discord answers. A crash between the two could post a second message; the old one is then deleted by hand. Single worker only, as everywhere.
+8. Not built: a board of leadership-only events, a per-alliance title or colour, pinning (needs another permission), a board in more than one language.
+
+### 82.3 Data (Alembic `a1f0c0de0015`, additive, downgrade drops the columns)
+
+`audience_destinations`: `board_scope` Text null (CHECK null or `kingdom` or `alliance`), `board_tenant_id` Integer null (FK `tenants`, `SET NULL`; `alliance` with a null tenant means the alliance was removed and shows as an error), `board_message_id` Text null, `board_hash` String(64) null, `board_refreshed_at` timestamptz null, `board_error` Text null.
+
+### 82.4 Discord
+
+Three new client calls: `post_channel_message` (returns the message id), `edit_channel_message` (an Unknown Message answer is reported as `MESSAGE_GONE`), `delete_channel_message`. `FakeDiscord` gets the same three.
+
+### 82.5 API
+
+`DestinationIn` takes `board_scope` and `board_tenant_id` (alliance must be in the Kingdom; `kingdom` takes no alliance). Destinations in `/api/audiences` return the scope, tenant, `board_refreshed_at` and `board_error`. `POST /api/audience-destinations/{id}/board/refresh` (coordinators) renders now and returns the destination. Both writes are audited.
+
+### 82.6 Tests
+
+Render (days, UTC, cancelled, truncation, escaping, empty, leadership-only absent), hash skip, edit on change, recreate when the message is gone, off deletes, failure isolation from reminders, paused skip, permissions, API validation, audit.
+
+### 82.7 Open questions
+
+O1. Pin the board message? Needs Manage Messages; not in this version.
+O2. Should a board offer a language other than English? Not yet.
+
+## 83. Self-cleaning reminders
+
+Status: built with this section (alliance management roadmap item 4, §80.4).
+
+### 83.1 Goal
+
+A channel that gets "Bear Hunt in 60 minutes", "in 15 minutes" and "now" ends up with three messages saying the same thing. With this option on, only the newest reminder of an occurrence stays, and none stay once the event is over.
+
+### 83.2 Decisions
+
+1. Per event: `events.clean_up_reminders`, default off. One checkbox in the event form. It is copied by the "this and following" split and never inherited from the event type.
+2. Samaya stores the Discord message id of every reminder it posts, whether or not the option is on (`deliveries.discord_message_id`, already in the schema and now filled), so turning the option on later works for reminders that are already up.
+3. Two rules, per occurrence and per channel (a merged send is one message, §67.3):
+   a. When a later reminder (fewer minutes before the start) has posted, every earlier posted reminder in that channel is deleted.
+   b. When the occurrence has ended (its end, or its start when it has no duration), every remaining reminder is deleted.
+   A cancelled occurrence keeps its reminders until rule b; a cancellation notice is the leader's to post.
+4. Deletion never blocks sending. It runs after the delivery pass in the same tick, inside its own try block. Success sets `message_deleted_at`. A message that is already gone (Unknown Message) counts as deleted. An access failure (403, 404 channel) is stored in `cleanup_error`, shown in the delivery log, and not retried. Any other failure (network, 429, 5xx) is logged and retried on the next tick, for at most 24 hours after the occurrence ended.
+5. Permission: to my knowledge a bot may delete its own messages without Manage Messages. That is Discord's documented behaviour but not verified against a live server in this build, so the form says "needs no extra permission" only as a note to check on first use. Nothing here deletes a message Samaya did not post (a manual or unknown message id is never stored).
+6. The Discord Scheduled Event is not a reminder and is untouched. Schedule boards (§82) are not reminders and are untouched.
+7. At most 50 deletions per tick so a backlog cannot stall the minute.
+
+### 83.3 Data (Alembic `a1f0c0de0016`, additive, downgrade drops the columns)
+
+`events.clean_up_reminders` Boolean not null default false. `deliveries.message_deleted_at` timestamptz null, `deliveries.cleanup_error` Text null.
+
+### 83.4 Engine change
+
+Reminder sends call `post_channel_message` (the id-returning call from §82) instead of `send_channel_message`, and `_finish` stores the id. Existing behaviour (claim before the call, at most once, the destination pause of §81) is unchanged. `run_cleanup(session_factory, discord, now)` implements decisions 3 and 4 and is called from `run_delivery_tick`.
+
+### 83.5 API and UI
+
+Event create, patch, the event dict, the split copy and the audit snapshot carry `clean_up_reminders`. The delivery log row shows "Reminder removed" or the cleanup error.
+
+### 83.6 Tests
+
+The id is stored; rule a (earlier deleted, latest kept, other channels untouched); rule b; option off deletes nothing; already gone counts as done; 403 stored and not retried; transient failure retried then given up after 24 hours; a failing delete does not stop other deletes or later sends; merged sends delete once; split copies the flag; API round trip and audit; viewer permissions as for any event edit.
+
+### 83.7 Open questions
+
+O1. Confirm on a real server that deleting the bot's own message needs no Manage Messages.
+O2. Should the last reminder also go when the event starts rather than ends? One constant if so.
+
+## 84. Time polls
+
+Status: design only. Not built. Written 2026-10-07 after the §80 roadmap items 1 to 4.
+
+### 84.1 Goal
+
+Choosing a time is where leaders lose the most time: a message asking "what works?", replies scattered over a channel, a hand count. A leader proposes 2 to 6 UTC time slots, players tap the ones that work in Discord, Samaya tallies, and the leader picks the winner and applies it to the schedule. Nothing is applied automatically.
+
+### 84.2 Decisions
+
+1. **Buttons and our own storage, not native Discord polls.** A native poll is per message and per server, cannot feed a result back into Samaya, and cannot give one Kingdom-wide count across several servers. Buttons use the signed interactions endpoint that already exists (§70), so no gateway connection is added. Native polls stay available to leaders by hand for one-offs.
+2. **Who creates:** anyone who may edit the alliance's events (`require_not_viewer`). A Kingdom-wide poll needs a Kingdom coordinator, as Kingdom-wide events do. Where it posts: one or more of the Audiences linked to the poll's alliance; one message per destination, posted through the same destination resolution as reminders (a shared channel is one message, §67.3). A poll in a leadership-only Audience is allowed.
+3. **Slots:** 2 to 6, distinct, in the future, in UTC, shown as `<t:unix:F>` plus the UTC clock time so every viewer sees their own time and the UTC time. Six buttons fit in two Discord action rows (5 per row, 5 rows is the limit). A voter may tap several slots; tapping a slot again removes the vote.
+4. **Counts are live in the message.** A click is answered with the interaction response that updates the message (callback type 7), recomputed from the database, so concurrent clicks converge and no extra Discord call is made. Other copies of the poll (other channels) are brought up to date by the per-minute poll pass, which edits a message only when its text hash changed and at most once every 2 minutes per message (the §82 pattern).
+5. **Voters are not stored as Discord IDs.** A vote row holds `HMAC-SHA256(SECRET_KEY, poll_id:discord_user_id)`, enough to toggle and to count each person once, not enough to list or contact voters. Leaders and the Discord message show counts per slot only, never names. Rotating `SECRET_KEY` loses the ability to untoggle old votes; counts stay.
+6. **Who may vote:** anyone who can see the channel and whose interaction comes from one of the guilds the poll was posted to. It is not tied to the roster, because Samaya cannot verify that a Discord user owns a game ID (§80.1). Counts are advisory and one person with several accounts can skew them; the leader decides.
+7. **Closing:** at `closes_at` (default 48 hours, at most 14 days) or by hand. Closing removes the buttons, edits each message to the final tally and marks the leading slot. A tie shows as a tie. The leader then chooses a winner in the console:
+   - a poll linked to an occurrence offers **Move occurrence to this slot**, which calls the existing occurrence move (audited there);
+   - any other poll offers **New event at this slot**, which opens the event form prefilled with the date and time. Neither runs on its own.
+8. **Limits:** 3 open polls per alliance, one click rate limit of 10 per minute per Discord user (`services/rate_limit.py`), poll titles up to 80 characters. Polls and votes older than 90 days are deleted by the daily job.
+9. **Never public.** No public route, no ICS entry, nothing in `public_rows`. The only public-facing text is the Discord message itself.
+10. **Failures do not lose votes.** Votes are stored before any Discord call. A failed message edit is stored on the message row (`error`), retried every 10 minutes, and shown in the console, as for boards.
+
+### 84.3 Data (one Alembic revision, additive, downgrade drops the tables)
+
+The id is the next free one after whatever has merged. §78 reserves `0017` and `0018`, so this is expected to be `a1f0c0de0019`.
+
+`time_polls`: `id`, `kingdom_id` (FK, `CASCADE`), `tenant_id` (FK, `CASCADE`, null for Kingdom-wide), `title` String(80), `occurrence_id` (FK `event_occurrences`, `SET NULL`), `status` (`open`, `closed`, `cancelled`; CHECK), `closes_at`, `closed_at`, `winner_slot_id` (FK, `SET NULL`), `created_by` (FK users, `SET NULL`), `created_at`.
+
+`time_poll_slots`: `id`, `poll_id` (FK, `CASCADE`), `starts_at` timestamptz, `position`. Unique `(poll_id, starts_at)`.
+
+`time_poll_votes`: `slot_id` (FK, `CASCADE`), `voter_hash` String(64). Primary key `(slot_id, voter_hash)`.
+
+`time_poll_messages`: `id`, `poll_id` (FK, `CASCADE`), `destination_id` (FK `audience_destinations`, `SET NULL`), `guild_id`, `channel_id`, `message_id`, `content_hash`, `error`, `refreshed_at`. Unique `(poll_id, channel_id)`.
+
+### 84.4 Engine and Discord
+
+`services/time_poll.py`: pure `render_poll(poll, slots, counts)` and `custom_id` build and parse (`tp:{poll_id}:{slot_id}`, integers only, anything else is ignored), `record_vote` (toggle, in one transaction), `post_poll`, `run_poll_tick` (edit changed messages, close expired polls), `close_poll`. `discord_api.post_channel_message` and `edit_channel_message` gain an optional `components` argument; `FakeDiscord` the same. `discord_commands.handle_interaction` gains component interactions (type 3). Every response carries `allowed_mentions: {parse: []}`. A click on a closed, cancelled or unknown poll gets an ephemeral "This poll is closed." Poll text is escaped like board text (§82).
+
+### 84.5 API and UI (admin, `X-Tenant-Slug`)
+
+`POST /api/time-polls` (title, slots, audience ids, `closes_in_hours`, optional `occurrence_id`), `GET /api/time-polls` and `GET /api/time-polls/{id}` (tallies, message status), `POST /api/time-polls/{id}/close` (optional `winner_slot_id`), `POST .../cancel`. All writes audited. A **Polls** tab: list with count bars (a number beside every bar, never colour alone), create modal with a **Suggest slots** button that fills candidates from §85 free slots, close and apply actions, and the collapsed about-page explainer.
+
+### 84.6 Tests
+
+Create validation (2 to 6 slots, past slots, duplicate slots, other alliance's Audience, open polls limit); vote toggle and counting; one voter once; no Discord ID anywhere in the database; the hash differs per poll; click on closed, cancelled, unknown poll; slot that belongs to another poll; hostile `custom_id`; guild mismatch; type 7 response content and components; concurrent clicks converge; tick edits only on a changed hash and throttles; expiry closes and removes buttons; tie handling; message edit failure keeps votes; apply paths call the existing endpoints; viewer 403; Kingdom-wide needs a coordinator; nothing in public routes; retention.
+
+### 84.7 Effort
+
+Large: about 2 days of build and review. The interaction, hashing and tick parts are new; rendering, escaping, destination posting and the refresh pattern reuse §70, §67 and §82.
+
+### 84.8 Open questions
+
+O1. Restrict voting to members of a Discord role or to the alliance's guild only? Default here: anyone in the channel.
+O2. Add a "none of these work" button? It would count as a vote against and help leaders see when to propose again.
+O3. Verify against the current Discord docs before building: callback type 7 for component interactions on an interactions-endpoint app, the 5-by-5 component limits, and that edits through the bot token keep the buttons when `components` is sent.
+O4. Per-poll voter hashes mean a person voting in two polls is not linkable. That is intended and stays.
+
+### 84.9 As built
+
+Built as specified, with these notes.
+
+- **Discord facts.** Callback type 7 (update the message a button was on) is confirmed against the discord-api-types enum. The 5-buttons-per-row and 5-row limits and the 100 character `custom_id` limit are from general knowledge and were not re-read in Discord's own docs. Whether a PATCH without `components` keeps the buttons was not verified, so every edit resends the components (an empty list on close and cancel).
+- **Voting.** Clicks answer with type 7 carrying the fresh tally, so the clicked copy is already current and the tick does not edit it again. Wrong guild, closed, cancelled, unknown and malformed ids get an ephemeral "This poll is closed." `custom_id` parsing accepts ASCII digits only (a trailing newline or a full-width digit is rejected).
+- **Concurrency.** A duplicate insert from a double click is absorbed. The shared in-memory test database has one connection, so the concurrency test uses a file database.
+- **Failures.** If posting to a channel fails, the poll and its votes still exist; the API returns `discord_errors` and the poll shows without that message. Edit failures are stored on the message row and retried after 10 minutes.
+- **UI.** The new-poll form takes UTC times and has Suggest slots (§85 finder, 7 days, 12:00 to 23:00 UTC). Applying a result is by hand: Move occurrence (the existing occurrence PATCH) for a poll linked to an occurrence through the API, otherwise New event, which opens the event form with the date and time filled in. The form does not link an occurrence yet; the API accepts `occurrence_id`.
+- **Migration.** `a1f0c0de0019`, chained from 0016. Whichever of 0017 and 0018 (PWA, §78) lands first must keep its own id and this revision's `down_revision` must be re-pointed, or the PWA revisions chain after it.
+- Tests: `tests/test_time_poll.py`, `tests/test_polls_api.py`.
+
+## 85. Schedule insights
+
+Status: design only. Not built. Written 2026-10-07.
+
+### 85.1 Goal
+
+Leaders can see the schedule one event at a time but not as a whole. They cannot easily answer "where do our events collide?", "which UTC hours are quiet?" or "are reminders going out on time?". This section adds a read-only Insights tab built only from data Samaya already stores. No new collection, no migration.
+
+### 85.2 Decisions
+
+1. **Scope follows access.** Every endpoint uses `get_current_tenants` (so `X-Tenant-Slug: *` means every alliance the caller can reach). Kingdom-wide events are always included, because they are public. Another alliance's events appear only when the caller can reach that alliance. Leadership-only events are included for callers who can reach their alliance, since this is an admin view, and are never exposed on a public route.
+2. **Read-only and open to viewers**, like the Schedule and Delivery tabs. Nothing here writes, so there are no audit rows.
+3. **Excluded from every count:** inactive events and cancelled occurrences. A moved occurrence counts at its effective start (`effective_start`, §66). Events with no duration count as a 30 minute block (`NO_DURATION_MINUTES`) for overlap and free-slot maths only.
+4. **Aggregates only.** No per-player data anywhere. The coverage panel shows counts per alliance, never names or IDs (§80.2).
+5. **Computed in process** from at most 60 days of occurrences. Pure functions in `services/analytics.py` take rows and a clock, so every rule is a unit test. No cache, no extra tables, no chart library: markup is a real `<table>` plus CSS, so it works without a build step.
+
+### 85.3 Panels
+
+1. **Heatmap.** Weekday by UTC hour (7 by 24), each cell the number of event starts over the window (default 28 days, 7 to 60). Every cell shows its number, so meaning never depends on colour; the colour ramp has a text contrast check per cell. A cell opens the list of events behind it. Answers "when do we already cluster?".
+2. **Overlaps.** Pairs of occurrences whose intervals intersect, with the alliances, the overlap in minutes and a note when both post to the same channel. Intervals that only touch (one ends when the next starts) do not overlap.
+3. **Free slots.** Inputs: duration in minutes (15 to 480, default 60), window in days (1 to 30, default 14), allowed UTC hours (default 0 to 24), and which alliances to keep clear (default all reachable). Output: the 5 best start times, quarter-hour grid, none overlapping a selected alliance's event, ranked by clearance (minutes to the nearest event, larger is better), then by earliest. The §84 poll form uses this to suggest candidate slots.
+4. **Delivery trends.** Per day for 30 days, from `deliveries`: reminders due, posted, errors, and lateness (`posted_at_utc` minus `due_at_utc`) at the median and 95th percentile. Merged deliveries (`merged_into_id` set) are not counted twice. Per destination on request. The window is limited by how long deliveries are kept; to confirm that nothing prunes them today before the numbers are called a trend.
+5. **Redemption coverage** (only when gift codes are configured). For the last 5 runs, per alliance: roster players, redeemed or already had it, other problems, wrong kingdom. Coverage is redeemed plus already had it, over players in the run.
+
+### 85.4 API (all `GET`, under `/admin/api/analytics/`)
+
+`/schedule-heatmap?days=`, `/schedule-overlaps?days=`, `/free-slots?duration=&days=&from_hour=&to_hour=&alliances=`, `/delivery-trends?days=&by=day|destination`, `/redemption-coverage?runs=`. Each rejects out-of-range parameters with a 422 naming the parameter. Datetimes are ISO UTC.
+
+### 85.5 UI
+
+A new **Insights** tab with the four or five panels as collapsible sections, an alliance filter like the other tabs, loading and empty states, the heatmap with a legend and a text summary above it ("Busiest: Saturday 19:00 UTC, 4 events"), and the collapsed about-page explainer. BEM classes, no inline styles or handlers, `classList` hiding, contrast checked for every colour pair, and a layout that works at phone width (the heatmap scrolls inside its own container).
+
+### 85.6 Tests
+
+Heatmap: counts by weekday and hour, cancelled and inactive excluded, moved occurrence at its new time, window bounds. Overlaps: nested, partial, touching (not overlapping), no-duration block, same-channel note. Free slots: duration fits, hour window, selected alliances only, ranking and tie order, empty result when nothing fits, bad parameters. Delivery trends: lateness percentiles on a fixed sample, merged deliveries once, destination split, empty days. Coverage: percentages on a fixed sample, alliance isolation. Permissions: viewer allowed, an alliance the caller cannot reach never appears, `*` equals the union of reachable alliances, nothing on a public route, the page works with no data.
+
+### 85.7 Effort
+
+Medium: about 1 day. All queries and rules are new, but no schema, no Discord calls and no writes.
+
+### 85.8 As built
+
+Built as specified, with these differences and findings.
+
+- **Visibility.** The panels use the same visibility as the Schedule tab: events the alliance owns, events with it in the audience, and kingdom-wide events of the caller's Kingdoms. A leadership-only kingdom-wide event therefore shows to every Kingdom member who can reach an alliance, which is narrower than the wording in 85.2 but identical to what the Schedule tab already shows. Nothing is public.
+- **Heatmap** counts occurrence starts by weekday and UTC hour (not busy hours). Moved occurrences count at their new time. Cancelled occurrences and inactive events are left out.
+- **Free slots** rank by clearance (minutes to the nearest event, larger first), then by start. An empty schedule therefore returns the earliest quarter-hours. Picks never overlap each other. Up to five are returned.
+- **Retention.** `deliveries` rows are never pruned, so the 60 day trend window is always complete.
+- **Coverage** counts per alliance and run only. No player ID or name is returned.
+- Tests: `tests/test_analytics.py` (pure rules) and `tests/test_analytics_api.py` (endpoints and permissions). No migration.
+
+### 85.9 Open questions
+
+O1. Is 30 minutes the right block for an event with no duration?
+O2. Should free-slot ranking prefer hours that past events or polls favoured? Left out: it would need attendance data (RSVP or interest counts, from the Discord feature list) and is worth revisiting after that exists.
+O3. Add CSV export for any panel? Not in this version.
+O4. Attendance and interest trends wait for RSVP or interested-count syncing; RSVP records stated intent, and Discord cannot say who actually showed up in game.
+
+## 86. Discord integration ideas
+
+Status: idea list only. Nothing here is designed or built, except where a section is named. Written 2026-10-07. Every Discord API fact below is from memory and must be checked against the current Discord documentation before the idea gets its own section.
+
+### 86.1 What the list is for
+
+Scheduling is largely solved: events, reminders, boards, cleanup and pausing work. What Samaya lacks is a way to hear back from players. Most of the useful ideas below add a participation signal (who wants a ping, who plans to come, which time works) or reduce how much leaders do by hand. Each idea that gets built gets its own section first, as §79 to §83 did.
+
+### 86.2 Higher value
+
+1. **Subscribe and RSVP buttons on reminders.** Buttons use the signed interactions endpoint (§70), so no gateway connection is needed.
+   - A **Notify me** button grants a per event type role. It replaces blunt `@role` mentions with an opt-in, and the existing "mention the role" option then pings only people who asked.
+   - An **RSVP** button stores a count per occurrence. The schedule board (§82) can show "12 going". RSVP records stated intent only; Discord cannot say who attended in game.
+   - The Notify me button is specified in §87 (role toggle with recorded intent). The RSVP count is O1 there.
+   - Reuses the component handling, `custom_id` parsing and `components` argument that §84 adds. Medium effort. Needs a small table for RSVPs (hashed voters, as in §84.2 decision 5) and the Manage Roles permission for the role button.
+2. **Sync "interested" counts from Scheduled Events.** Discord already collects interest on the events Samaya creates, and the API exposes the interested users of a scheduled event. Reading the count gives an attendance signal with no new UI. Low effort. Counts only, no user list stored.
+3. **Embeds for reminders and the board.** Alliance colour, the event cover, 4096 character descriptions and fields. It makes the board much easier to read. Low effort, but it changes the message format and the §82 hash input, so it needs an explicit decision and a per destination switch.
+4. **Threads under reminders.** Message IDs are stored (§83), so the bot can start a thread on a reminder for sign-ups or questions and let it archive itself. Low effort. Needs a thread permission.
+5. **Time polls** (§84) and **schedule insights** (§85) are written up in their own sections. They belong on this list as the poll and analysis ideas.
+
+### 86.3 Worth considering
+
+- **Announcement channel crossposting.** One post reaches every server that follows the channel, which suits a Kingdom with several servers. Check the permission needed for the bot's own messages.
+- **Native Discord polls through the API.** Fine for a quick one-off. §84 explains why it is not the base for poll features that feed back into Samaya.
+- **Role based admin access.** Use a member's Discord roles at login instead of invites. Fits the alliance suite direction but needs extra OAuth scopes and a privacy review (§80.2).
+- **User installed commands.** `/next` and `/schedule` usable in DMs and in any server, not only servers the bot has joined. Check current availability and the install flow.
+- **Server member counts over time.** The guild endpoint can return approximate member counts. A trend per server needs a small table and a daily job. Check that the counts need no privileged intent.
+- **Localised slash commands** and an **admin console translation** stay deferred (§72).
+
+### 86.4 Data analysis ideas
+
+Built from data Samaya already stores, so they need no new collection. §85 covers the first four.
+
+- Conflict and gap map: events per UTC hour and weekday, overlaps, free slots.
+- Delivery trends: success rate and lateness per day and per destination.
+- Redemption coverage per alliance from gift code runs (§79).
+- Roster size over time, counts only.
+- After RSVP or interest counts exist: interest per event type and per time slot, and trends over weeks.
+- Not available from Discord without privileged intents: per role member counts and channel activity. Skip them.
+
+### 86.5 Skipped on purpose
+
+- **A gateway connection** for reactions or message events. It breaks the webhook only, single worker design, and buttons cover the same need.
+- **DM reminders.** They need per user opt-in, hit rate limits, and fail silently when a user blocks DMs.
+- **Voice or stage channel automation.** Low value for this community.
+- **Per player attendance records or public participation lists.** They conflict with §80.2: counts and trends only, no naming and shaming.
+
+### 86.6 Suggested order
+
+1. §85 schedule insights: no schema, no Discord calls, useful on its own and feeds §84.
+2. §84 time polls: adds the component and interaction groundwork.
+3. Subscribe and RSVP buttons, then interested count sync, on top of that groundwork.
+4. Embeds and threads whenever a leader asks for a better looking board or a place to discuss.
+5. The rest only on request.
+
+### 86.7 Open questions
+
+O1. Which of the four higher value ideas does the alliance actually ask for first? Build in that order, not the order above, once someone asks.
+O2. Should "Notify me" create the role itself or only grant one a leader names? Creating roles needs more permission and can clutter a server.
+O3. Verify against the Discord documentation: scheduled event user endpoints, crossposting permissions, user install availability, guild approximate counts, role and thread permissions.
+
+
+## 87. Notify me button (role toggle with recorded intent)
+
+Status: design only. Not built. Written 2026-10-07. Builds on §84 (components, `custom_id`, hashed voters), §67 (destinations and merged sends) and §86.2 item 1.
+
+### 87.1 Goal
+
+Pinging a whole role for every reminder is blunt. A reminder gets a **Notify me** button. One tap toggles a Discord role for the player, and Samaya records the intent, so the event's reminders can ping only people who asked. The same record gives leaders a count of how many people want each kind of event.
+
+Two buttons, two meanings, both in this section. **Notify me** is a standing preference for a recurring event and toggles a role (87.2). **I'm in** is attendance at one occurrence and records a headcount, with no role (87.10). One tap cannot honestly do both: tapping a later reminder would remove the role a player already has.
+
+### 87.2 Decisions
+
+1. **One button, one toggle.** The button is `Notify me`. A tap adds the role if the player lacks it, removes it if they have it. The state is read from the click itself: a component interaction in a guild carries the member's current role IDs, so Samaya needs no extra Discord read and cannot disagree with what the player sees. Samaya then records the new state.
+2. **The role belongs to the recurring event, per Discord server. The event type is only a convenience fallback.** An event is the recurring unit (§66), so a role mapped to an event covers every occurrence and reminder of that series, and a tap on any reminder subscribes the player to the whole series. Type alone is not enough, because attendance is often exclusive (decision 12): Bear Hunt #1 and Bear Hunt #2 are two events of one type with different audiences. Resolution for (event, server): the event's own role, else the type's role, else no button. The form warns when two events that post to one server resolve to the same type role, and a role shared this way is refused for events in the same attendance group. "This and following" splits copy the event's mapping to the new series; subscribers stay with the role, so nobody taps again. Event mappings are managed by whoever can edit the event; type mappings by Kingdom coordinators.
+3. **Leaders pick an existing role or let Samaya create one, and a created role is named exactly after the event.** Creating needs the Manage Roles permission, so it is an explicit button, never automatic. The role gets the event's name as written ("Bear Hunt #1"), is mentionable, has no permissions, and is flagged `created_by_samaya`. The name is the tracking handle, because Discord roles carry no metadata. Rules: (a) if a role with that exact name already exists in the server, Samaya offers to link it and does not create a duplicate; (b) a name longer than 100 characters, Discord's limit, is refused with the limit stated, and the leader shortens the event name or links a role; (c) renaming an event never renames its role on its own, and the form offers Sync role name as an explicit action; (d) Samaya never deletes a role. **Reconnecting:** the form's Find roles action lists server roles whose names match an event's name and that no event maps yet, and links one in a click. This repairs a mapping lost to a deleted and recreated event, a moved server, or a restore. Subscriber counts survive only if the old mapping row still exists, since the hashes hang off it. Roles linked by name are not flagged `created_by_samaya`.
+4. **Which events show the button.** The button is **on by default** for the recurring event: `signup_enabled` defaults to true on new events and applies to every occurrence. It only appears where a role resolves (decision 2) for the server a reminder posts to; a reminder to a server with no role posts without the button, and the form warns about it. Turning it off is a per-event checkbox. Existing events migrate with it off, so deploying this changes no reminder until a leader maps a role and turns it on. Leadership-only events never get the button, and `signup_enabled` is forced off for them. Discord Scheduled Events and the schedule board have no button.
+5. **Pinging subscribers.** An event with `signup_mention` adds the type's role for that server to each reminder, next to whatever `mention_role` already adds. A leader who wants subscribers only turns the existing "mention the role" option off for that event. The two options stay independent, so enabling the button never silently changes who is pinged.
+6. **Recorded intent is hashed and counted.** A subscription row holds `HMAC-SHA256(SECRET_KEY, "sub:signup_role_id:discord_user_id")`, enough to toggle and count, not enough to list or contact anyone (the §84.2 rule). The console shows counts per type and server, never names. The record is advisory: a player can lose the role by other means (a moderator, leaving the server), and without the members privilege Samaya cannot see that. The count therefore means "people who last tapped to be notified", and the console says so.
+7. **Role safety is the main risk, so it is enforced twice.** Any player who can click can give themselves the role. A role with moderator powers would be a privilege escalation. Samaya refuses `@everyone`, managed roles (bots, boosts, integrations), roles at or above the bot's top role, and any role holding a permission in the deny list (87.6). It checks when the mapping is saved and again at click time against a role list cached for 5 minutes. A refused role is never granted and the player gets a plain message.
+8. **Clicks answer within Discord's 3 seconds without waiting for the role call.** The webhook answers at once with a deferred, private reply, then does the work after the response is sent and edits that reply with the result (87.4). One role change at a time per process is capped at 4 concurrent calls, so a ping that sends 200 players to the button queues instead of failing.
+9. **Limits.** 10 taps per minute per Discord user (`services/rate_limit.py`). Role calls reuse the shared retry and 429 handling.
+10. **Never public.** No public route, no ICS entry, nothing in `public_rows`. Counts appear only in the admin console.
+11. **Failures change nothing.** If the role call fails, nothing is recorded and the player is told. The error is stored on the mapping row, shown in the console, and cleared by the next success. There is no auto-disable in this version.
+
+12. **Attendance groups: one role at a time.** Some events exclude each other: a player cannot attend both Bear Hunt #1 and #2 on the same day, or two Eternity's Reach events in one week. A Kingdom coordinator creates an **attendance group** (a name, for example "Bear Hunt, daily" or "Eternity's Reach, weekly") and puts events in it. A player may hold at most one of a group's roles in a server. Tapping a second event's button changes nothing yet: the private reply says "You are already in Bear Hunt #1. Switch to Bear Hunt #2?" with a **Switch** button (`custom_id` `sw:{event_id}`, same strict parsing). Switch removes the old role, adds the new one, and moves the record, in that order, and tells the player. The held role comes from `member.roles` in the click, so detecting the conflict costs no extra Discord call. Groups limit what Samaya's button does. They cannot stop a leader assigning both roles by hand; the console only counts players it can detect holding two.
+    A group has two independent rules. `exclusive_roles` (default on) keeps the one-role-at-a-time rule above. `window` (`none`, `day` or `week`) limits how many occurrences of the group's events a player can say "I'm in" to (87.10). Samaya does not infer either from event times: Bear Hunt #1 and #2 use `day`, Eternity's Reach uses `week`.
+13. **Group edits are safe.** Putting an event in a group never removes existing roles. Subscribers who already hold two roles of a new group are counted and left alone until they tap Switch or a leader fixes them.
+
+### 87.3 Data (one Alembic revision, additive, downgrade drops the tables and columns)
+
+The id is the next free one after §84's `0019`; §78 reserves `0017` and `0018`, so this is expected to be `a1f0c0de0020`, chaining from `0019`. Whichever of the PWA revisions lands first must keep its own id, and the chain must be re-pointed on merge.
+
+`events`: `rsvp_enabled` Boolean NOT NULL (migration default false, new events default true, forced off for leadership-only), `signup_group_id` (FK `signup_groups`, `SET NULL`, nullable), `signup_enabled` Boolean NOT NULL, `signup_mention` Boolean NOT NULL. The migration adds both with server default false so existing events are unchanged; the API and model default `signup_enabled` to true for new events (decision 4) and `signup_mention` to false.
+
+`signup_roles`: `id` PK, `event_id` (FK `events`, `CASCADE`, nullable), `type_id` (FK `event_types`, `CASCADE`, nullable), `server_id` (FK `discord_servers`, `CASCADE`), `role_id` Text NOT NULL, `created_by_samaya` Boolean NOT NULL default false, `last_error` Text, `last_error_at`. CHECK exactly one of `event_id`, `type_id` is NOT NULL (written as explicit `IS NOT NULL` tests); CHECK `role_id <> ''`. Unique `(event_id, server_id)` and unique `(type_id, server_id)` (partial indexes on Postgres, plain unique constraints with NULLs distinct on SQLite).
+
+`signup_groups`: `id` PK, `kingdom_id` (FK, `CASCADE`), `name` String(80) NOT NULL, `exclusive_roles` Boolean NOT NULL default true, `window` String(8) NOT NULL default 'none' with CHECK in ('none','day','week'), unique `(kingdom_id, name)`. Deleting a group sets its events' `signup_group_id` to NULL.
+
+`event_subscriptions`: `signup_role_id` (FK `signup_roles`, `CASCADE`), `voter_hash` String(64), `subscribed_at`. Primary key `(signup_role_id, voter_hash)`. Removing a mapping deletes its subscriptions (they described a role that no longer applies). There is no age based pruning: a subscription is current state, not history.
+
+### 87.4 Engine and Discord
+
+`services/signup.py`:
+- pure `custom_id` build and parse (`sub:{event_id}`; the mapping is resolved from the event and the interaction's guild, never from the id, ASCII digits only, anything else ignored), `voter_hash`, `unsafe_role_reason(role, bot_top_position)` and the permission deny list.
+- `handle_subscribe(db, interaction)`: parse, rate limit, load the event (active, `signup_enabled`, not leadership-only), resolve the mapping for `interaction.guild_id` (event, else type), refuse if none resolves, decide add, remove or offer a switch from `member.roles` and the event's attendance group, check role safety, call Discord, then record and answer.
+- `groups_held(member_role_ids, group_roles)`, pure: the roles of a group that the member already holds.
+- `discord_api` gains `add_member_role`, `remove_member_role` (`PUT` and `DELETE /guilds/{g}/members/{u}/roles/{r}`, with an audit log reason such as "Notify me, Bear Hunt"), `create_role`, and `edit_interaction_response` (`PATCH /webhooks/{application_id}/{token}/messages/@original`, authenticated by the interaction token, not the bot token). `get_guild_roles` also returns `permissions`, `managed` and `position`.
+- Reminder posting (`event_engine.process_delivery`): for an event with `signup_enabled` and a mapped role for the destination's server, post with one action row holding the button (`components` is already supported by §84). With `signup_mention`, prepend `<@&role>`. Reminder messages already post with the default mention rules, so role pings work as today.
+
+`discord_commands.handle_interaction` routes `custom_id` values starting `sub:` to `handle_subscribe`. The webhook returns a deferred private reply (callback type 5, flags 64) and runs the follow-up with FastAPI `BackgroundTasks`, so the response is on the wire before any role call. Messages sent to the player: "You will now be notified about {type}.", "You will no longer be notified about {type}.", "That role cannot be given here, so ask a leader." (unsafe), "Samaya cannot change roles in this server yet, so ask a leader." (403 or hierarchy), "This button is no longer active." (event gone, disabled, wrong guild, or malformed id), "Slow down a little and try again in a minute." (rate limit). Text is English only until Discord localisation is built (§86). The §83 cleanup of old reminders removes their buttons with them; the newest reminder keeps its own.
+
+### 87.5 API and UI (admin)
+
+- `GET /api/event-types` and `GET /api/events` gain `signup_roles`: per server `{scope, server_id, server_name, role_id, role_name, created_by_samaya, subscribers, last_error}`, where `scope` is `event` or `type` (the one in effect).
+- `PUT /api/event-types/{id}/signup-roles` and `PUT /api/events/{id}/signup-roles` with `{server_id, role_id}`, `{server_id, create: true}` or `{server_id, remove: true}`. Type mappings: Kingdom coordinator only. Event mappings: anyone who can edit that event. Both audited. A role that fails the safety check is a 422 naming the reason ("That role has the Manage Messages permission, so anyone could use it to moderate"). `create` answers 502 with the Discord reason when the bot lacks Manage Roles.
+- `GET /api/discord/roles` marks roles that fail the safety check (`unsafe_reason`) so the picker can grey them out.
+- Event create and update accept `signup_enabled` and `signup_mention`. The response carries `signup_warnings`: servers the event posts to that have no role for its type. A warning does not block saving. Leadership-only events reject `signup_enabled` with a 422.
+- `GET/POST/PATCH/DELETE /api/signup-groups` (Kingdom coordinator writes, audited, a delete lists the events it releases). `PATCH /api/events/{id}` accepts `signup_group_id`; the group must belong to the event's Kingdom. A grouped event's `signup_roles` response adds `exclusive_with` (the other events in the group).
+- `POST /api/events/{id}/signup-roles/find` lists unmapped server roles whose names match the event's name; the `PUT` with `{server_id, role_id}` links one. `POST .../signup-roles/sync-name` renames the linked role to the event's current name (Manage Roles; refused for roles Samaya neither created nor linked).
+- **Event types tab:** a "Default Notify me roles" section per type: a row per server with a role select (unsafe roles disabled with the reason), Create role, Remove, the subscriber count with the advisory note, and the last error.
+- **Attendance groups** live on the Event types tab beside the type roles: each group with its events and a count of players detected holding two roles.
+- **Events form:** an Attendance group select (none by default), a "Notify me button" checkbox (checked for new events), a "Ping subscribers" checkbox, and a per-server role row that shows the role in effect ("Using the Bear Hunt type role" or the event's own) with Use a different role, Create role and Use the type's role. The warnings list servers with no role.
+- The about-page explainers of both tabs describe the button, that counts are advisory, that Samaya never deletes roles, and the Manage Roles requirement.
+
+### 87.6 Security
+
+Role deny list (Discord permission bits; confirm the values before building, O3): Administrator, Manage Guild, Manage Roles, Manage Channels, Manage Messages, Manage Webhooks, Manage Threads, Manage Nicknames, Manage Guild Expressions, Manage Events, Kick Members, Ban Members, Moderate Members, View Audit Log, Mention Everyone. A role whose permission field cannot be parsed is refused. Other threats: a forged click (the webhook already verifies the signature, §70); a `custom_id` for another event (the guild and mapping checks decide, and the id carries no role); a click from a guild the type is not mapped to (refused); a voter hash cannot be reversed to a Discord ID; a mapping created by one Kingdom cannot name another Kingdom's server (servers belong to a Kingdom, §67).
+
+### 87.7 Tests
+
+Role naming: a created role equals the event name, an existing exact name is offered for linking and never duplicated, 101 characters refused, an event rename does not rename the role, sync name works only for roles Samaya created or linked, find lists only unmapped matches, a relink after the mapping row was deleted starts from zero subscribers.
+Attendance groups: a second tap in a group replies with Switch and changes nothing; Switch removes, adds, then moves the record, and records nothing if a call fails; a stale or forged `sw:` id is ignored; a shared type role in one group is refused; a group from another Kingdom is a 422; a group edit never removes roles; double holders are counted.
+Resolution: event mapping beats type mapping, type is the fallback, neither means no button, two series of one type can differ, a split keeps the mapping and its subscribers, deleting an event removes only its own mapping, the CHECK rejects zero or two scopes, and the migration leaves existing events off while new events default on.
+Pure: `custom_id` round trip and hostile ids (trailing newline, full width digits, extra parts); the deny list for each bit, `@everyone`, managed roles, a role above the bot, an unparseable field; voter hash differs per type, server and user and never contains the ID.
+Click handling with `FakeDiscord`: add when `member.roles` lacks the role, remove when it has it; the record follows the new state; no record when the Discord call fails; 403 and hierarchy errors stored as `last_error` and cleared by a success; unsafe role refused at click time even if it was safe when saved; wrong guild; unmapped guild; inactive, disabled and leadership-only events; deleted event; rate limit; the deferred response shape and that the follow-up edits the original through the interaction token; concurrency cap; two quick taps converge.
+Engine: the button appears only for mapped servers, is absent for leadership-only events, merged sends carry one button, `signup_mention` adds the right role per guild, the audience role mention is unchanged, the §83 cleanup still works with components.
+API: mapping validation (own Kingdom's servers only, unsafe role 422, create without permission 502), coordinator only, audit rows, viewers read only, `signup_warnings`, counts only and no IDs in any payload, nothing on public routes, migration upgrade, `alembic check` and downgrade on Postgres.
+
+### 87.8 Effort
+
+Large: about 4 days (about 3 for Notify me and groups, about 1 for I'm in) with the two-level mapping. The click path, role calls, safety check and deferred reply are new. Components, hashing, rate limiting, destination posting and the retry rules are reused from §84 and §67.
+
+### 87.9 Open questions
+
+O1. Resolved: **I'm in** is part of this section (87.10).
+O2. Resolved: Notify me is on by default for a recurring event (decision 4), scoped to that event with the type as fallback. Existing events stay off. Still open: should a new event copy its type's `signup_mention`? Today it does not, so enabling the button never changes who is pinged.
+O3. Verify against the Discord documentation before building: that component interactions in a guild carry `member.roles`; the deferred type 5 reply with flags 64 and editing `@original` with the interaction token (valid 15 minutes); the role add and remove routes, their audit log reason header and rate limits; the permission bit values in 87.6; and the role hierarchy rule (a bot can only manage roles below its highest role).
+O4. Should removing a mapping, or deleting an event or event type, offer to delete the roles Samaya created? Today it only lists them.
+O5. Should the button label carry the type name ("Notify me: Bear Hunt")? Useful when one message lists several events, which reminders never do today.
+O6. Count display in the Insights tab (§85) next to the heatmap, once subscriptions exist.
+O7. Resolved: the group's `window` field (87.10).
+O8. Resolved: the count shows on the reminder and the board (87.10 decisions 7 and 10).
+O9. Resolved: Kingshot weeks start on Monday; the `week` window is Monday 00:00 UTC to Sunday 23:59 UTC.
+
+### 87.10 I'm in button (attendance for one occurrence)
+
+**Goal.** A second button on the same reminder records that a player will attend this occurrence, so leaders see headcount before a rally or a run, and so a player cannot commit to two events that exclude each other (Bear Hunt #1 and #2 on one day, two Eternity's Reach events in one week).
+
+**Decisions.**
+1. **Key.** `in:{event_id}:{YYYYMMDD}`, where the date is the occurrence's nominal UTC start date. Occurrence ids are not stable (the engine recreates occurrences, §78 decision 11), and a moved occurrence keeps its nominal date, so the key survives both. Strict parse: ASCII digits only, `fullmatch`.
+2. **Valid taps.** The event is active, `rsvp_enabled`, not leadership-only, the date is an actual occurrence (`recurrence.occurs_on`) that is not cancelled, the occurrence has not started, and the interaction's guild is a server the event posts to. Anything else answers "This button is no longer active." or "This event has already started."
+3. **Toggle.** Tapping again withdraws. Answers are private and immediate (callback type 4, flags 64), since this path makes no Discord call: "You are in for Bear Hunt #1 on Tue 20:00. 12 going." or "You are out."
+4. **Windowed groups.** If the event's group has a `window` of `day` or `week`, a player may hold one "I'm in" per window across the group's events. The window is the occurrence's UTC date (`day`) or its Monday-start UTC week (`week`). A second tap in the window changes nothing and replies "You are already in Bear Hunt #1 today. Switch to #2?" with a **Switch** button (`rs:{event_id}:{YYYYMMDD}`) that withdraws the first and records the second in one transaction.
+5. **Hashing.** The voter hash is `HMAC-SHA256(SECRET_KEY, "rsvp:{scope}:discord_user_id")`, where `scope` is `g{group_id}` for a grouped event and `e{event_id}` otherwise. A group needs one hash per player across its events to detect a clash; an ungrouped event gets a per event hash so nothing links a player across unrelated events. Neither reveals the ID.
+6. **No role, no Discord call.** I'm in does not need a mapped role and appears on every reminder of an `rsvp_enabled` event, in every server the event posts to. A Kingdom wide event counts all its servers together.
+7. **Where counts show.** The admin Schedule tab ("12 in" per occurrence), the reminder itself, and the Discord schedule board (§82). Never on the public web, never in `public_rows` or ICS, no names. On a reminder the message gets a last line `✅ 12 going`, shown only when the count is above zero. On the board an occurrence line gets `· 12 in`, again only above zero. The board only lists events `public_rows` already allows, so leadership-only events never show a count. The reminder's count is kept current by the headcount refresh (decision 10). A Kingdom wide event counts all its servers together on every reminder and board.
+8. **Retention.** Rows are deleted 30 days after the occurrence date by the daily job. Cancelling an occurrence keeps its rows until then and the console shows them under Cancelled.
+10. **Headcount refresh on reminders.** A tap does not edit the channel message itself, which would be a Discord call per tap. A per-minute tick (`run_rsvp_refresh`, own scheduler job) edits sent reminders whose count changed: for each delivery with a stored `discord_message_id` whose occurrence has not started and whose event has `rsvp_enabled`, compare the current count with `deliveries.rsvp_count_shown`; if different and `rsvp_edited_at` is over 2 minutes old, edit the message with the original content plus the count line, resending the buttons (an edit without `components` would clear them, the §84 rule), then store the new count and time. At most 20 edits per tick. A failed edit stores `rsvp_edit_error_at` and retries after 10 minutes. A 404 (message deleted, including by §83 cleanup) stops edits for that delivery. Once the occurrence starts, the last count stays as is. Edits use the destination's bot token and `NO_MENTIONS` allowed mentions, so an edit never pings anyone again. Columns: `deliveries.rsvp_count_shown` Integer, `rsvp_edited_at`, `rsvp_edit_error_at`.
+9. **Limits.** Shares the 10 taps per minute per user limit. The button sits on the same action row as Notify me, `I'm in` first.
+
+**Data (same revision).** `deliveries` gains `rsvp_count_shown`, `rsvp_edited_at` and `rsvp_edit_error_at` (decision 10). `occurrence_rsvps`: `event_id` (FK `events`, `CASCADE`), `occurrence_date` Date, `voter_hash` String(64), `created_at`, primary key `(event_id, occurrence_date, voter_hash)`, index on `(voter_hash, occurrence_date)` for the window check.
+
+**API.** `GET /api/occurrences` gains `rsvp_count`. `PATCH /api/events/{id}` accepts `rsvp_enabled` (422 for leadership-only). `GET/POST/PATCH /api/signup-groups` accept `window` and `exclusive_roles`. The Events form gets an I'm in checkbox (checked for new events), and the group editor gets a Window select and an Exclusive roles checkbox. Both tabs' explainers say counts are admin only.
+
+**Tests.** Pure: key round trip and hostile ids (trailing newline, full width digits, bad date such as 20260230), window bucketing for day, week at the Sunday/Monday boundary and year end, hash scope for grouped and ungrouped events. Handling: tap in, tap out, count in the reply, not an occurrence, cancelled, started, wrong guild, disabled, leadership-only, moved occurrence keeps its key, recreated occurrence keeps its rows, rate limit; windowed group clash offers Switch and changes nothing, Switch is atomic, a different day or week is allowed, a stale or forged `rs:` id is ignored, a group with window `none` allows several. Headcount: the count line appears only above zero, an edit resends the buttons and mentions nothing, unchanged counts cause no call, the 2 minute throttle and 10 minute error back-off hold, a 404 stops edits, a started occurrence is never edited, at most 20 per tick, the board line carries `· N in` and omits it at zero, leadership-only events never appear. Engine: both buttons on the right row, I'm in alone in a server with no role, absent for leadership-only, merged sends carry one set. API: counts only, no IDs in any payload, permissions, audit, nothing on public routes, pruning at 30 days, migration upgrade, `alembic check` and downgrade on Postgres.
+
+### 87.11 As built
+
+Built as specified in 87.1 to 87.10, with these notes.
+
+- **Unverified against real Discord (O3).** Nothing here has run against Discord. Check first, on the dev bot: that a guild component click carries `member.roles`; the deferred type 5 reply with flags 64 and the `@original` edit; the role add, remove, create and rename routes and their rate limits; the permission bit values in the deny list; and the bot's top role position, which Samaya reads from `/users/@me` and the bot's guild member. All of it sits behind the injectable Discord client and is covered by `FakeDiscord` only.
+- **Interaction plumbing.** `discord_commands.handle_interaction_ex` returns `(response, followup)`; `handle_interaction` wraps it. `routers/webhooks.py` runs the followup (the `@original` edit) in a background task after the response is sent. Component clicks try `services/signup.handle_signup_component` first, then the poll handler. `models.get_session_factory()` lets the background work open its own session.
+- **Custom ids.** `sub:{event}`, `sw:{event}`, `in:{event}:{YYYYMMDD}`, `rs:{event}:{YYYYMMDD}`, matched with `fullmatch`, ASCII digits only, and a real-date check.
+- **Hashes.** Notify me: `sub:{server_id}:{role_id}:{user}`. I'm in: `rsvp:g{group}|e{event}:{user}`. Both HMAC-SHA256 with `SECRET_KEY`. Counts only reach the API, the reminder and the board.
+- **Role cache.** `discord_api.get_role_context` caches roles and the bot's top position for 5 minutes. Role ids are digit-checked because they enter URL paths.
+- **Headcount refresh.** `rsvp_tick_job` (every minute, job id `rsvp_headcount_tick`) reuses the poll refresh pattern: compare to `rsvp_count_shown`, 2 minute throttle, 10 minute back-off after an error, 20 deliveries per tick. `generation_job` prunes RSVPs older than 30 days.
+- **Schedule board.** A line shows `· N in` only above zero and never for cancelled occurrences.
+- **API additions beyond 87.5.** `GET /api/signup-roles/server-roles?server_id=` lists a Kingdom server's roles with `unsafe_reason` for the picker. Mappings: `PUT /api/event-types/{id}/signup-roles` (coordinator), `PUT /api/events/{id}/signup-roles`, `POST .../find`, `POST .../sync-name`. A mapping body carries exactly one of `role_id`, `create` or `remove`.
+- **Admin UI.** `static/js/signup.js` holds the shared role rows and the attendance groups panel. The Events form has a "Buttons on reminders" group (the three checkboxes, the group select, the role rows in edit mode only, disabled for leadership-only). The Event types tab has an Attendance groups table and a Notify me roles dialog per type. The Schedule tab shows a green "N in" label.
+- **Migration.** `a1f0c0de0020`, chained from 0019, additive; verified on Postgres (upgrade, `alembic check`, downgrade, upgrade).
+- Tests: `tests/test_signup.py`, `tests/test_signup_api.py`.

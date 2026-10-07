@@ -96,6 +96,11 @@ class EventIn(BaseModel):
     interval_days:    Optional[int] = None
     until_date:       Optional[str] = None
     mention_role:     Optional[bool] = None
+    clean_up_reminders: Optional[bool] = None  # spec §83
+    signup_enabled:   Optional[bool] = None    # spec §87: Notify me button (default on for a new event)
+    signup_mention:   Optional[bool] = None    # spec §87: ping the Notify me role in reminders
+    rsvp_enabled:     Optional[bool] = None    # spec §87.10: I'm in button (default on for a new event)
+    signup_group_id:  Optional[int] = None
     reminder_minutes: Optional[list[int]] = None
     reminder_messages: Optional[dict[int, str]] = None
 
@@ -142,6 +147,11 @@ class EventPatch(BaseModel):
     interval_days:    Optional[int] = None
     until_date:       Optional[str] = None
     mention_role:     Optional[bool] = None
+    clean_up_reminders: Optional[bool] = None  # spec §83
+    signup_enabled:   Optional[bool] = None    # spec §87
+    signup_mention:   Optional[bool] = None
+    rsvp_enabled:     Optional[bool] = None
+    signup_group_id:  Optional[int] = None     # null clears
     reminder_minutes: Optional[list[int]] = None
     reminder_messages: Optional[dict[int, str]] = None
     alliances:        Optional[list[EventAllianceIn]] = None

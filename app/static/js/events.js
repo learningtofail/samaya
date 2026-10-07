@@ -655,6 +655,36 @@ function renderPreview(res) {
 
 // ── Open the form ────────────────────────────────────────────
 
+// ── Notify me and I'm in (spec §87) ──────────────────────────
+function syncSignupLeadership() {
+  const leadership = byId('evLeadershipOnly').checked;
+  ['evSignupEnabled', 'evSignupMention', 'evRsvpEnabled', 'evSignupGroup'].forEach((id) => { byId(id).disabled = leadership; });
+  if (leadership) ['evSignupEnabled', 'evSignupMention', 'evRsvpEnabled'].forEach((id) => { byId(id).checked = false; });
+}
+
+async function setupSignupFields(event, duplicate, mode) {
+  const source = event || null;
+  byId('evSignupEnabled').checked = source ? !!source.signup_enabled : true;
+  byId('evSignupMention').checked = source ? !!source.signup_mention : false;
+  byId('evRsvpEnabled').checked = source ? !!source.rsvp_enabled : true;
+  const wanted = source ? source.signup_group_id : null;
+  byId('evSignupGroup').innerHTML = groupSelectHtml(wanted);
+  syncSignupLeadership();
+  const host = byId('evSignupRoles');
+  host.innerHTML = '';
+  const showRoles = mode === 'edit' && !duplicate && !!event;
+  byId('evSignupRolesNew').classList.toggle('hidden', showRoles || mode === 'split');
+  const slug = event && !duplicate ? writeSlugForEvent(event) : ownerSlugValue();
+  try {
+    await loadSignupGroups(slug);
+    byId('evSignupGroup').innerHTML = groupSelectHtml(wanted);
+    syncSignupLeadership();
+  } catch (e) {
+    toast(e.message, true);
+  }
+  if (showRoles) createEventSignupRoles(host, event, canWriteEvent(event));
+}
+
 async function openEventForm({ mode, event, splitFrom, duplicate }) {
   EVF.mode = mode;
   EVF.event = event || null;
@@ -734,7 +764,9 @@ async function openEventForm({ mode, event, splitFrom, duplicate }) {
   byId('evUntil').value = event && event.until_date ? event.until_date : '';
   byId('evScope').value = event ? event.scope : 'alliance';
   byId('evMentionRole').checked = event ? event.mention_role : false;
+  byId('evCleanUp').checked = event ? !!event.clean_up_reminders : false;
   byId('evLeadershipOnly').checked = event ? event.leadership_only : false;
+  setupSignupFields(event, duplicate, mode);
   byId('evCoverFile').value = '';
   EVF.cover.original = event && !duplicate ? (event.cover_image_data || '') : '';
   setCoverPreview(event ? (event.cover_image_data || '') : '');
@@ -800,7 +832,7 @@ byId('evDuration').addEventListener('input', () => EVF.touched.add('calendar'));
 byId('evRecurrence').addEventListener('change', () => { EVF.touched.add('recurrence'); syncRecurrenceGroups(); });
 byId('evInterval').addEventListener('input', () => EVF.touched.add('recurrence'));
 byId('evMentionRole').addEventListener('change', () => EVF.touched.add('mention'));
-byId('evLeadershipOnly').addEventListener('change', () => { syncLeadershipNote(); renderEventAudiences(); });
+byId('evLeadershipOnly').addEventListener('change', () => { syncLeadershipNote(); syncSignupLeadership(); renderEventAudiences(); });
 ['evAnchor', 'evStart'].forEach((id) => byId(id).addEventListener('input', () => {
   if (EVF.composer) EVF.composer.refresh();
 }));
@@ -855,6 +887,9 @@ function collectEventForm() {
   return {
     type_id: typeId, name, location: byId('evLocation').value.trim(), scope,
     leadership_only: byId('evLeadershipOnly').checked, mention_role: byId('evMentionRole').checked,
+    clean_up_reminders: byId('evCleanUp').checked,
+    signup_enabled: byId('evSignupEnabled').checked, signup_mention: byId('evSignupMention').checked,
+    rsvp_enabled: byId('evRsvpEnabled').checked, signup_group_id: byId('evSignupGroup').value ? parseInt(byId('evSignupGroup').value, 10) : null,
     message: EVF.composer.value(), anchor_date: anchor, start_time_utc: start,
     duration_hours: duration, recurrence_kind: repeats ? 'interval_days' : 'none',
     interval_days: interval, until_date: until, reminder_minutes: EVF.reminders.value(),
@@ -890,6 +925,9 @@ function buildEventChanges(orig, f, skipAnchor) {
   if (f.scope !== orig.scope) c.scope = f.scope;
   if (f.leadership_only !== orig.leadership_only) c.leadership_only = f.leadership_only;
   if (f.mention_role !== orig.mention_role) c.mention_role = f.mention_role;
+  if (f.clean_up_reminders !== !!orig.clean_up_reminders) c.clean_up_reminders = f.clean_up_reminders;
+  ['signup_enabled', 'signup_mention', 'rsvp_enabled'].forEach((k) => { if (f[k] !== !!orig[k]) c[k] = f[k]; });
+  if (f.signup_group_id !== (orig.signup_group_id == null ? null : orig.signup_group_id)) c.signup_group_id = f.signup_group_id;
   if (f.message !== (orig.message || '')) c.message = f.message;
   if (!skipAnchor && f.anchor_date !== orig.anchor_date) c.anchor_date = f.anchor_date;
   if (f.start_time_utc !== orig.start_time_utc) c.start_time_utc = f.start_time_utc;
@@ -920,7 +958,8 @@ async function saveEventForm() {
         type_id: f.type_id, name: f.name, scope: f.scope, leadership_only: f.leadership_only,
         start_time_utc: f.start_time_utc, anchor_date: f.anchor_date, location: f.location,
         message: f.message, duration_hours: f.duration_hours, recurrence_kind: f.recurrence_kind,
-        interval_days: f.interval_days, until_date: f.until_date, mention_role: f.mention_role,
+        interval_days: f.interval_days, until_date: f.until_date, mention_role: f.mention_role, clean_up_reminders: f.clean_up_reminders,
+        signup_enabled: f.signup_enabled, signup_mention: f.signup_mention, rsvp_enabled: f.rsvp_enabled, signup_group_id: f.signup_group_id,
         reminder_minutes: f.reminder_minutes, reminder_messages: f.reminder_messages,
         alliances: f.alliances, audience_changes: f.audience_changes,
       };

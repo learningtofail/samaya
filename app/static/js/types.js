@@ -35,10 +35,17 @@ async function loadTypes() {
   try {
     EVENT_TYPES = await api('GET', '/api/event-types', null, false, typesSlug());
     renderTypes();
+    await loadSignupGroups(typesSlug());
+    renderSignupGroups(typesSlug(), typesCoordinator());
   } catch (e) {
     toast(e.message, true);
     byId('typesBody').innerHTML = emptyRow(6, 'Could not load event types: ' + e.message);
   }
+}
+
+function typesCoordinator() {
+  const tenant = tenantBySlug(typesSlug());
+  return !!tenant && isKingdomCoordinator(tenant.kingdom_id);
 }
 
 function typeDefaultsText(t) {
@@ -55,7 +62,7 @@ function buildTypeRow(t) {
   const actions = canWriteAnywhere()
     ? `<div class="row-actions">
         <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="edit" data-id="${t.id}">Edit</button>
-        <details class="menu"><summary class="menu__btn" aria-label="More actions for ${escapeHtml(t.name)}">&#8943;</summary><div class="menu__panel"><button type="button" class="menu__item menu__item--danger" data-action="delete" data-id="${t.id}">Delete&hellip;</button></div></details>
+        <details class="menu"><summary class="menu__btn" aria-label="More actions for ${escapeHtml(t.name)}">&#8943;</summary><div class="menu__panel"><button type="button" class="menu__item" data-action="roles" data-id="${t.id}">Notify me roles&hellip;</button><button type="button" class="menu__item menu__item--danger" data-action="delete" data-id="${t.id}">Delete&hellip;</button></div></details>
       </div>`
     : '<span class="samaya-muted">Read only</span>';
   return `<tr class="pf-v6-c-table__tr">
@@ -147,7 +154,18 @@ async function saveType() {
   }
 }
 
+function closeTypeRolesModal() {
+  closeModalById('typeRolesModal');
+}
+
 bindActions(byId('typesBody'), {
+  roles(btn) {
+    const t = EVENT_TYPES.find((x) => x.id === parseInt(btn.dataset.id, 10));
+    if (!t) return;
+    byId('typeRolesTitle').textContent = `Notify me roles: ${t.name}`;
+    createTypeSignupRoles(byId('typeRolesHost'), t, typesSlug(), typesCoordinator());
+    openModalById('typeRolesModal');
+  },
   edit(btn) {
     const t = EVENT_TYPES.find((x) => x.id === parseInt(btn.dataset.id, 10));
     if (t) openTypeModal(t);

@@ -24,7 +24,11 @@
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="events">Events</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="schedule">Schedule</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="delivery">Delivery log</button></li>
+      <li class="tabs__item"><button type="button" class="tabs__link" data-view="polls">Polls</button></li>
+      <li class="tabs__item"><button type="button" class="tabs__link" data-view="insights">Insights</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="types">Event types</button></li>
+      <li class="tabs__item"><button type="button" class="tabs__link" data-view="players">Players</button></li>
+      <li class="tabs__item"><button type="button" class="tabs__link" data-view="giftcodes">Gift codes</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="feedback">Feedback</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="setup">Setup</button></li>
       <li class="tabs__item hidden" id="appearanceTabItem"><button type="button" class="tabs__link" data-view="appearance">Appearance</button></li>
@@ -134,6 +138,7 @@
       <ul>
         <li><strong>Cancel</strong> skips one date and removes its pending reminders and Discord event. <strong>Restore</strong> brings it back.</li>
         <li><strong>Move or edit message</strong> gives one date its own time or its own message without touching the rest of the series.</li>
+        <li>A green <strong>N in</strong> label is the current I'm in headcount for that date. It is advisory, counts taps only and is visible to leaders only.</li>
         <li>Occurrences are generated about four weeks ahead, so a longer range shows nothing past that.</li>
       </ul>
     </div>
@@ -218,14 +223,241 @@
         <tbody id="typesBody"></tbody>
       </table>
     </div>
+  <div class="view__head">
+    <h3 class="view__subtitle" id="h-groups">Attendance groups</h3>
+    <button type="button" class="pf-v6-c-button pf-m-secondary hidden" id="btnNewGroup">New group</button>
+  </div>
+  <div class="table-wrap">
+    <table class="pf-v6-c-table pf-m-grid-md responsive-table">
+      <caption class="sr-only">Attendance groups</caption>
+      <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Group</th><th class="pf-v6-c-table__th" scope="col">Rule</th><th class="pf-v6-c-table__th" scope="col">Events</th><th class="pf-v6-c-table__th" scope="col">Actions</th></tr></thead>
+      <tbody id="groupsBody"></tbody>
+    </table>
+  </div>
   <details class="about-page">
     <summary>About this tab</summary>
     <div class="about-page__body">
       <p>A type is a starting point for new events: a color and the duration, repeat interval, message, reminders and role mention a new event of that type begins with. Changing a type never changes events that already exist.</p>
       <p>Types belong to a kingdom and are shared by every alliance in it. A type that events still use cannot be deleted. Creating and editing types needs kingdom coordinator access.</p>
+      <p><strong>Notify me roles</strong> set here are the fallback for events of the type that have no role of their own. <strong>Attendance groups</strong> mark events a player cannot attend together. With "one role at a time" a second Notify me tap offers a Switch. "Attend one per day" or "per week" (weeks start on Monday, UTC) makes I'm in refuse a second event in the window until the player taps Switch. Headcounts are advisory and visible to leaders only. Samaya never deletes a Discord role, and creating or assigning roles needs the Manage Roles permission with the bot role above the Notify me roles.</p>
     </div>
   </details>
 </section>
+<section id="v-polls" class="view" aria-labelledby="h-polls">
+  <div class="view__head">
+    <h2 class="view__title" id="h-polls">Polls</h2>
+    <button type="button" class="pf-v6-c-button pf-m-primary" id="btnNewPoll">New poll</button>
+  </div>
+  <div class="filters filters--panel" role="group" aria-label="Filter polls">
+    <div class="filters__item">
+      <label class="filters__label" for="pollsAlliance">Alliance</label>
+      <select class="pf-v6-c-form-control" id="pollsAlliance"></select>
+    </div>
+    <div class="filters__item">
+      <label class="filters__label" for="pollsStatus">Status</label>
+      <select class="pf-v6-c-form-control" id="pollsStatus">
+        <option value="">All</option>
+        <option value="open" selected>Open</option>
+        <option value="closed">Closed</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+    </div>
+  </div>
+  <p class="count" id="pollsCount" role="status"></p>
+  <div id="pollsList"></div>
+  <details class="about-page">
+    <summary>About this tab</summary>
+    <div class="about-page__body">
+      <p>A poll proposes two to six UTC start times. Samaya posts it to the audiences you choose, with one button per time. Players tap every time that works for them and tap again to take a vote back. The counts in the Discord message update as people tap.</p>
+      <p>Samaya stores a one-way code for each voter, never their Discord ID, and shows counts only, never names. Counts are advisory: anyone who can see the channel can vote, and one person with several accounts can skew them. You decide the winner.</p>
+      <p>A poll closes by itself after the time you set (up to 14 days) or when you close it. Closing removes the buttons and writes the final tally. Nothing changes on the schedule on its own: after closing, use <strong>Move occurrence</strong> (for a poll linked to an occurrence) or <strong>New event</strong> to apply a time. At most three polls per alliance can be open at once. Polls are kept for 90 days. Use <strong>Suggest slots</strong> in the new poll form to fill in free times from the Insights tab's finder.</p>
+    </div>
+  </details>
+</section>
+<section id="v-insights" class="view" aria-labelledby="h-insights">
+  <div class="view__head"><h2 class="view__title" id="h-insights">Insights</h2></div>
+  <div class="filters filters--panel" role="group" aria-label="Scope of the insights">
+    <div class="filters__item">
+      <label class="filters__label" for="insightsAlliance">Alliance</label>
+      <select class="pf-v6-c-form-control" id="insightsAlliance"></select>
+    </div>
+    <div class="filters__item">
+      <label class="filters__label" for="insightsDays">Look ahead</label>
+      <select class="pf-v6-c-form-control" id="insightsDays">
+        <option value="14">14 days</option>
+        <option value="28" selected>28 days</option>
+        <option value="60">60 days</option>
+      </select>
+    </div>
+  </div>
+  <p class="count" id="insightsStatus" role="status"></p>
+
+  <section class="panel" aria-labelledby="h-insights-heat">
+    <h3 class="panel__title" id="h-insights-heat">When events happen</h3>
+    <p class="samaya-muted" id="heatSummary"></p>
+    <div class="heat-wrap" role="region" aria-label="Events by weekday and hour, scrollable" tabindex="0">
+      <table class="heat" id="heatTable">
+        <caption class="sr-only">Number of event occurrences by weekday and UTC hour</caption>
+        <thead id="heatHead"></thead>
+        <tbody id="heatBody"></tbody>
+      </table>
+    </div>
+    <p class="heat-legend samaya-muted">Hours are UTC. Darker cells have more events. <span class="heat-legend__swatches" aria-hidden="true"><span class="heat__swatch heat--1"></span><span class="heat__swatch heat--2"></span><span class="heat__swatch heat--3"></span><span class="heat__swatch heat--4"></span></span> few to many</p>
+  </section>
+
+  <section class="panel" aria-labelledby="h-insights-overlaps">
+    <h3 class="panel__title" id="h-insights-overlaps">Events that overlap</h3>
+    <p class="samaya-muted" id="overlapSummary"></p>
+    <div class="table-wrap">
+      <table class="pf-v6-c-table pf-m-grid-md responsive-table">
+        <caption class="sr-only">Pairs of events that run at the same time</caption>
+        <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Event</th><th class="pf-v6-c-table__th" scope="col">Overlaps with</th><th class="pf-v6-c-table__th" scope="col">When (UTC)</th><th class="pf-v6-c-table__th" scope="col">Minutes</th><th class="pf-v6-c-table__th" scope="col">Same channel</th></tr></thead>
+        <tbody id="overlapBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-insights-slots">
+    <h3 class="panel__title" id="h-insights-slots">Find a free slot</h3>
+    <form class="slot-form" id="slotForm">
+      <div class="filters__item">
+        <label class="filters__label" for="slotDuration">Length (minutes)</label>
+        <input class="pf-v6-c-form-control" id="slotDuration" type="number" min="15" max="480" step="15" value="60" required>
+      </div>
+      <div class="filters__item">
+        <label class="filters__label" for="slotDays">Within (days)</label>
+        <input class="pf-v6-c-form-control" id="slotDays" type="number" min="1" max="30" value="14" required>
+      </div>
+      <div class="filters__item">
+        <label class="filters__label" for="slotFrom">Earliest start (UTC hour)</label>
+        <input class="pf-v6-c-form-control" id="slotFrom" type="number" min="0" max="23" value="0" required>
+      </div>
+      <div class="filters__item">
+        <label class="filters__label" for="slotTo">Must end by (UTC hour)</label>
+        <input class="pf-v6-c-form-control" id="slotTo" type="number" min="1" max="24" value="24" required>
+      </div>
+      <fieldset class="pf-v6-c-form__group check-group slot-form__alliances" id="slotAlliances">
+        <legend class="filters__label">Keep clear of these alliances (none ticked means all)</legend>
+      </fieldset>
+      <div class="row-actions"><button type="submit" class="pf-v6-c-button pf-m-primary" id="btnFindSlots">Find slots</button></div>
+    </form>
+    <p class="samaya-muted" id="slotSummary" role="status"></p>
+    <ol class="slot-list" id="slotList"></ol>
+  </section>
+
+  <section class="panel" aria-labelledby="h-insights-trends">
+    <h3 class="panel__title" id="h-insights-trends">Reminder delivery</h3>
+    <div class="filters">
+      <div class="filters__item">
+        <label class="filters__label" for="trendWindow">Window</label>
+        <select class="pf-v6-c-form-control" id="trendWindow"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="60">Last 60 days</option></select>
+      </div>
+      <div class="filters__item">
+        <label class="filters__label" for="trendBy">Group by</label>
+        <select class="pf-v6-c-form-control" id="trendBy"><option value="day">Day</option><option value="destination">Destination</option></select>
+      </div>
+    </div>
+    <p class="samaya-muted" id="trendSummary"></p>
+    <div class="table-wrap">
+      <table class="pf-v6-c-table pf-m-grid-md responsive-table">
+        <caption class="sr-only">Reminders due, posted and failed, with how late they were</caption>
+        <thead id="trendHead"></thead>
+        <tbody id="trendBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-insights-coverage">
+    <h3 class="panel__title" id="h-insights-coverage">Gift code coverage</h3>
+    <p class="samaya-muted">Share of each alliance's listed players who redeemed or already had the code, for the latest runs. Counts only, never names or IDs.</p>
+    <div id="coverageBody"></div>
+  </section>
+
+  <details class="about-page">
+    <summary>About this tab</summary>
+    <div class="about-page__body">
+      <p>Insights reads what Samaya already stores and changes nothing. The heatmap counts occurrences of active, not cancelled events by weekday and UTC hour over the look-ahead window; a moved occurrence counts at its new time. Overlaps lists events whose times actually intersect. An event with no duration counts as 30 minutes. Events that merely touch do not overlap.</p>
+      <p>Find a free slot proposes up to five start times on a quarter-hour grid that do not collide with any event you can see (or only the alliances you tick; kingdom-wide events always count). It prefers the times furthest from the nearest event and never returns two slots that overlap each other.</p>
+      <p>Reminder delivery shows, per day or per destination, how many reminders were due, posted and failed, and how late the posted ones were (median and 95th percentile). Merged sends count once. Gift code coverage is a per-alliance percentage from the latest runs. You see the same alliances you can see everywhere else, and nothing here is public.</p>
+    </div>
+  </details>
+</section>
+<section id="v-players" class="view" aria-labelledby="h-players">
+  <div class="view__head"><h2 class="view__title" id="h-players">Players</h2></div>
+  <div class="filters filters--panel" role="group" aria-label="Choose an alliance">
+    <div class="filters__item">
+      <label class="filters__label" for="playersAlliance">Alliance</label>
+      <select class="pf-v6-c-form-control" id="playersAlliance"></select>
+    </div>
+  </div>
+  <p class="count" id="playersCount" role="status"></p>
+  <section class="panel" id="playersAddPanel" aria-labelledby="h-players-add">
+    <h3 class="panel__title" id="h-players-add">Add players</h3>
+    <div class="pf-v6-c-form__group">
+      <label class="pf-v6-c-form__label" for="playersText"><span class="pf-v6-c-form__label-text">Player IDs</span></label>
+      <textarea class="pf-v6-c-form-control" id="playersText" rows="5" spellcheck="false" autocomplete="off"></textarea>
+      <p class="pf-v6-c-form__helper-text">One player per line: the ID, or ID,kingdom, or ID,kingdom,name. Up to 500 lines at a time. Lines starting with # are ignored.</p>
+    </div>
+    <div class="row-actions">
+      <button type="button" class="pf-v6-c-button pf-m-primary" id="btnAddPlayers">Add players</button>
+      <button type="button" class="pf-v6-c-button pf-m-secondary" id="btnExportPlayers">Export CSV</button>
+    </div>
+    <div class="samaya-muted" id="playersAddResult" role="status"></div>
+  </section>
+  <div class="table-wrap">
+    <table class="pf-v6-c-table pf-m-grid-md responsive-table">
+      <caption class="sr-only">Players in this alliance</caption>
+      <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Player ID</th><th class="pf-v6-c-table__th" scope="col">Kingdom</th><th class="pf-v6-c-table__th" scope="col">Name</th><th class="pf-v6-c-table__th" scope="col">Note</th><th class="pf-v6-c-table__th" scope="col">Actions</th></tr></thead>
+      <tbody id="playersBody"></tbody>
+    </table>
+  </div>
+  <details class="about-page">
+    <summary>About this tab</summary>
+    <div class="about-page__body">
+      <p>The list of player IDs for one alliance. Gift code redemption reads it, and later features will too. Only leaders can see or change it, and nothing here appears on the public pages.</p>
+      <p>Samaya cannot check who owns an ID, because the game gives it no way to. By listing a player you are saying they agreed to it. Names and notes are optional and typed by you.</p>
+      <p>A player's kingdom is the Kingdom's game number (set in Setup) unless you give that player their own, for example after a transfer. A player can be on one alliance's list at a time. Export CSV downloads the list and is recorded in the audit log.</p>
+    </div>
+  </details>
+</section>
+
+<section id="v-giftcodes" class="view" aria-labelledby="h-giftcodes">
+  <div class="view__head"><h2 class="view__title" id="h-giftcodes">Gift codes</h2></div>
+  <p class="notice hidden" id="giftcodesOff" role="status">Gift code redemption is not switched on for this server. The server administrator sets a signing key to enable it; see the notes below.</p>
+  <section class="panel" id="giftStartPanel" aria-labelledby="h-gift-start">
+    <h3 class="panel__title" id="h-gift-start">Redeem a code</h3>
+    <div class="pf-v6-c-form__group">
+      <label class="pf-v6-c-form__label" for="giftCode"><span class="pf-v6-c-form__label-text">Gift code</span></label>
+      <input class="pf-v6-c-form-control code-input" type="text" id="giftCode" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false">
+    </div>
+    <fieldset class="pf-v6-c-form__group check-group">
+      <legend class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Alliances</span></legend>
+      <div id="giftAlliances"></div>
+    </fieldset>
+    <div class="row-actions"><button type="button" class="pf-v6-c-button pf-m-primary" id="btnStartRun">Start redeeming</button></div>
+  </section>
+  <section class="panel hidden" id="giftActive" aria-labelledby="h-gift-active">
+    <h3 class="panel__title" id="h-gift-active">In progress</h3>
+    <div class="run-card" id="giftActiveBody"></div>
+  </section>
+  <h3 class="view__subtitle" id="h-gift-runs">Recent runs</h3>
+  <div class="table-wrap">
+    <table class="pf-v6-c-table pf-m-grid-md responsive-table" aria-labelledby="h-gift-runs">
+      <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Code</th><th class="pf-v6-c-table__th" scope="col">Started</th><th class="pf-v6-c-table__th" scope="col">Status</th><th class="pf-v6-c-table__th" scope="col">Result</th><th class="pf-v6-c-table__th" scope="col">Actions</th></tr></thead>
+      <tbody id="giftRunsBody"></tbody>
+    </table>
+  </div>
+  <details class="about-page">
+    <summary>About this tab</summary>
+    <div class="about-page__body">
+      <p>Paste a code and Samaya redeems it for every player on the chosen alliances' lists, one at a time. A run is kept going by the server, so you can close this page. Players who already redeemed the same code in an earlier run are not asked again.</p>
+      <p>A run stops on its own if the code has expired, is wrong, or has reached its claim limit, if the game server cannot be reached or refuses Samaya, or if its answers stop making sense, which usually means the game changed its API. "Wrong kingdom" means the game rejected that player's ID and kingdom number together; fix the number on the Players tab and run the code again.</p>
+      <p>Samaya talks to the game's own redemption endpoint with its own name in the request, not pretending to be a browser. The game could still block it. Results are kept for 90 days.</p>
+      <p>To switch this on, the server administrator sets <code>KS_GIFTCODE_SIGN_KEY</code> in <code>.env</code> and restarts the app.</p>
+    </div>
+  </details>
+</section>
+
 <section id="v-feedback" class="view" aria-labelledby="h-feedback">
   <div class="view__head"><h2 class="view__title" id="h-feedback">Feedback</h2></div>
   <p class="banner banner--info" id="ticketAuthor"></p>
@@ -607,6 +839,36 @@
             </div>
               <div class="pf-v6-c-form__group form-grid__full">
               <div class="check">
+                <input type="checkbox" id="evCleanUp" aria-describedby="evCleanUpHelp">
+                <label for="evCleanUp">Delete earlier reminders</label>
+              </div>
+              <p class="pf-v6-c-form__helper-text" id="evCleanUpHelp">Keeps only the newest reminder in each channel, and removes them all when the event ends. Only reminders Samaya posted are deleted.</p>
+            </div>
+              <fieldset class="form-grid__full check-group" id="evSignupSet" aria-describedby="evSignupHelp">
+              <legend class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Buttons on reminders</span></legend>
+              <p class="pf-v6-c-form__helper-text" id="evSignupHelp">Players tap Notify me to get or drop the event's Discord role, and I'm in to say they will attend one date. Counts are shown to leaders only. Not available for leadership-only events.</p>
+              <div class="check">
+                <input type="checkbox" id="evSignupEnabled">
+                <label for="evSignupEnabled">Notify me button</label>
+              </div>
+              <div class="check">
+                <input type="checkbox" id="evSignupMention">
+                <label for="evSignupMention">Ping the Notify me role in reminders</label>
+              </div>
+              <div class="check">
+                <input type="checkbox" id="evRsvpEnabled">
+                <label for="evRsvpEnabled">I'm in button and headcount</label>
+              </div>
+              <div class="pf-v6-c-form__group">
+                <label class="pf-v6-c-form__label" for="evSignupGroup"><span class="pf-v6-c-form__label-text">Attendance group</span></label>
+                <select class="pf-v6-c-form-control" id="evSignupGroup"></select>
+                <p class="pf-v6-c-form__helper-text">Events in a group exclude each other, for example Bear Hunt 1 and 2 on the same day. Groups are managed on the Event types tab.</p>
+              </div>
+              <div id="evSignupRoles"></div>
+              <p class="pf-v6-c-form__helper-text hidden" id="evSignupRolesNew">Save the event first, then edit it to choose its Notify me roles.</p>
+            </fieldset>
+              <div class="pf-v6-c-form__group form-grid__full">
+              <div class="check">
                 <input type="checkbox" id="evLeadershipOnly">
                 <label for="evLeadershipOnly">Leadership only</label>
               </div>
@@ -731,6 +993,62 @@
       </div>
       <footer class="pf-v6-c-modal-box__footer">
         <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSaveType">Save</button>
+        <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<div class="pf-v6-c-backdrop" id="typeRolesModal" data-close-fn="closeTypeRolesModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="typeRolesTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="typeRolesTitle">Notify me roles</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <p class="samaya-muted">Used by events of this type that have no role of their own. Creating a role names it exactly after the type.</p>
+        <div id="typeRolesHost"></div>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Close</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<div class="pf-v6-c-backdrop" id="groupModal" data-close-fn="closeGroupModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="groupModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="groupModalTitle">New attendance group</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <div class="form-errors hidden" id="sgErrors" role="alert"></div>
+        <form class="pf-v6-c-form" id="groupForm" novalidate>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="sgName"><span class="pf-v6-c-form__label-text">Name</span></label>
+            <input class="pf-v6-c-form-control" type="text" id="sgName" maxlength="80" required>
+          </div>
+          <div class="pf-v6-c-form__group">
+            <div class="check">
+              <input type="checkbox" id="sgExclusive" checked>
+              <label for="sgExclusive">One Notify me role at a time</label>
+            </div>
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="sgWindow"><span class="pf-v6-c-form__label-text">I'm in limit</span></label>
+            <select class="pf-v6-c-form-control" id="sgWindow">
+              <option value="none">No limit</option>
+              <option value="day">One event per day</option>
+              <option value="week">One event per week (Monday to Sunday, UTC)</option>
+            </select>
+          </div>
+        </form>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSaveGroup">Save</button>
         <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
       </footer>
     </div>
@@ -1107,6 +1425,11 @@
             <input class="pf-v6-c-form-control" type="text" id="kgSlug">
           </div>
           <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="kgGameNumber"><span class="pf-v6-c-form__label-text">Game kingdom number</span></label>
+            <input class="pf-v6-c-form-control" type="number" id="kgGameNumber" min="1" max="999999" inputmode="numeric">
+            <p class="pf-v6-c-form__helper-text">The number the game uses for this Kingdom, such as 138. Gift code redemption sends it for every player without their own.</p>
+          </div>
+          <div class="pf-v6-c-form__group">
             <label class="pf-v6-c-form__label" for="kgPublicTitle"><span class="pf-v6-c-form__label-text">Public events page title</span></label>
             <input class="pf-v6-c-form-control" type="text" id="kgPublicTitle" placeholder="Kingshot Event Schedule">
             <p class="pf-v6-c-form__helper-text">Blank uses the default.</p>
@@ -1140,6 +1463,107 @@
   </div>
 </div>
 
+<div class="pf-v6-c-backdrop" id="pollModal" data-close-fn="closePollModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="pollModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="pollModalTitle">New poll</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <form class="pf-v6-c-form" id="pollForm" novalidate>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="pollTitle"><span class="pf-v6-c-form__label-text">Question</span></label>
+            <input class="pf-v6-c-form-control" type="text" id="pollTitle" maxlength="80" placeholder="When should Bear Hunt run?">
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="pollAlliance"><span class="pf-v6-c-form__label-text">Alliance</span></label>
+            <select class="pf-v6-c-form-control" id="pollAlliance"></select>
+          </div>
+          <fieldset class="pf-v6-c-form__group check-group" id="pollAudiences">
+            <legend class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Post to</span></legend>
+          </fieldset>
+          <fieldset class="pf-v6-c-form__group check-group">
+            <legend class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Times (UTC), 2 to 6</span></legend>
+            <div id="pollSlots" class="poll-slots"></div>
+            <div class="row-actions">
+              <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnAddPollSlot">Add a time</button>
+              <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnSuggestSlots">Suggest slots</button>
+            </div>
+          </fieldset>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="pollCloses"><span class="pf-v6-c-form__label-text">Closes after</span></label>
+            <select class="pf-v6-c-form-control" id="pollCloses">
+              <option value="24">24 hours</option>
+              <option value="48" selected>48 hours</option>
+              <option value="72">3 days</option>
+              <option value="168">7 days</option>
+              <option value="336">14 days</option>
+            </select>
+          </div>
+          <p class="form-errors hidden" id="pollError" role="alert"></p>
+        </form>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSavePoll">Post poll</button>
+        <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<div class="pf-v6-c-backdrop" id="playerModal" data-close-fn="closePlayerModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="playerModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="playerModalTitle">Edit player</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <input type="hidden" id="plId">
+        <form class="pf-v6-c-form" novalidate>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="plKid"><span class="pf-v6-c-form__label-text">Kingdom number</span></label>
+            <input class="pf-v6-c-form-control" type="number" id="plKid" min="1" max="999999" inputmode="numeric">
+            <p class="pf-v6-c-form__helper-text" id="plKidHelp"></p>
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="plName"><span class="pf-v6-c-form__label-text">Name</span></label>
+            <input class="pf-v6-c-form-control" type="text" id="plName" maxlength="60">
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="plNote"><span class="pf-v6-c-form__label-text">Note</span></label>
+            <input class="pf-v6-c-form-control" type="text" id="plNote" maxlength="40">
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="plAlliance"><span class="pf-v6-c-form__label-text">Alliance</span></label>
+            <select class="pf-v6-c-form-control" id="plAlliance"></select>
+          </div>
+        </form>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSavePlayer">Save</button>
+        <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<div class="pf-v6-c-backdrop" id="runModal" data-close-fn="closeRunModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="runModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="runModalTitle">Run details</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body" id="runModalBody"></div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-primary" data-modal-dismiss>Close</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
 <div class="pf-v6-c-backdrop" id="timezoneModal" data-close-fn="closeTimezoneModal">
   <div class="pf-v6-l-bullseye">
     <div class="pf-v6-c-modal-box pf-m-sm" role="dialog" aria-modal="true" aria-labelledby="timezoneModalTitle">
@@ -1167,6 +1591,7 @@
 <script src="/static/js/events.js"></script>
 <script src="/static/js/schedule.js"></script>
 <script src="/static/js/deliveries.js"></script>
+<script src="/static/js/signup.js"></script>
 <script src="/static/js/types.js"></script>
 <script src="/static/js/markdown.js"></script>
 <script src="/static/js/tickets.js"></script>
@@ -1174,6 +1599,10 @@
 <script src="/static/js/platform.js"></script>
 <script src="/static/js/setup.js"></script>
 <script src="/static/js/appearance.js"></script>
+<script src="/static/js/insights.js"></script>
+<script src="/static/js/polls.js"></script>
+<script src="/static/js/players.js"></script>
+<script src="/static/js/giftcodes.js"></script>
 <script src="/static/js/audit.js"></script>
 <script src="/static/js/init.js"></script>
 </body>

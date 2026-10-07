@@ -11,6 +11,7 @@ built:
   Audience, AudienceDestination,
   AllianceAudience, EventAudience,
   TenantSecondaryServer                  — where messages go (spec §68)
+  Player, RedemptionRun, RedemptionResult — the player registry and gift codes (spec §79, §80)
 
 Every table has its own docstring explaining what it's for and why it's
 shaped the way it is — this header is just the map."""
@@ -18,7 +19,7 @@ import uuid
 
 from sqlalchemy import (
     JSON, Boolean, CheckConstraint, Column, Date, DateTime,
-    ForeignKey, Index, Integer, LargeBinary, Numeric, Text, Time,
+    ForeignKey, Index, Integer, LargeBinary, Numeric, String, Text, Time,
     UniqueConstraint, func, text
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -65,6 +66,10 @@ class Kingdom(Base):
         Integer, ForeignKey("themes.id", ondelete="RESTRICT", name="fk_kingdom_default_theme", use_alter=True),
         nullable=True,
     )
+
+    # Spec §79.2: the number the game uses for this Kingdom (138 for K138). Gift
+    # code redemption sends it as `kid` for every player without their own.
+    game_number = Column(Integer, nullable=True)
 
     tenants = relationship("Tenant", back_populates="kingdom")
 
@@ -499,6 +504,13 @@ class Event(Base):
     anchor_date      = Column(Date, nullable=False)
     until_date       = Column(Date, nullable=True)
     mention_role     = Column(Boolean, nullable=False, default=False)
+    # Spec §83: delete earlier reminders once a later one posts, and all of them after the event.
+    clean_up_reminders = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    # Spec §87: the Notify me and I'm in buttons. On for a new event, off for events that predate the feature.
+    signup_enabled   = Column(Boolean, nullable=False, default=True, server_default=text("false"))
+    signup_mention   = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    rsvp_enabled     = Column(Boolean, nullable=False, default=True, server_default=text("false"))
+    signup_group_id  = Column(Integer, ForeignKey("signup_groups.id", ondelete="SET NULL"), nullable=True)
     active           = Column(Boolean, nullable=False, default=True)
     cover_image_data = Column(Text, nullable=True)
     created_at       = Column(DateTime(timezone=True), server_default=func.now())
@@ -625,6 +637,14 @@ class Delivery(Base):
     guild_id           = Column(Text, nullable=False, default="", server_default="")
     channel_id         = Column(Text, nullable=False, default="", server_default="")
     merged_into_id     = Column(Integer, ForeignKey("deliveries.id", ondelete="SET NULL"), nullable=True)
+    # Spec §83: when Samaya deleted this reminder's Discord message, or why it could not.
+    message_deleted_at = Column(DateTime(timezone=True), nullable=True)
+    cleanup_error      = Column(Text, nullable=True)
+    # Spec §87.10: the "I'm in" count last written onto this reminder, and when (or when it failed).
+    rsvp_count_shown   = Column(Integer, nullable=True)
+    rsvp_base_content  = Column(Text, nullable=True)  # the reminder text before the count line, so an edit can rebuild it
+    rsvp_edited_at     = Column(DateTime(timezone=True), nullable=True)
+    rsvp_edit_error_at = Column(DateTime(timezone=True), nullable=True)
 
     occurrence = relationship("EventOccurrence", back_populates="deliveries")
     destination = relationship("AudienceDestination", lazy="joined")
@@ -696,6 +716,18 @@ class AudienceDestination(Base):
     server_id   = Column(Integer, ForeignKey("discord_servers.id"), nullable=False)
     channel_id  = Column(Text, nullable=False)
     role_id     = Column(Text, nullable=False, default="", server_default="")
+    # Spec §81: a destination that keeps answering 403/404 is paused until a
+    # coordinator resumes it.
+    consecutive_failures = Column(Integer, nullable=False, default=0, server_default="0")
+    paused_at            = Column(DateTime(timezone=True))
+    pause_reason         = Column(Text)
+    # Spec §82: an optional schedule board, one Discord message edited in place.
+    board_scope        = Column(Text)  # null (off), "kingdom" or "alliance"
+    board_tenant_id    = Column(Integer, ForeignKey("tenants.id", ondelete="SET NULL"))
+    board_message_id   = Column(Text)
+    board_hash         = Column(String(64))
+    board_refreshed_at = Column(DateTime(timezone=True))
+    board_error        = Column(Text)
 
     server   = relationship("DiscordServer", lazy="joined")
     audience = relationship("Audience", lazy="joined", back_populates="destinations")
@@ -703,6 +735,8 @@ class AudienceDestination(Base):
     __table_args__ = (
         UniqueConstraint("audience_id", "server_id", "channel_id", "role_id", name="uq_audience_destination"),
         CheckConstraint("channel_id <> ''", name="ck_audience_destination_channel_set"),
+        CheckConstraint("board_scope IS NULL OR board_scope IN ('kingdom', 'alliance')",
+                        name="ck_audience_destination_board_scope"),
     )
 
 
@@ -803,3 +837,227 @@ class ScheduledTheme(Base):
         CheckConstraint("priority_level >= 0 AND priority_level <= 1000", name="ck_scheduled_theme_priority"),
         Index("ix_scheduled_themes_window", "kingdom_id", "start_utc", "end_utc"),
     )
+
+
+class Player(Base):
+    """Spec §80.3: the player registry every player-facing feature reads. A
+    player is an in-game ID (`fid`) in one alliance. Samaya cannot verify who
+    owns an ID, so only leaders write this table. `kid` overrides the Kingdom's
+    game_number for a transferred player. `name` and `note` are typed by a
+    leader and optional; the game no longer lets Samaya fetch them."""
+    __tablename__ = "players"
+
+    id         = Column(Integer, primary_key=True)
+    kingdom_id = Column(Integer, ForeignKey("kingdoms.id", ondelete="CASCADE"), nullable=False)
+    tenant_id  = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    fid        = Column(String(20), nullable=False)
+    kid        = Column(Integer, nullable=True)
+    name       = Column(String(60), nullable=True)
+    note       = Column(String(40), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("kingdom_id", "fid", name="uq_player_kingdom_fid"),
+        CheckConstraint("fid <> ''", name="ck_player_fid_set"),
+        Index("ix_players_tenant", "tenant_id"),
+    )
+
+
+class RedemptionRun(Base):
+    """Spec §79.3: one gift code being redeemed for the players of one or more
+    alliances. The tick job advances it; state lives here so a restart loses
+    nothing. A Kingdom has at most one active run at a time."""
+    __tablename__ = "redemption_runs"
+
+    id          = Column(Integer, primary_key=True)
+    kingdom_id  = Column(Integer, ForeignKey("kingdoms.id", ondelete="CASCADE"), nullable=False)
+    code        = Column(Text, nullable=False)
+    status      = Column(Text, nullable=False, default="queued")
+    stop_reason = Column(Text, nullable=True)
+    created_by  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at  = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    started_at  = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    results = relationship("RedemptionResult", cascade="all, delete-orphan", back_populates="run")
+
+    __table_args__ = (
+        CheckConstraint("status IN ('queued', 'running', 'done', 'stopped', 'cancelled')", name="ck_redemption_run_status"),
+    )
+
+
+class RedemptionResult(Base):
+    """Spec §79.3: one distinct player ID within one run. `status` is
+    pending, in_flight or cooling while the run is working, then the final
+    outcome key (services/giftcode_client.py)."""
+    __tablename__ = "redemption_results"
+
+    id              = Column(Integer, primary_key=True)
+    run_id          = Column(Integer, ForeignKey("redemption_runs.id", ondelete="CASCADE"), nullable=False)
+    tenant_id       = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    player_id       = Column(Integer, ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
+    fid             = Column(String(20), nullable=False)
+    kid             = Column(Integer, nullable=False)
+    status          = Column(Text, nullable=False, default="pending")
+    message         = Column(Text, nullable=True)
+    attempts        = Column(Integer, nullable=False, default=0)
+    cooldowns       = Column(Integer, nullable=False, default=0)
+    next_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at      = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    run = relationship("RedemptionRun", back_populates="results")
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "fid", name="uq_redemption_result_fid"),
+        Index("ix_redemption_results_run_status", "run_id", "status"),
+    )
+
+
+class TimePoll(Base):
+    """Spec §84: a leader proposes 2 to 6 UTC time slots, players tap the ones
+    that work in Discord, Samaya tallies. Nothing is applied automatically.
+    tenant_id is null for a Kingdom-wide poll."""
+    __tablename__ = "time_polls"
+
+    id             = Column(Integer, primary_key=True)
+    kingdom_id     = Column(Integer, ForeignKey("kingdoms.id", ondelete="CASCADE"), nullable=False)
+    tenant_id      = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True)
+    title          = Column(String(80), nullable=False)
+    occurrence_id  = Column(Integer, ForeignKey("event_occurrences.id", ondelete="SET NULL"), nullable=True)
+    status         = Column(Text, nullable=False, default="open")
+    closes_at      = Column(DateTime(timezone=True), nullable=False)
+    closed_at      = Column(DateTime(timezone=True), nullable=True)
+    winner_slot_id = Column(Integer, ForeignKey("time_poll_slots.id", ondelete="SET NULL", use_alter=True,
+                                                name="fk_time_polls_winner_slot"), nullable=True)
+    created_by     = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at     = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    slots = relationship("TimePollSlot", lazy="selectin", order_by="TimePollSlot.position",
+                         primaryjoin="TimePoll.id == TimePollSlot.poll_id", cascade="all, delete-orphan",
+                         foreign_keys="TimePollSlot.poll_id", back_populates="poll")
+    messages = relationship("TimePollMessage", lazy="selectin", order_by="TimePollMessage.id",
+                            cascade="all, delete-orphan", back_populates="poll")
+
+    __table_args__ = (
+        CheckConstraint("status IN ('open', 'closed', 'cancelled')", name="ck_time_poll_status"),
+        Index("ix_time_polls_status_closes", "status", "closes_at"),
+    )
+
+
+class TimePollSlot(Base):
+    __tablename__ = "time_poll_slots"
+
+    id        = Column(Integer, primary_key=True)
+    poll_id   = Column(Integer, ForeignKey("time_polls.id", ondelete="CASCADE"), nullable=False)
+    starts_at = Column(DateTime(timezone=True), nullable=False)
+    position  = Column(Integer, nullable=False, default=0)
+
+    poll = relationship("TimePoll", back_populates="slots", foreign_keys=[poll_id])
+
+    __table_args__ = (UniqueConstraint("poll_id", "starts_at", name="uq_time_poll_slot"),)
+
+
+class TimePollVote(Base):
+    """One vote. voter_hash is HMAC-SHA256(SECRET_KEY, "poll_id:discord_user_id"):
+    enough to toggle and count a person once, not enough to list or contact them."""
+    __tablename__ = "time_poll_votes"
+
+    slot_id    = Column(Integer, ForeignKey("time_poll_slots.id", ondelete="CASCADE"), primary_key=True)
+    voter_hash = Column(String(64), primary_key=True)
+
+
+class TimePollMessage(Base):
+    """One posted Discord message of a poll (one per channel)."""
+    __tablename__ = "time_poll_messages"
+
+    id             = Column(Integer, primary_key=True)
+    poll_id        = Column(Integer, ForeignKey("time_polls.id", ondelete="CASCADE"), nullable=False)
+    destination_id = Column(Integer, ForeignKey("audience_destinations.id", ondelete="SET NULL"), nullable=True)
+    guild_id       = Column(Text, nullable=False)
+    channel_id     = Column(Text, nullable=False)
+    message_id     = Column(Text, nullable=False)
+    content_hash   = Column(String(64), nullable=True)
+    error          = Column(Text, nullable=True)
+    refreshed_at   = Column(DateTime(timezone=True), nullable=True)
+
+    poll = relationship("TimePoll", back_populates="messages")
+
+    __table_args__ = (UniqueConstraint("poll_id", "channel_id", name="uq_time_poll_message_channel"),)
+
+
+# ---------------------------------------------------------------------------
+# Notify me and I'm in (spec §87)
+# ---------------------------------------------------------------------------
+
+class SignupGroup(Base):
+    """A Kingdom's set of events a player can only join one of. `exclusive_roles`
+    keeps a player to one Notify me role at a time; `attendance_window` limits "I'm in" to
+    one occurrence per day or per Monday-start UTC week across the group."""
+    __tablename__ = "signup_groups"
+
+    id              = Column(Integer, primary_key=True)
+    kingdom_id      = Column(Integer, ForeignKey("kingdoms.id", ondelete="CASCADE"), nullable=False)
+    name            = Column(String(80), nullable=False)
+    exclusive_roles = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    attendance_window = Column(String(8), nullable=False, default="none", server_default="none")
+
+    __table_args__ = (
+        UniqueConstraint("kingdom_id", "name", name="uq_signup_group_name"),
+        CheckConstraint("attendance_window IN ('none', 'day', 'week')", name="ck_signup_group_window"),
+    )
+
+
+class SignupRole(Base):
+    """The Discord role behind Notify me for one server: mapped to a recurring
+    event, or to an event type as the fallback (exactly one of the two)."""
+    __tablename__ = "signup_roles"
+
+    id                 = Column(Integer, primary_key=True)
+    event_id           = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=True)
+    type_id            = Column(Integer, ForeignKey("event_types.id", ondelete="CASCADE"), nullable=True)
+    server_id          = Column(Integer, ForeignKey("discord_servers.id", ondelete="CASCADE"), nullable=False)
+    role_id            = Column(Text, nullable=False)
+    role_name          = Column(Text, nullable=False, default="", server_default="")
+    created_by_samaya  = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    last_error         = Column(Text, nullable=True)
+    last_error_at      = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "(event_id IS NOT NULL AND type_id IS NULL) OR (event_id IS NULL AND type_id IS NOT NULL)",
+            name="ck_signup_role_one_scope",
+        ),
+        CheckConstraint("role_id <> ''", name="ck_signup_role_id_set"),
+        Index("uq_signup_role_event", "event_id", "server_id", unique=True,
+              postgresql_where=text("event_id IS NOT NULL"), sqlite_where=text("event_id IS NOT NULL")),
+        Index("uq_signup_role_type", "type_id", "server_id", unique=True,
+              postgresql_where=text("type_id IS NOT NULL"), sqlite_where=text("type_id IS NOT NULL")),
+    )
+
+
+class EventSubscription(Base):
+    """A player who tapped Notify me for a Discord role. Keyed by the role, not
+    the mapping row, so a split series or a relinked role keeps its subscribers.
+    voter_hash is HMAC-SHA256(SECRET_KEY, "sub:server_id:role_id:discord_user_id")."""
+    __tablename__ = "event_subscriptions"
+
+    server_id     = Column(Integer, ForeignKey("discord_servers.id", ondelete="CASCADE"), primary_key=True)
+    role_id       = Column(Text, primary_key=True)
+    voter_hash    = Column(String(64), primary_key=True)
+    subscribed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class OccurrenceRsvp(Base):
+    """"I'm in" for one occurrence, keyed by the occurrence's nominal date so it
+    survives occurrences being recreated or moved (spec §87.10). voter_hash scope
+    is the attendance group when there is one, else the event."""
+    __tablename__ = "occurrence_rsvps"
+
+    event_id        = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
+    occurrence_date = Column(Date, primary_key=True)
+    voter_hash      = Column(String(64), primary_key=True)
+    created_at      = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (Index("ix_occurrence_rsvps_voter", "voter_hash", "occurrence_date"),)
