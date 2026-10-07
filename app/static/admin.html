@@ -138,6 +138,7 @@
       <ul>
         <li><strong>Cancel</strong> skips one date and removes its pending reminders and Discord event. <strong>Restore</strong> brings it back.</li>
         <li><strong>Move or edit message</strong> gives one date its own time or its own message without touching the rest of the series.</li>
+        <li>A green <strong>N in</strong> label is the current I'm in headcount for that date. It is advisory, counts taps only and is visible to leaders only.</li>
         <li>Occurrences are generated about four weeks ahead, so a longer range shows nothing past that.</li>
       </ul>
     </div>
@@ -222,11 +223,23 @@
         <tbody id="typesBody"></tbody>
       </table>
     </div>
+  <div class="view__head">
+    <h3 class="view__subtitle" id="h-groups">Attendance groups</h3>
+    <button type="button" class="pf-v6-c-button pf-m-secondary hidden" id="btnNewGroup">New group</button>
+  </div>
+  <div class="table-wrap">
+    <table class="pf-v6-c-table pf-m-grid-md responsive-table">
+      <caption class="sr-only">Attendance groups</caption>
+      <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Group</th><th class="pf-v6-c-table__th" scope="col">Rule</th><th class="pf-v6-c-table__th" scope="col">Events</th><th class="pf-v6-c-table__th" scope="col">Actions</th></tr></thead>
+      <tbody id="groupsBody"></tbody>
+    </table>
+  </div>
   <details class="about-page">
     <summary>About this tab</summary>
     <div class="about-page__body">
       <p>A type is a starting point for new events: a color and the duration, repeat interval, message, reminders and role mention a new event of that type begins with. Changing a type never changes events that already exist.</p>
       <p>Types belong to a kingdom and are shared by every alliance in it. A type that events still use cannot be deleted. Creating and editing types needs kingdom coordinator access.</p>
+      <p><strong>Notify me roles</strong> set here are the fallback for events of the type that have no role of their own. <strong>Attendance groups</strong> mark events a player cannot attend together. With "one role at a time" a second Notify me tap offers a Switch. "Attend one per day" or "per week" (weeks start on Monday, UTC) makes I'm in refuse a second event in the window until the player taps Switch. Headcounts are advisory and visible to leaders only. Samaya never deletes a Discord role, and creating or assigning roles needs the Manage Roles permission with the bot role above the Notify me roles.</p>
     </div>
   </details>
 </section>
@@ -831,6 +844,29 @@
               </div>
               <p class="pf-v6-c-form__helper-text" id="evCleanUpHelp">Keeps only the newest reminder in each channel, and removes them all when the event ends. Only reminders Samaya posted are deleted.</p>
             </div>
+              <fieldset class="form-grid__full check-group" id="evSignupSet" aria-describedby="evSignupHelp">
+              <legend class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Buttons on reminders</span></legend>
+              <p class="pf-v6-c-form__helper-text" id="evSignupHelp">Players tap Notify me to get or drop the event's Discord role, and I'm in to say they will attend one date. Counts are shown to leaders only. Not available for leadership-only events.</p>
+              <div class="check">
+                <input type="checkbox" id="evSignupEnabled">
+                <label for="evSignupEnabled">Notify me button</label>
+              </div>
+              <div class="check">
+                <input type="checkbox" id="evSignupMention">
+                <label for="evSignupMention">Ping the Notify me role in reminders</label>
+              </div>
+              <div class="check">
+                <input type="checkbox" id="evRsvpEnabled">
+                <label for="evRsvpEnabled">I'm in button and headcount</label>
+              </div>
+              <div class="pf-v6-c-form__group">
+                <label class="pf-v6-c-form__label" for="evSignupGroup"><span class="pf-v6-c-form__label-text">Attendance group</span></label>
+                <select class="pf-v6-c-form-control" id="evSignupGroup"></select>
+                <p class="pf-v6-c-form__helper-text">Events in a group exclude each other, for example Bear Hunt 1 and 2 on the same day. Groups are managed on the Event types tab.</p>
+              </div>
+              <div id="evSignupRoles"></div>
+              <p class="pf-v6-c-form__helper-text hidden" id="evSignupRolesNew">Save the event first, then edit it to choose its Notify me roles.</p>
+            </fieldset>
               <div class="pf-v6-c-form__group form-grid__full">
               <div class="check">
                 <input type="checkbox" id="evLeadershipOnly">
@@ -957,6 +993,62 @@
       </div>
       <footer class="pf-v6-c-modal-box__footer">
         <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSaveType">Save</button>
+        <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<div class="pf-v6-c-backdrop" id="typeRolesModal" data-close-fn="closeTypeRolesModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="typeRolesTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="typeRolesTitle">Notify me roles</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <p class="samaya-muted">Used by events of this type that have no role of their own. Creating a role names it exactly after the type.</p>
+        <div id="typeRolesHost"></div>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Close</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<div class="pf-v6-c-backdrop" id="groupModal" data-close-fn="closeGroupModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="groupModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="groupModalTitle">New attendance group</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <div class="form-errors hidden" id="sgErrors" role="alert"></div>
+        <form class="pf-v6-c-form" id="groupForm" novalidate>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="sgName"><span class="pf-v6-c-form__label-text">Name</span></label>
+            <input class="pf-v6-c-form-control" type="text" id="sgName" maxlength="80" required>
+          </div>
+          <div class="pf-v6-c-form__group">
+            <div class="check">
+              <input type="checkbox" id="sgExclusive" checked>
+              <label for="sgExclusive">One Notify me role at a time</label>
+            </div>
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="sgWindow"><span class="pf-v6-c-form__label-text">I'm in limit</span></label>
+            <select class="pf-v6-c-form-control" id="sgWindow">
+              <option value="none">No limit</option>
+              <option value="day">One event per day</option>
+              <option value="week">One event per week (Monday to Sunday, UTC)</option>
+            </select>
+          </div>
+        </form>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSaveGroup">Save</button>
         <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
       </footer>
     </div>
@@ -1499,6 +1591,7 @@
 <script src="/static/js/events.js"></script>
 <script src="/static/js/schedule.js"></script>
 <script src="/static/js/deliveries.js"></script>
+<script src="/static/js/signup.js"></script>
 <script src="/static/js/types.js"></script>
 <script src="/static/js/markdown.js"></script>
 <script src="/static/js/tickets.js"></script>

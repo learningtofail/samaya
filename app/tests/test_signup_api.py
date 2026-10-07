@@ -359,6 +359,27 @@ class TestTypeRoles:
         assert response.status_code == 404
 
 
+class TestServerRoles:
+    async def test_lists_usable_and_unsafe_roles_without_managed_or_everyone(self, client, sf, configured, discord):
+        discord.add_role(GUILD, "1010", "Mods", permissions=1 << 13)
+        discord.add_role(GUILD, "1011", "Bot role", managed=True)
+        discord.add_role(GUILD, GUILD, "@everyone")
+        response = await client.get(f"{A}/signup-roles/server-roles", params={"server_id": configured["server_id"]}, headers=H)
+        assert response.status_code == 200
+        by_id = {r["id"]: r for r in response.json()["roles"]}
+        assert set(by_id) == {"1001", "1002", "1010"}
+        assert by_id["1001"]["unsafe_reason"] is None and "Manage Messages" in by_id["1010"]["unsafe_reason"]
+
+    async def test_unknown_server_is_not_found(self, client, sf, configured, discord):
+        response = await client.get(f"{A}/signup-roles/server-roles", params={"server_id": 99999}, headers=H)
+        assert response.status_code == 404
+
+    async def test_discord_failure_is_a_502(self, client, sf, configured, discord):
+        discord.role_context_error = "down"
+        response = await client.get(f"{A}/signup-roles/server-roles", params={"server_id": configured["server_id"]}, headers=H)
+        assert response.status_code == 502
+
+
 class TestFindAndSyncName:
     async def test_find_lists_unmapped_roles_with_the_events_name(self, client, sf, configured, discord):
         discord.add_role(GUILD, "1004", "Bear Hunt #9")

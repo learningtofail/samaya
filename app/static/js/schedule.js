@@ -97,6 +97,7 @@ function occStatusHtml(occ) {
   if (occ.is_moved) labels.push(pfLabel('Moved', 'pf-m-blue'));
   if (occ.message_override) labels.push(pfLabel('Own message', 'pf-m-purple'));
   if (occ.leadership_only) labels.push(pfLabel('Leadership only', 'pf-m-orange'));
+  if (occ.rsvp_enabled && occ.rsvp_count > 0) labels.push(pfLabel(`${occ.rsvp_count} in`, 'pf-m-green'));
   return `<div class="label-stack">${labels.join(' ')}</div>`;
 }
 

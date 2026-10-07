@@ -305,6 +305,21 @@ async def set_event_role(
                                 kingdom_id=owner.kingdom_id, body=payload)
 
 
+@router.get("/signup-roles/server-roles")
+async def list_server_roles(
+    server_id: int, tenant: Tenant = Depends(require_not_viewer), db: AsyncSession = Depends(get_db),
+    discord=Depends(get_discord),
+):
+    """Roles of one Kingdom server for the picker, each with the reason it cannot be used (or null)."""
+    server = await _server_in_kingdom(db, server_id, tenant.kingdom_id)
+    _token, roles, bot_top = await _role_context(discord, server)
+    rows = [{"id": r["id"], "name": r["name"], "position": r.get("position", 0),
+             "unsafe_reason": unsafe_role_reason(r, bot_top, server.guild_id)}
+            for r in roles.values() if r["id"] != server.guild_id and not r.get("managed")]
+    rows.sort(key=lambda r: (-r["position"], r["name"].lower()))
+    return {"roles": rows}
+
+
 @router.post("/events/{event_id}/signup-roles/find")
 async def find_event_roles(
     event_id: int, payload: ServerIn, tenant: Tenant = Depends(require_not_viewer),
