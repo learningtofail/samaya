@@ -3406,7 +3406,7 @@ Status: design only. Not built. Written 2026-10-07. Builds on §84 (components, 
 
 Pinging a whole role for every reminder is blunt. A reminder gets a **Notify me** button. One tap toggles a Discord role for the player, and Samaya records the intent, so the event's reminders can ping only people who asked. The same record gives leaders a count of how many people want each kind of event.
 
-Assumption in this section: "intent" means the stated wish to be notified about an event type, not attendance at one occurrence. A per occurrence "I'm in" count is a second, separate button (O1). One tap cannot honestly do both, because tapping a later reminder would remove the role the player already has.
+Two buttons, two meanings, both in this section. **Notify me** is a standing preference for a recurring event and toggles a role (87.2). **I'm in** is attendance at one occurrence and records a headcount, with no role (87.10). One tap cannot honestly do both: tapping a later reminder would remove the role a player already has.
 
 ### 87.2 Decisions
 
@@ -3423,18 +3423,18 @@ Assumption in this section: "intent" means the stated wish to be notified about 
 11. **Failures change nothing.** If the role call fails, nothing is recorded and the player is told. The error is stored on the mapping row, shown in the console, and cleared by the next success. There is no auto-disable in this version.
 
 12. **Attendance groups: one role at a time.** Some events exclude each other: a player cannot attend both Bear Hunt #1 and #2 on the same day, or two Eternity's Reach events in one week. A Kingdom coordinator creates an **attendance group** (a name, for example "Bear Hunt, daily" or "Eternity's Reach, weekly") and puts events in it. A player may hold at most one of a group's roles in a server. Tapping a second event's button changes nothing yet: the private reply says "You are already in Bear Hunt #1. Switch to Bear Hunt #2?" with a **Switch** button (`custom_id` `sw:{event_id}`, same strict parsing). Switch removes the old role, adds the new one, and moves the record, in that order, and tells the player. The held role comes from `member.roles` in the click, so detecting the conflict costs no extra Discord call. Groups limit what Samaya's button does. They cannot stop a leader assigning both roles by hand; the console only counts players it can detect holding two.
-    Assumption: a group means "one at a time" for as long as the player is subscribed. The day or week limit is the reason for the group, not a rule Samaya computes, because a subscription is a standing intent (decision 6), not a booking for one date. A real per week booking is the per occurrence "I'm in" button (O1), which could reuse the same groups to enforce the weekly limit (O7).
+    A group has two independent rules. `exclusive_roles` (default on) keeps the one-role-at-a-time rule above. `window` (`none`, `day` or `week`) limits how many occurrences of the group's events a player can say "I'm in" to (87.10). Samaya does not infer either from event times: Bear Hunt #1 and #2 use `day`, Eternity's Reach uses `week`.
 13. **Group edits are safe.** Putting an event in a group never removes existing roles. Subscribers who already hold two roles of a new group are counted and left alone until they tap Switch or a leader fixes them.
 
 ### 87.3 Data (one Alembic revision, additive, downgrade drops the tables and columns)
 
 The id is the next free one after §84's `0019`; §78 reserves `0017` and `0018`, so this is expected to be `a1f0c0de0020`, chaining from `0019`. Whichever of the PWA revisions lands first must keep its own id, and the chain must be re-pointed on merge.
 
-`events`: `signup_group_id` (FK `signup_groups`, `SET NULL`, nullable), `signup_enabled` Boolean NOT NULL, `signup_mention` Boolean NOT NULL. The migration adds both with server default false so existing events are unchanged; the API and model default `signup_enabled` to true for new events (decision 4) and `signup_mention` to false.
+`events`: `rsvp_enabled` Boolean NOT NULL (migration default false, new events default true, forced off for leadership-only), `signup_group_id` (FK `signup_groups`, `SET NULL`, nullable), `signup_enabled` Boolean NOT NULL, `signup_mention` Boolean NOT NULL. The migration adds both with server default false so existing events are unchanged; the API and model default `signup_enabled` to true for new events (decision 4) and `signup_mention` to false.
 
 `signup_roles`: `id` PK, `event_id` (FK `events`, `CASCADE`, nullable), `type_id` (FK `event_types`, `CASCADE`, nullable), `server_id` (FK `discord_servers`, `CASCADE`), `role_id` Text NOT NULL, `created_by_samaya` Boolean NOT NULL default false, `last_error` Text, `last_error_at`. CHECK exactly one of `event_id`, `type_id` is NOT NULL (written as explicit `IS NOT NULL` tests); CHECK `role_id <> ''`. Unique `(event_id, server_id)` and unique `(type_id, server_id)` (partial indexes on Postgres, plain unique constraints with NULLs distinct on SQLite).
 
-`signup_groups`: `id` PK, `kingdom_id` (FK, `CASCADE`), `name` String(80) NOT NULL, unique `(kingdom_id, name)`. Deleting a group sets its events' `signup_group_id` to NULL.
+`signup_groups`: `id` PK, `kingdom_id` (FK, `CASCADE`), `name` String(80) NOT NULL, `exclusive_roles` Boolean NOT NULL default true, `window` String(8) NOT NULL default 'none' with CHECK in ('none','day','week'), unique `(kingdom_id, name)`. Deleting a group sets its events' `signup_group_id` to NULL.
 
 `event_subscriptions`: `signup_role_id` (FK `signup_roles`, `CASCADE`), `voter_hash` String(64), `subscribed_at`. Primary key `(signup_role_id, voter_hash)`. Removing a mapping deletes its subscriptions (they described a role that no longer applies). There is no age based pruning: a subscription is current state, not history.
 
@@ -3478,14 +3478,37 @@ API: mapping validation (own Kingdom's servers only, unsafe role 422, create wit
 
 ### 87.8 Effort
 
-Medium to large: about 3 days with the two-level mapping. The click path, role calls, safety check and deferred reply are new. Components, hashing, rate limiting, destination posting and the retry rules are reused from §84 and §67.
+Large: about 4 days (about 3 for Notify me and groups, about 1 for I'm in) with the two-level mapping. The click path, role calls, safety check and deferred reply are new. Components, hashing, rate limiting, destination posting and the retry rules are reused from §84 and §67.
 
 ### 87.9 Open questions
 
-O1. Add a second button, **I'm in**, that records a per occurrence count for the schedule board ("12 going")? It needs its own table (occurrence, hashed voter) and no role. It is separate from this button on purpose (87.1).
+O1. Resolved: **I'm in** is part of this section (87.10).
 O2. Resolved: Notify me is on by default for a recurring event (decision 4), scoped to that event with the type as fallback. Existing events stay off. Still open: should a new event copy its type's `signup_mention`? Today it does not, so enabling the button never changes who is pinged.
 O3. Verify against the Discord documentation before building: that component interactions in a guild carry `member.roles`; the deferred type 5 reply with flags 64 and editing `@original` with the interaction token (valid 15 minutes); the role add and remove routes, their audit log reason header and rate limits; the permission bit values in 87.6; and the role hierarchy rule (a bot can only manage roles below its highest role).
 O4. Should removing a mapping, or deleting an event or event type, offer to delete the roles Samaya created? Today it only lists them.
 O5. Should the button label carry the type name ("Notify me: Bear Hunt")? Useful when one message lists several events, which reminders never do today.
 O6. Count display in the Insights tab (§85) next to the heatmap, once subscriptions exist.
-O7. Should a group also carry a window (same day, same week) that the per occurrence "I'm in" button enforces? Needs O1 first.
+O7. Resolved: the group's `window` field (87.10).
+O8. Show the count on the Discord schedule board (§82) and on the reminder itself? A channel is visible to everyone in it, so it is a different audience from the admin console. Left out of this version; the player sees the count in their own private reply.
+O9. What is a week for the `week` window? This section assumes Monday 00:00 UTC to Sunday 23:59 UTC. Kingshot's own event week may differ; confirm before building.
+
+### 87.10 I'm in button (attendance for one occurrence)
+
+**Goal.** A second button on the same reminder records that a player will attend this occurrence, so leaders see headcount before a rally or a run, and so a player cannot commit to two events that exclude each other (Bear Hunt #1 and #2 on one day, two Eternity's Reach events in one week).
+
+**Decisions.**
+1. **Key.** `in:{event_id}:{YYYYMMDD}`, where the date is the occurrence's nominal UTC start date. Occurrence ids are not stable (the engine recreates occurrences, §78 decision 11), and a moved occurrence keeps its nominal date, so the key survives both. Strict parse: ASCII digits only, `fullmatch`.
+2. **Valid taps.** The event is active, `rsvp_enabled`, not leadership-only, the date is an actual occurrence (`recurrence.occurs_on`) that is not cancelled, the occurrence has not started, and the interaction's guild is a server the event posts to. Anything else answers "This button is no longer active." or "This event has already started."
+3. **Toggle.** Tapping again withdraws. Answers are private and immediate (callback type 4, flags 64), since this path makes no Discord call: "You are in for Bear Hunt #1 on Tue 20:00. 12 going." or "You are out."
+4. **Windowed groups.** If the event's group has a `window` of `day` or `week`, a player may hold one "I'm in" per window across the group's events. The window is the occurrence's UTC date (`day`) or its Monday-start UTC week (`week`, O9). A second tap in the window changes nothing and replies "You are already in Bear Hunt #1 today. Switch to #2?" with a **Switch** button (`rs:{event_id}:{YYYYMMDD}`) that withdraws the first and records the second in one transaction.
+5. **Hashing.** The voter hash is `HMAC-SHA256(SECRET_KEY, "rsvp:{scope}:discord_user_id")`, where `scope` is `g{group_id}` for a grouped event and `e{event_id}` otherwise. A group needs one hash per player across its events to detect a clash; an ungrouped event gets a per event hash so nothing links a player across unrelated events. Neither reveals the ID.
+6. **No role, no Discord call.** I'm in does not need a mapped role and appears on every reminder of an `rsvp_enabled` event, in every server the event posts to. A Kingdom wide event counts all its servers together.
+7. **Who sees counts.** Admin console only: the Schedule tab shows "12 in" per occurrence, and the event detail lists past occurrences. Never public, never in `public_rows` or ICS, no names. Board and reminder display is O8.
+8. **Retention.** Rows are deleted 30 days after the occurrence date by the daily job. Cancelling an occurrence keeps its rows until then and the console shows them under Cancelled.
+9. **Limits.** Shares the 10 taps per minute per user limit. The button sits on the same action row as Notify me, `I'm in` first.
+
+**Data (same revision).** `occurrence_rsvps`: `event_id` (FK `events`, `CASCADE`), `occurrence_date` Date, `voter_hash` String(64), `created_at`, primary key `(event_id, occurrence_date, voter_hash)`, index on `(voter_hash, occurrence_date)` for the window check.
+
+**API.** `GET /api/occurrences` gains `rsvp_count`. `PATCH /api/events/{id}` accepts `rsvp_enabled` (422 for leadership-only). `GET/POST/PATCH /api/signup-groups` accept `window` and `exclusive_roles`. The Events form gets an I'm in checkbox (checked for new events), and the group editor gets a Window select and an Exclusive roles checkbox. Both tabs' explainers say counts are admin only.
+
+**Tests.** Pure: key round trip and hostile ids (trailing newline, full width digits, bad date such as 20260230), window bucketing for day, week at the Sunday/Monday boundary and year end, hash scope for grouped and ungrouped events. Handling: tap in, tap out, count in the reply, not an occurrence, cancelled, started, wrong guild, disabled, leadership-only, moved occurrence keeps its key, recreated occurrence keeps its rows, rate limit; windowed group clash offers Switch and changes nothing, Switch is atomic, a different day or week is allowed, a stale or forged `rs:` id is ignored, a group with window `none` allows several. Engine: both buttons on the right row, I'm in alone in a server with no role, absent for leadership-only, merged sends carry one set. API: counts only, no IDs in any payload, permissions, audit, nothing on public routes, pruning at 30 days, migration upgrade, `alembic check` and downgrade on Postgres.
