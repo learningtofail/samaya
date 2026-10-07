@@ -583,3 +583,16 @@ textarea.pf-v6-c-form-control { min-height: 5rem; resize: vertical; }
 .slot-form__alliances { grid-column: 1 / -1; }
 .slot-list { list-style: none; padding: 0; margin: var(--space-2) 0 0; display: grid; gap: var(--space-2); }
 .slot-list__item { padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; }
+
+/* ── Polls (spec §84) ─────────────────────────────────── */
+.poll__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); justify-content: space-between; }
+.poll__slots { list-style: none; padding: 0; margin: var(--space-3) 0; display: grid; gap: var(--space-2); }
+.poll__slot { display: grid; gap: var(--space-2); align-items: center; grid-template-columns: 1fr; padding: var(--space-2) 0; border-top: 1px solid var(--line); }
+.poll__bar { width: 100%; height: 12px; accent-color: var(--accent); }
+.poll__votes { font-variant-numeric: tabular-nums; }
+.poll__error { margin-top: var(--space-2); }
+.poll-slots { display: grid; gap: var(--space-2); margin-bottom: var(--space-2); }
+.poll-slots__row { display: flex; gap: var(--space-2); align-items: center; }
+@media (min-width: 900px) {
+  .poll__slot { grid-template-columns: 16rem minmax(8rem, 1fr) 6rem auto; }
+}

@@ -3266,6 +3266,18 @@ O2. Add a "none of these work" button? It would count as a vote against and help
 O3. Verify against the current Discord docs before building: callback type 7 for component interactions on an interactions-endpoint app, the 5-by-5 component limits, and that edits through the bot token keep the buttons when `components` is sent.
 O4. Per-poll voter hashes mean a person voting in two polls is not linkable. That is intended and stays.
 
+### 84.9 As built
+
+Built as specified, with these notes.
+
+- **Discord facts.** Callback type 7 (update the message a button was on) is confirmed against the discord-api-types enum. The 5-buttons-per-row and 5-row limits and the 100 character `custom_id` limit are from general knowledge and were not re-read in Discord's own docs. Whether a PATCH without `components` keeps the buttons was not verified, so every edit resends the components (an empty list on close and cancel).
+- **Voting.** Clicks answer with type 7 carrying the fresh tally, so the clicked copy is already current and the tick does not edit it again. Wrong guild, closed, cancelled, unknown and malformed ids get an ephemeral "This poll is closed." `custom_id` parsing accepts ASCII digits only (a trailing newline or a full-width digit is rejected).
+- **Concurrency.** A duplicate insert from a double click is absorbed. The shared in-memory test database has one connection, so the concurrency test uses a file database.
+- **Failures.** If posting to a channel fails, the poll and its votes still exist; the API returns `discord_errors` and the poll shows without that message. Edit failures are stored on the message row and retried after 10 minutes.
+- **UI.** The new-poll form takes UTC times and has Suggest slots (§85 finder, 7 days, 12:00 to 23:00 UTC). Applying a result is by hand: Move occurrence (the existing occurrence PATCH) for a poll linked to an occurrence through the API, otherwise New event, which opens the event form with the date and time filled in. The form does not link an occurrence yet; the API accepts `occurrence_id`.
+- **Migration.** `a1f0c0de0019`, chained from 0016. Whichever of 0017 and 0018 (PWA, §78) lands first must keep its own id and this revision's `down_revision` must be re-pointed, or the PWA revisions chain after it.
+- Tests: `tests/test_time_poll.py`, `tests/test_polls_api.py`.
+
 ## 85. Schedule insights
 
 Status: design only. Not built. Written 2026-10-07.

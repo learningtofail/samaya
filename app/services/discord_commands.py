@@ -16,11 +16,12 @@ from models.db import DiscordServer, Tenant, TenantSecondaryServer, Ticket
 from services.event_engine import effective_end, effective_start
 from services.public_events import PublicRow, public_rows
 from services.rate_limit import RateLimiter
+from services.time_poll import handle_component
 
 logger = logging.getLogger(__name__)
 
 # Interaction types (what Discord sends) and callback types (what we answer).
-INTERACTION_COMMAND, INTERACTION_AUTOCOMPLETE, INTERACTION_MODAL_SUBMIT = 2, 4, 5
+INTERACTION_COMMAND, INTERACTION_COMPONENT, INTERACTION_AUTOCOMPLETE, INTERACTION_MODAL_SUBMIT = 2, 3, 4, 5
 CALLBACK_MESSAGE, CALLBACK_AUTOCOMPLETE, CALLBACK_MODAL = 4, 8, 9
 EPHEMERAL = 64
 MESSAGE_LIMIT = 1900          # Discord allows 2000; leave room for the trailer
@@ -260,6 +261,8 @@ async def handle_interaction(db: AsyncSession, interaction: dict, now: datetime 
             return await handle_autocomplete(db, interaction)
         if kind == INTERACTION_MODAL_SUBMIT:
             return await handle_feedback_submit(db, interaction)
+        if kind == INTERACTION_COMPONENT:  # spec §84: a time poll button
+            return await handle_component(db, interaction, now)
         if kind == INTERACTION_COMMAND:
             name = (interaction.get("data") or {}).get("name")
             if name == "schedule":
