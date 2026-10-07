@@ -40,6 +40,7 @@ class BoardLine:
     name: str
     alliances: tuple[str, ...] = ()
     cancelled: bool = False
+    going: int = 0  # spec §87.10: the "I'm in" count, shown only above zero
 
 
 def escape_markdown(text: str) -> str:
@@ -53,7 +54,8 @@ def _line_text(line: BoardLine) -> str:
     if line.cancelled:
         return f"{clock} ~~{name}~~ cancelled"
     names = f" · {escape_markdown(', '.join(line.alliances))}" if line.alliances else ""
-    return f"{clock} {name}{names} {stamp}"
+    going = f" · {line.going} in" if line.going > 0 else ""
+    return f"{clock} {name}{names}{going} {stamp}"
 
 
 def render_board(title: str, lines: list[BoardLine], today: date) -> str:
@@ -106,10 +108,14 @@ async def board_lines(db: AsyncSession, dest: AudienceDestination, now: datetime
         if not start <= when < end:
             continue
         entry = merged.setdefault(row.occurrence.id, {
-            "start": when, "name": row.event.name, "names": [], "cancelled": row.occurrence.status == "cancelled"})
+            "start": when, "name": row.event.name, "names": [], "cancelled": row.occurrence.status == "cancelled",
+            "key": (row.event.id, row.occurrence.occurrence_date), "rsvp": row.event.rsvp_enabled})
         if dest.board_scope != "alliance" and row.event.scope != "kingdom-wide" and row.tenant.name not in entry["names"]:
             entry["names"].append(row.tenant.name)
-    lines = [BoardLine(e["start"], e["name"], tuple(sorted(e["names"])), e["cancelled"]) for e in merged.values()]
+    from services.signup import rsvp_counts  # imported here: signup imports event_engine, as this module does
+    going = await rsvp_counts(db, [e["key"] for e in merged.values() if e["rsvp"] and not e["cancelled"]])
+    lines = [BoardLine(e["start"], e["name"], tuple(sorted(e["names"])), e["cancelled"], going.get(e["key"], 0))
+             for e in merged.values()]
     return title, lines
 
 

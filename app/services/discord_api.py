@@ -368,7 +368,9 @@ async def get_guild_roles(token: str, guild_id: str) -> tuple[list[dict], str]:
 
     if response.status_code == 200:
         roles = response.json()
-        return [{"id": r["id"], "name": r["name"], "color": r.get("color", 0)} for r in roles], ""
+        return [{"id": r["id"], "name": r["name"], "color": r.get("color", 0),
+                 "permissions": str(r.get("permissions", "0")), "managed": bool(r.get("managed", False)),
+                 "position": int(r.get("position", 0))} for r in roles], ""
     if response.status_code == 401:
         logger.warning(f"get_guild_roles: 401 for guild {guild_id}")
         return [], "401 Unauthorized — token invalid or bot removed"
@@ -478,12 +480,15 @@ MESSAGE_GONE = "MESSAGE_GONE"
 _NO_MENTIONS = {"parse": []}
 
 
-async def _message_request(method: str, url: str, token: str, body: dict | None, label: str):
-    """One Discord call with the shared retry rules. Returns (response, error); exactly one is None."""
+async def _message_request(method: str, url: str, token: str | None, body: dict | None, label: str,
+                           extra_headers: dict | None = None):
+    """One Discord call with the shared retry rules. Returns (response, error); exactly one is None.
+    A falsy `token` sends no bot credential (interaction webhooks authenticate by the URL)."""
+    headers = {**(_auth_headers(token) if token else {"Content-Type": "application/json"}), **(extra_headers or {})}
     async with httpx.AsyncClient() as client:
         for attempt in range(MAX_RETRIES):
             try:
-                response = await client.request(method, url, headers=_auth_headers(token), json=body)
+                response = await client.request(method, url, headers=headers, json=body)
             except httpx.RequestError as e:
                 if attempt < MAX_RETRIES - 1:
                     await asyncio.sleep(2 ** attempt)
@@ -575,3 +580,119 @@ async def delete_channel_message(token: str, channel_id: str, message_id: str) -
         except ValueError:
             pass
     return False, _message_error(response, label)
+
+
+# Roles, role membership and interaction replies (spec §87).
+
+ROLE_NAME_MAX = 100
+_role_cache: dict[tuple[str, str], tuple[float, dict, int | None]] = {}
+ROLE_CACHE_SECONDS = 300
+
+
+def _reason_header(reason: str) -> dict:
+    from urllib.parse import quote
+    return {"X-Audit-Log-Reason": quote(reason[:400], safe=" ")} if reason else {}
+
+
+def _role_error(response, label: str) -> str:
+    code = response.status_code
+    discord_code = None
+    try:
+        discord_code = response.json().get("code")
+    except ValueError:
+        pass
+    logger.warning(f"{label}: HTTP {code} (Discord code {discord_code})")
+    if code == 401:
+        return "401 Unauthorized"
+    if code == 403:
+        return ("403 The bot cannot manage this role: it needs the Manage Roles permission and a role above this one"
+                if discord_code == 50013 else "403 Missing permissions — the bot needs Manage Roles")
+    if code == 404:
+        return {10011: "404 Unknown role", 10007: "404 Unknown member", 10004: "404 Unknown server"}.get(
+            discord_code, "404 Not found")
+    return f"HTTP {code}"
+
+
+async def add_member_role(token: str, guild_id: str, user_id: str, role_id: str, reason: str = "") -> tuple[bool, str]:
+    label = f"add_member_role {guild_id}/{user_id}/{role_id}"
+    response, error = await _message_request(
+        "PUT", f"{DISCORD_API_BASE}/guilds/{guild_id}/members/{user_id}/roles/{role_id}", token, None, label,
+        _reason_header(reason))
+    if error:
+        return False, error
+    return (True, "") if response.status_code in (200, 204) else (False, _role_error(response, label))
+
+
+async def remove_member_role(token: str, guild_id: str, user_id: str, role_id: str, reason: str = "") -> tuple[bool, str]:
+    label = f"remove_member_role {guild_id}/{user_id}/{role_id}"
+    response, error = await _message_request(
+        "DELETE", f"{DISCORD_API_BASE}/guilds/{guild_id}/members/{user_id}/roles/{role_id}", token, None, label,
+        _reason_header(reason))
+    if error:
+        return False, error
+    return (True, "") if response.status_code in (200, 204) else (False, _role_error(response, label))
+
+
+async def create_role(token: str, guild_id: str, name: str, reason: str = "") -> tuple[dict | None, str]:
+    """Creates a mentionable role with no permissions. Returns ({"id", "name"}, "") or (None, error)."""
+    label = f"create_role {guild_id}"
+    body = {"name": name[:ROLE_NAME_MAX], "permissions": "0", "mentionable": True, "hoist": False}
+    response, error = await _message_request(
+        "POST", f"{DISCORD_API_BASE}/guilds/{guild_id}/roles", token, body, label, _reason_header(reason))
+    if error:
+        return None, error
+    if response.status_code in (200, 201):
+        try:
+            data = response.json()
+            return {"id": str(data["id"]), "name": data.get("name", name)}, ""
+        except (ValueError, KeyError, TypeError):
+            return None, "Discord answered without a role id"
+    return None, _role_error(response, label)
+
+
+async def rename_role(token: str, guild_id: str, role_id: str, name: str, reason: str = "") -> tuple[bool, str]:
+    label = f"rename_role {guild_id}/{role_id}"
+    response, error = await _message_request(
+        "PATCH", f"{DISCORD_API_BASE}/guilds/{guild_id}/roles/{role_id}", token, {"name": name[:ROLE_NAME_MAX]}, label,
+        _reason_header(reason))
+    if error:
+        return False, error
+    return (True, "") if response.status_code == 200 else (False, _role_error(response, label))
+
+
+async def edit_interaction_response(application_id: str, interaction_token: str, content: str) -> tuple[bool, str]:
+    """Edits the deferred private reply of an interaction. The URL carries the credential (valid 15 minutes)."""
+    label = "edit_interaction_response"
+    response, error = await _message_request(
+        "PATCH", f"{DISCORD_API_BASE}/webhooks/{application_id}/{interaction_token}/messages/@original", None,
+        {"content": content, "allowed_mentions": _NO_MENTIONS}, label)
+    if error:
+        return False, error
+    return (True, "") if response.status_code == 200 else (False, _message_error(response, label))
+
+
+async def get_role_context(token: str, guild_id: str) -> tuple[dict, int | None, str]:
+    """({role_id: role}, the bot's highest role position or None, error), cached 5 minutes per server.
+    The position is None when it cannot be read; Discord then enforces the hierarchy itself (error 50013)."""
+    import time
+    key = (token[-8:], guild_id)
+    hit = _role_cache.get(key)
+    if hit is not None and time.monotonic() - hit[0] < ROLE_CACHE_SECONDS:
+        return hit[1], hit[2], ""
+    roles, error = await get_guild_roles(token, guild_id)
+    if error:
+        return {}, None, error
+    by_id = {r["id"]: r for r in roles}
+    top: int | None = None
+    me, _ = await _message_request("GET", f"{DISCORD_API_BASE}/users/@me", token, None, "get_bot_user")
+    if me is not None and me.status_code == 200:
+        try:
+            member, _ = await _message_request(
+                "GET", f"{DISCORD_API_BASE}/guilds/{guild_id}/members/{me.json()['id']}", token, None, "get_bot_member")
+            if member is not None and member.status_code == 200:
+                held = [by_id[r]["position"] for r in member.json().get("roles", []) if r in by_id]
+                top = max(held) if held else 0
+        except (ValueError, KeyError, TypeError):
+            top = None
+    _role_cache[key] = (time.monotonic(), by_id, top)
+    return by_id, top, ""

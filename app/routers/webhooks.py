@@ -1,12 +1,13 @@
 import logging
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import get_db
-from services.discord_commands import handle_interaction
+from models import get_db, get_session_factory
+from services.discord_client import get_discord
+from services.discord_commands import handle_interaction_ex
 
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,13 @@ def verify_signature(public_key: str, signature: str, timestamp: str, body: byte
 
 
 @router.post("/discord")
-async def discord_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+async def discord_webhook(
+    request: Request,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    discord=Depends(get_discord),
+    session_factory=Depends(get_session_factory),
+):
     body      = await request.body()
     signature = request.headers.get("X-Signature-Ed25519", "")
     timestamp = request.headers.get("X-Signature-Timestamp", "")
@@ -67,4 +74,7 @@ async def discord_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     # Discord's Interactions Endpoint only ever delivers Interaction objects
     # (PING, commands, autocomplete, modals). Guild scheduled event updates are
     # Gateway events and never arrive here. Spec §70 handles the rest.
-    return JSONResponse(await handle_interaction(db, data))
+    response, followup = await handle_interaction_ex(db, data, discord=discord, session_factory=session_factory)
+    if followup is not None:  # spec §87: Discord has its answer before the role call starts
+        background.add_task(followup)
+    return JSONResponse(response)

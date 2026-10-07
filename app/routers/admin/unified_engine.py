@@ -25,6 +25,7 @@ from services.event_engine import (
     remove_posted_discord_events, sync_event_occurrences, apply_event_change, cancel_pending_deliveries,
 )
 from services.recurrence import occurs_on
+from services.signup import copy_event_signup, rsvp_counts
 from services.time_utils import ensure_utc
 
 from .deps import get_current_tenants, get_current_user, require_not_viewer
@@ -47,7 +48,7 @@ def _iso(dt: datetime | None) -> str | None:
 
 
 def _occurrence_dict(occ: EventOccurrence, event: Event, delivery_counts: dict[str, int] | None = None,
-                     overview: dict | None = None) -> dict:
+                     overview: dict | None = None, going: int = 0) -> dict:
     end = effective_end(occ)
     return {
         **(overview or {}),
@@ -64,6 +65,8 @@ def _occurrence_dict(occ: EventOccurrence, event: Event, delivery_counts: dict[s
         "is_moved":             occ.start_datetime_utc_override is not None,
         "message_override":     occ.message_override,
         "delivery_counts":      delivery_counts or {},
+        "rsvp_enabled":         event.rsvp_enabled,
+        "rsvp_count":           going,  # spec §87.10: a count only, admin console only
     }
 
 
@@ -179,7 +182,9 @@ async def list_occurrences(
     for _, e in pairs:
         if e.id not in overviews:
             overviews[e.id] = await event_overview(db, await _load_event(db, e.id))
-    return [_occurrence_dict(o, e, counts.get(o.id), overviews[e.id]) for o, e in pairs]
+    going = await rsvp_counts(db, [(o.event_id, o.occurrence_date) for o, _ in pairs])
+    return [_occurrence_dict(o, e, counts.get(o.id), overviews[e.id], going.get((o.event_id, o.occurrence_date), 0))
+            for o, e in pairs]
 
 
 @router.patch("/occurrences/{occurrence_id}")
@@ -289,6 +294,8 @@ async def split_event(
         recurrence_kind=event.recurrence_kind, interval_days=event.interval_days,
         anchor_date=payload.from_date, until_date=event.until_date, mention_role=event.mention_role,
         clean_up_reminders=event.clean_up_reminders,
+        signup_enabled=event.signup_enabled, signup_mention=event.signup_mention, rsvp_enabled=event.rsvp_enabled,
+        signup_group_id=event.signup_group_id,
         active=event.active, cover_image_data=event.cover_image_data,
     )
     new_event.reminders = [EventReminder(minutes_before=r.minutes_before, message=r.message) for r in event.reminders]
@@ -306,6 +313,7 @@ async def split_event(
         await db.rollback()
         raise_friendly_integrity_error(e, {})
 
+    await copy_event_signup(db, event.id, new_event, payload.from_date)  # spec §87: roles and later RSVPs follow the new series
     changes = payload.changes
     await apply_event_patch(db, user, new_event, owner, changes, new_event.scope)
     if changes.anchor_date is None:

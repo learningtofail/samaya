@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from scheduler.unified_jobs import board_tick_job, delivery_tick_job, generation_job, giftcode_tick_job, poll_tick_job
+from scheduler.unified_jobs import board_tick_job, delivery_tick_job, generation_job, giftcode_tick_job, poll_tick_job, rsvp_tick_job
 from services import giftcode_client
 from routers import events, admin, webhooks, ics, auth as auth_router, auth_pages, tickets_public, themes_public
 
@@ -73,6 +73,10 @@ async def lifespan(app: FastAPI):
     )
     scheduler.add_job(
         poll_tick_job, IntervalTrigger(minutes=1), id="time_poll_tick", replace_existing=True,
+        max_instances=1, coalesce=True,
+    )
+    scheduler.add_job(
+        rsvp_tick_job, IntervalTrigger(minutes=1), id="rsvp_headcount_tick", replace_existing=True,
         max_instances=1, coalesce=True,
     )
     if giftcode_client.is_configured():

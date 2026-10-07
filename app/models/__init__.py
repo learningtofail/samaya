@@ -9,3 +9,8 @@ AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_co
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
+
+
+def get_session_factory():
+    """The session factory for work that continues after a response (spec §87). A dependency so tests can swap it."""
+    return AsyncSessionLocal

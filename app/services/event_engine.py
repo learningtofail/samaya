@@ -152,6 +152,8 @@ async def event_overview(session: AsyncSession, event: Event) -> dict:
         "destination_count": len(plan.resolution.destinations),
         "channel_count": len(plan.sends),
         "warnings": warnings,
+        # Spec §87: the Discord servers this event posts to, for Notify me roles.
+        "servers": [{"id": i, "name": n} for i, n in sorted({(d.server.id, d.server.name) for d in plan.resolution.destinations})],
     }
 
 
@@ -533,10 +535,29 @@ async def _send_reminder(
         content = default_reminder_text(event.name, delivery.reminder_minutes)
     if event.mention_role and send.role_ids:
         content = " ".join(f"<@&{r}>" for r in send.role_ids) + f" {content}"
-    message_id, error = await discord.post_channel_message(token, dest.channel_id, content[:MAX_CONTENT_CHARS])
+    # Spec §87: the Notify me and I'm in buttons, the subscriber ping and the headcount line.
+    from services import signup  # imported here: signup itself imports this module
+    signup_role = None
+    if not event.leadership_only and (event.signup_enabled or event.rsvp_enabled):
+        signup_role = await signup.resolve_signup_role_for_server(session, event, server.id)
+    if event.signup_enabled and event.signup_mention and signup_role is not None:
+        tag = f"<@&{signup_role.role_id}>"
+        if tag not in content:
+            content = f"{tag} {content}"
+    components = signup.button_row(event, occ.occurrence_date, signup_role is not None)
+    count = 0
+    if components and event.rsvp_enabled:
+        count = (await signup.rsvp_counts(session, [(event.id, occ.occurrence_date)])).get((event.id, occ.occurrence_date), 0)
+    text = signup.with_count(content, count, MAX_CONTENT_CHARS)
+    if components:
+        message_id, error = await discord.post_channel_message(token, dest.channel_id, text, components=components)
+    else:
+        message_id, error = await discord.post_channel_message(token, dest.channel_id, content[:MAX_CONTENT_CHARS])
     if not message_id:
         return "error", error
     delivery.discord_message_id = message_id  # spec §83: kept so the message can be cleaned up later
+    if components and event.rsvp_enabled:  # spec §87.10: what a headcount edit rebuilds from
+        delivery.rsvp_base_content, delivery.rsvp_count_shown = content[:MAX_CONTENT_CHARS], count
     return "posted", note
 
 
@@ -554,9 +575,9 @@ async def _claim(session: AsyncSession, delivery_id: int, now: datetime) -> bool
 
 async def _finish(session_factory, delivery_id: int, status: str, detail: str | None,
                   discord_event_id: str | None, now: datetime, merged_into_id: int | None = None,
-                  discord_message_id: str | None = None) -> None:
+                  discord_message_id: str | None = None, extra: dict | None = None) -> None:
     async with session_factory() as session:
-        values = {"status": status, "detail": detail}
+        values = {"status": status, "detail": detail, **(extra or {})}
         if merged_into_id is not None:
             values["merged_into_id"] = merged_into_id
         if status == "posted":
@@ -609,6 +630,7 @@ async def process_delivery(session_factory, discord, delivery_id: int, now: date
     status, detail, discord_event_id, merged_into_id = "error", "Unexpected failure before sending", None, None
     reminder_destination_id: int | None = None
     message_id: str | None = None
+    extra: dict = {}
     try:
         async with session_factory() as session:
             delivery = await session.get(Delivery, delivery_id)
@@ -630,10 +652,13 @@ async def process_delivery(session_factory, discord, delivery_id: int, now: date
                 reminder_destination_id = delivery.destination_id
                 status, detail = await _send_reminder(session, discord, delivery, event, occ, tenant, now)
                 message_id = delivery.discord_message_id
+                if delivery.rsvp_base_content is not None:
+                    extra = {"rsvp_base_content": delivery.rsvp_base_content,
+                             "rsvp_count_shown": delivery.rsvp_count_shown}
     except Exception as exc:  # one delivery's failure must not stop the tick
         logger.exception("delivery %s failed", delivery_id)
         status, detail = "error", f"{type(exc).__name__}: {exc}"
-    await _finish(session_factory, delivery_id, status, detail, discord_event_id, now, merged_into_id, message_id)
+    await _finish(session_factory, delivery_id, status, detail, discord_event_id, now, merged_into_id, message_id, extra)
     if reminder_destination_id is not None:
         try:
             await record_destination_outcome(session_factory, reminder_destination_id, status, detail, now)

@@ -16,6 +16,7 @@ from models.db import DiscordServer, Tenant, TenantSecondaryServer, Ticket
 from services.event_engine import effective_end, effective_start
 from services.public_events import PublicRow, public_rows
 from services.rate_limit import RateLimiter
+from services.signup import handle_signup_component
 from services.time_poll import handle_component
 
 logger = logging.getLogger(__name__)
@@ -253,26 +254,44 @@ async def handle_feedback_submit(db: AsyncSession, interaction: dict) -> dict:
 # --------------------------------------------------------------- dispatch
 async def handle_interaction(db: AsyncSession, interaction: dict, now: datetime | None = None) -> dict:
     """Answers one non-PING interaction. Never raises: an unexpected failure
-    is logged and the user gets a short apology instead of a Discord error."""
+    is logged and the user gets a short apology instead of a Discord error.
+    Any follow-up work (spec §87's role change) is dropped; use `handle_interaction_ex` to run it."""
+    response, _followup = await handle_interaction_ex(db, interaction, now)
+    return response
+
+
+async def handle_interaction_ex(db: AsyncSession, interaction: dict, now: datetime | None = None,
+                                discord=None, session_factory=None):
+    """Like `handle_interaction`, but returns (response, follow-up). The follow-up is a no-argument coroutine
+    function the caller runs after the response is sent, or None."""
     now = now or datetime.now(timezone.utc)
     kind = interaction.get("type")
     try:
         if kind == INTERACTION_AUTOCOMPLETE:
-            return await handle_autocomplete(db, interaction)
+            return await handle_autocomplete(db, interaction), None
         if kind == INTERACTION_MODAL_SUBMIT:
-            return await handle_feedback_submit(db, interaction)
-        if kind == INTERACTION_COMPONENT:  # spec §84: a time poll button
-            return await handle_component(db, interaction, now)
+            return await handle_feedback_submit(db, interaction), None
+        if kind == INTERACTION_COMPONENT:
+            if discord is None:
+                from services.discord_client import get_discord
+                discord = get_discord()
+            if session_factory is None:
+                from models import AsyncSessionLocal
+                session_factory = AsyncSessionLocal
+            signup = await handle_signup_component(db, interaction, discord, session_factory, now)  # spec §87
+            if signup is not None:
+                return signup
+            return await handle_component(db, interaction, now), None  # spec §84: a time poll button
         if kind == INTERACTION_COMMAND:
             name = (interaction.get("data") or {}).get("name")
             if name == "schedule":
-                return await handle_schedule(db, interaction, now)
+                return await handle_schedule(db, interaction, now), None
             if name == "next":
-                return await handle_next(db, interaction, now)
+                return await handle_next(db, interaction, now), None
             if name == "feedback":
-                return handle_feedback_command(interaction)
-        return _reply("Unknown command.")
+                return handle_feedback_command(interaction), None
+        return _reply("Unknown command."), None
     except Exception:
         logger.exception("Discord interaction failed (type %s)", kind)
-        return _reply("Something went wrong. Try again in a minute.")
+        return _reply("Something went wrong. Try again in a minute."), None
 

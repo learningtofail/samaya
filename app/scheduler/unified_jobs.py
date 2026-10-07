@@ -10,6 +10,7 @@ from services import discord_api, giftcode_client
 from services.event_engine import run_delivery_tick, run_generation
 from services.giftcode_engine import prune_redemptions, run_tick
 from services.schedule_board import run_board_refresh
+from services.signup import prune_rsvps, run_rsvp_refresh
 from services.time_poll import prune_polls, run_poll_tick
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,17 @@ async def poll_tick_job() -> None:
         logger.exception("time poll tick failed")
 
 
+async def rsvp_tick_job() -> None:
+    """Spec §87.10: edits sent reminders whose "I'm in" count changed. Separate from the delivery tick so a
+    headcount edit can never delay a reminder."""
+    try:
+        counts = await run_rsvp_refresh(AsyncSessionLocal, discord_api, datetime.now(timezone.utc))
+        if counts["edited"] or counts["error"]:
+            logger.info("headcount edits: %s", counts)
+    except Exception:
+        logger.exception("headcount tick failed")
+
+
 async def generation_job() -> None:
     try:
         logger.info("generation: synced %s events", await run_generation(AsyncSessionLocal))
@@ -64,6 +76,13 @@ async def generation_job() -> None:
             logger.info("retention: removed %s old time polls", pruned)
     except Exception:
         logger.exception("time poll retention failed")
+    try:
+        async with AsyncSessionLocal() as db:
+            pruned = await prune_rsvps(db, datetime.now(timezone.utc))
+        if pruned:
+            logger.info("retention: removed %s old I'm in records", pruned)
+    except Exception:
+        logger.exception("RSVP retention failed")
 
 
 async def giftcode_tick_job() -> None:
