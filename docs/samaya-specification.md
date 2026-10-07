@@ -3349,6 +3349,7 @@ Scheduling is largely solved: events, reminders, boards, cleanup and pausing wor
 1. **Subscribe and RSVP buttons on reminders.** Buttons use the signed interactions endpoint (§70), so no gateway connection is needed.
    - A **Notify me** button grants a per event type role. It replaces blunt `@role` mentions with an opt-in, and the existing "mention the role" option then pings only people who asked.
    - An **RSVP** button stores a count per occurrence. The schedule board (§82) can show "12 going". RSVP records stated intent only; Discord cannot say who attended in game.
+   - The Notify me button is specified in §87 (role toggle with recorded intent). The RSVP count is O1 there.
    - Reuses the component handling, `custom_id` parsing and `components` argument that §84 adds. Medium effort. Needs a small table for RSVPs (hashed voters, as in §84.2 decision 5) and the Manage Roles permission for the role button.
 2. **Sync "interested" counts from Scheduled Events.** Discord already collects interest on the events Samaya creates, and the API exposes the interested users of a scheduled event. Reading the count gives an attendance signal with no new UI. Low effort. Counts only, no user list stored.
 3. **Embeds for reminders and the board.** Alliance colour, the event cover, 4096 character descriptions and fields. It makes the board much easier to read. Low effort, but it changes the message format and the §82 hash input, so it needs an explicit decision and a per destination switch.
@@ -3395,3 +3396,82 @@ Built from data Samaya already stores, so they need no new collection. §85 cove
 O1. Which of the four higher value ideas does the alliance actually ask for first? Build in that order, not the order above, once someone asks.
 O2. Should "Notify me" create the role itself or only grant one a leader names? Creating roles needs more permission and can clutter a server.
 O3. Verify against the Discord documentation: scheduled event user endpoints, crossposting permissions, user install availability, guild approximate counts, role and thread permissions.
+
+
+## 87. Notify me button (role toggle with recorded intent)
+
+Status: design only. Not built. Written 2026-10-07. Builds on §84 (components, `custom_id`, hashed voters), §67 (destinations and merged sends) and §86.2 item 1.
+
+### 87.1 Goal
+
+Pinging a whole role for every reminder is blunt. A reminder gets a **Notify me** button. One tap toggles a Discord role for the player, and Samaya records the intent, so the event's reminders can ping only people who asked. The same record gives leaders a count of how many people want each kind of event.
+
+Assumption in this section: "intent" means the stated wish to be notified about an event type, not attendance at one occurrence. A per occurrence "I'm in" count is a second, separate button (O1). One tap cannot honestly do both, because tapping a later reminder would remove the role the player already has.
+
+### 87.2 Decisions
+
+1. **One button, one toggle.** The button is `Notify me`. A tap adds the role if the player lacks it, removes it if they have it. The state is read from the click itself: a component interaction in a guild carries the member's current role IDs, so Samaya needs no extra Discord read and cannot disagree with what the player sees. Samaya then records the new state.
+2. **The role belongs to the event type, per Discord server.** One role per (event type, server), for example "Bear Hunt" in each server the type posts to. A role per event would multiply roles; a role per alliance would split one community. Event types belong to the Kingdom and so do servers, so Kingdom coordinators manage the mapping (the same permission as editing event types).
+3. **Leaders pick an existing role or let Samaya create one.** Creating needs the Manage Roles permission, so it is an explicit button, never automatic. A role Samaya creates is named after the type, mentionable, with no permissions, and is flagged `created_by_samaya`. Samaya never deletes a role.
+4. **Which events show the button:** an event with `signup_enabled`, whose type has a role for the server a reminder posts to. A reminder to a server with no mapping posts without the button. Leadership-only events never get the button. Discord Scheduled Events and the schedule board have no button.
+5. **Pinging subscribers.** An event with `signup_mention` adds the type's role for that server to each reminder, next to whatever `mention_role` already adds. A leader who wants subscribers only turns the existing "mention the role" option off for that event. The two options stay independent, so enabling the button never silently changes who is pinged.
+6. **Recorded intent is hashed and counted.** A subscription row holds `HMAC-SHA256(SECRET_KEY, "sub:type_id:server_id:discord_user_id")`, enough to toggle and count, not enough to list or contact anyone (the §84.2 rule). The console shows counts per type and server, never names. The record is advisory: a player can lose the role by other means (a moderator, leaving the server), and without the members privilege Samaya cannot see that. The count therefore means "people who last tapped to be notified", and the console says so.
+7. **Role safety is the main risk, so it is enforced twice.** Any player who can click can give themselves the role. A role with moderator powers would be a privilege escalation. Samaya refuses `@everyone`, managed roles (bots, boosts, integrations), roles at or above the bot's top role, and any role holding a permission in the deny list (87.6). It checks when the mapping is saved and again at click time against a role list cached for 5 minutes. A refused role is never granted and the player gets a plain message.
+8. **Clicks answer within Discord's 3 seconds without waiting for the role call.** The webhook answers at once with a deferred, private reply, then does the work after the response is sent and edits that reply with the result (87.4). One role change at a time per process is capped at 4 concurrent calls, so a ping that sends 200 players to the button queues instead of failing.
+9. **Limits.** 10 taps per minute per Discord user (`services/rate_limit.py`). Role calls reuse the shared retry and 429 handling.
+10. **Never public.** No public route, no ICS entry, nothing in `public_rows`. Counts appear only in the admin console.
+11. **Failures change nothing.** If the role call fails, nothing is recorded and the player is told. The error is stored on the mapping row, shown in the console, and cleared by the next success. There is no auto-disable in this version.
+
+### 87.3 Data (one Alembic revision, additive, downgrade drops the tables and columns)
+
+The id is the next free one after §84's `0019`; §78 reserves `0017` and `0018`, so this is expected to be `a1f0c0de0020`, chaining from `0019`. Whichever of the PWA revisions lands first must keep its own id, and the chain must be re-pointed on merge.
+
+`events`: `signup_enabled` Boolean NOT NULL default false, `signup_mention` Boolean NOT NULL default false.
+
+`event_type_roles`: `type_id` (FK `event_types`, `CASCADE`), `server_id` (FK `discord_servers`, `CASCADE`), `role_id` Text NOT NULL, `created_by_samaya` Boolean NOT NULL default false, `last_error` Text, `last_error_at`. Primary key `(type_id, server_id)`. CHECK `role_id <> ''`.
+
+`event_subscriptions`: `type_id` (FK, `CASCADE`), `server_id` (FK, `CASCADE`), `voter_hash` String(64), `subscribed_at`. Primary key `(type_id, server_id, voter_hash)`. Removing a mapping deletes its subscriptions (they described a role that no longer applies). There is no age based pruning: a subscription is current state, not history.
+
+### 87.4 Engine and Discord
+
+`services/signup.py`:
+- pure `custom_id` build and parse (`sub:{event_id}`, ASCII digits only, anything else ignored), `voter_hash`, `unsafe_role_reason(role, bot_top_position)` and the permission deny list.
+- `handle_subscribe(db, interaction)`: parse, rate limit, load the event (active, `signup_enabled`, not leadership-only), find the mapping for `interaction.guild_id`, refuse if the interaction's guild is not one of the event type's mapped servers, decide add or remove from `member.roles`, check role safety, call Discord, then record and answer.
+- `discord_api` gains `add_member_role`, `remove_member_role` (`PUT` and `DELETE /guilds/{g}/members/{u}/roles/{r}`, with an audit log reason such as "Notify me, Bear Hunt"), `create_role`, and `edit_interaction_response` (`PATCH /webhooks/{application_id}/{token}/messages/@original`, authenticated by the interaction token, not the bot token). `get_guild_roles` also returns `permissions`, `managed` and `position`.
+- Reminder posting (`event_engine.process_delivery`): for an event with `signup_enabled` and a mapped role for the destination's server, post with one action row holding the button (`components` is already supported by §84). With `signup_mention`, prepend `<@&role>`. Reminder messages already post with the default mention rules, so role pings work as today.
+
+`discord_commands.handle_interaction` routes `custom_id` values starting `sub:` to `handle_subscribe`. The webhook returns a deferred private reply (callback type 5, flags 64) and runs the follow-up with FastAPI `BackgroundTasks`, so the response is on the wire before any role call. Messages sent to the player: "You will now be notified about {type}.", "You will no longer be notified about {type}.", "That role cannot be given here, so ask a leader." (unsafe), "Samaya cannot change roles in this server yet, so ask a leader." (403 or hierarchy), "This button is no longer active." (event gone, disabled, wrong guild, or malformed id), "Slow down a little and try again in a minute." (rate limit). Text is English only until Discord localisation is built (§86). The §83 cleanup of old reminders removes their buttons with them; the newest reminder keeps its own.
+
+### 87.5 API and UI (admin)
+
+- `GET /api/event-types` gains `signup_roles`: per server `{server_id, server_name, role_id, role_name, created_by_samaya, subscribers, last_error}`.
+- `PUT /api/event-types/{id}/signup-roles` with `{server_id, role_id}`, `{server_id, create: true}` or `{server_id, remove: true}`. Kingdom coordinator only, audited. A role that fails the safety check is a 422 naming the reason ("That role has the Manage Messages permission, so anyone could use it to moderate"). `create` answers 502 with the Discord reason when the bot lacks Manage Roles.
+- `GET /api/discord/roles` marks roles that fail the safety check (`unsafe_reason`) so the picker can grey them out.
+- Event create and update accept `signup_enabled` and `signup_mention`. The response carries `signup_warnings`: servers the event posts to that have no role for its type. A warning does not block saving. Leadership-only events reject `signup_enabled` with a 422.
+- **Event types tab:** a "Notify me roles" section per type: a row per server with a role select (unsafe roles disabled with the reason), Create role, Remove, the subscriber count with the advisory note, and the last error.
+- **Events form:** a "Notify me button" checkbox, a "Ping subscribers" checkbox, and the warnings. Both explain that the button needs a role on the Event types tab.
+- The about-page explainers of both tabs describe the button, that counts are advisory, that Samaya never deletes roles, and the Manage Roles requirement.
+
+### 87.6 Security
+
+Role deny list (Discord permission bits; confirm the values before building, O3): Administrator, Manage Guild, Manage Roles, Manage Channels, Manage Messages, Manage Webhooks, Manage Threads, Manage Nicknames, Manage Guild Expressions, Manage Events, Kick Members, Ban Members, Moderate Members, View Audit Log, Mention Everyone. A role whose permission field cannot be parsed is refused. Other threats: a forged click (the webhook already verifies the signature, §70); a `custom_id` for another event (the guild and mapping checks decide, and the id carries no role); a click from a guild the type is not mapped to (refused); a voter hash cannot be reversed to a Discord ID; a mapping created by one Kingdom cannot name another Kingdom's server (servers belong to a Kingdom, §67).
+
+### 87.7 Tests
+
+Pure: `custom_id` round trip and hostile ids (trailing newline, full width digits, extra parts); the deny list for each bit, `@everyone`, managed roles, a role above the bot, an unparseable field; voter hash differs per type, server and user and never contains the ID.
+Click handling with `FakeDiscord`: add when `member.roles` lacks the role, remove when it has it; the record follows the new state; no record when the Discord call fails; 403 and hierarchy errors stored as `last_error` and cleared by a success; unsafe role refused at click time even if it was safe when saved; wrong guild; unmapped guild; inactive, disabled and leadership-only events; deleted event; rate limit; the deferred response shape and that the follow-up edits the original through the interaction token; concurrency cap; two quick taps converge.
+Engine: the button appears only for mapped servers, is absent for leadership-only events, merged sends carry one button, `signup_mention` adds the right role per guild, the audience role mention is unchanged, the §83 cleanup still works with components.
+API: mapping validation (own Kingdom's servers only, unsafe role 422, create without permission 502), coordinator only, audit rows, viewers read only, `signup_warnings`, counts only and no IDs in any payload, nothing on public routes, migration upgrade, `alembic check` and downgrade on Postgres.
+
+### 87.8 Effort
+
+Medium: about 1.5 days. The click path, role calls, safety check and deferred reply are new. Components, hashing, rate limiting, destination posting and the retry rules are reused from §84 and §67.
+
+### 87.9 Open questions
+
+O1. Add a second button, **I'm in**, that records a per occurrence count for the schedule board ("12 going")? It needs its own table (occurrence, hashed voter) and no role. It is separate from this button on purpose (87.1).
+O2. Should **Notify me** also be enabled by default on new events of a type that has a role? Left off so a new event never changes who is pinged.
+O3. Verify against the Discord documentation before building: that component interactions in a guild carry `member.roles`; the deferred type 5 reply with flags 64 and editing `@original` with the interaction token (valid 15 minutes); the role add and remove routes, their audit log reason header and rate limits; the permission bit values in 87.6; and the role hierarchy rule (a bot can only manage roles below its highest role).
+O4. Should removing a mapping, or deleting an event type, offer to delete the roles Samaya created? Today it only lists them.
+O5. Should the button label carry the type name ("Notify me: Bear Hunt")? Useful when one message lists several events, which reminders never do today.
+O6. Count display in the Insights tab (§85) next to the heatmap, once subscriptions exist.
