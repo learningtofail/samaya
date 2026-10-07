@@ -43,7 +43,7 @@ CALLBACK_UPDATE_MESSAGE = 7
 EPHEMERAL = 64
 NO_MENTIONS = {"parse": []}
 
-_CUSTOM_ID = re.compile(r"^tp:(\d{1,9}):(\d{1,9})$")
+_CUSTOM_ID = re.compile(r"tp:([0-9]{1,9}):([0-9]{1,9})")
 _click_limit = RateLimiter("time_poll_click", max_requests=10, window_seconds=60)
 
 
@@ -55,7 +55,7 @@ def custom_id(poll_id: int, slot_id: int) -> str:
 
 def parse_custom_id(value) -> tuple[int, int] | None:
     """(poll_id, slot_id), or None for anything that is not exactly our format."""
-    match = _CUSTOM_ID.match(value) if isinstance(value, str) else None
+    match = _CUSTOM_ID.fullmatch(value) if isinstance(value, str) else None
     return (int(match.group(1)), int(match.group(2))) if match else None
 
 
