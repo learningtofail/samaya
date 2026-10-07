@@ -3533,3 +3533,7 @@ Built as specified in 87.1 to 87.10, with these notes.
 ### 87.12 Follow-ups
 
 - **Roles at event creation.** The Events form can set the Notify me role only after the event is saved, because the mapping endpoints are keyed by event id and the role is named after the saved event. A new event defaults to Notify me on with no role, so its first reminders go out without the button until someone edits the event and creates or links a role. Fix: let the create form (and `POST /api/events`) accept a role action per server (`create`, `role_id` or none) and apply it in the same request after the event row exists, falling back to the event type's role when none is given. Until then the form says "Save the event first, then edit it to choose its Notify me roles."
+
+### 87.13 Verified on production (2026-10-07)
+
+Checked by hand on the production bot with a throwaway event in a private channel. Worked as specified: a guild component click carries `member.roles`; the deferred private reply; adding and removing the member role through Notify me (PUT and DELETE returned 204); creating a role named after the event; Sync name (rename); linking a role that already exists answers 409 for a duplicate name; the I'm in count line appears and changes on the reminder through the headcount tick, with no role change. Not yet checked against real Discord: Switch inside an exclusive group, the I'm in day and week windows, refusal of a role holding a denied permission, and the bot's top-role position check.
