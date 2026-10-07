@@ -33,6 +33,22 @@ MESSAGE_GONE = "MESSAGE_GONE"
 SCOPES = ("kingdom", "alliance")
 KINGDOM_GROUP = "Kingdom-wide"  # spec §82.9 item 5: the first section of a board
 
+_BOARD_BUTTON = re.compile(r"(bn|bi):([0-9]{1,9})")
+
+
+def board_buttons(destination_id: int) -> list[dict]:
+    """Spec §82.10: the two buttons under a board. Each opens a private menu."""
+    return [{"type": 1, "components": [
+        {"type": 2, "style": 1, "label": "Notify me", "custom_id": f"bn:{destination_id}"},
+        {"type": 2, "style": 3, "label": "I'm in", "custom_id": f"bi:{destination_id}"}]}]
+
+
+def parse_board_button(value) -> tuple[str, int] | None:
+    """("bn" or "bi", destination id), or None."""
+    match = _BOARD_BUTTON.fullmatch(value) if isinstance(value, str) else None
+    return (match.group(1), int(match.group(2))) if match else None
+
+
 _DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 _MARKDOWN = re.compile(r"([\\*_~|>`\[\]])")
@@ -47,6 +63,10 @@ class BoardLine:
     going: int = 0  # spec §87.10: the "I'm in" count, shown only above zero
     duration_hours: float | None = None  # spec §82.9: shown when the event has one
     group: str = ""  # spec §82.9 item 5: section heading ("Kingdom-wide" or an alliance name); empty means no sections
+    event_id: int | None = None  # spec §82.10: what the private menus offer; never rendered
+    day: date | None = None
+    signup: bool = False
+    rsvp: bool = False
 
 
 def escape_markdown(text: str) -> str:
@@ -156,10 +176,11 @@ async def board_lines(db: AsyncSession, dest: AudienceDestination, now: datetime
         merged.setdefault((row.occurrence.id, group), {
             "start": when, "name": row.event.name, "group": group, "cancelled": row.occurrence.status == "cancelled",
             "key": (row.event.id, row.occurrence.occurrence_date), "rsvp": row.event.rsvp_enabled,
-            "duration": row.event.duration_hours})
+            "signup": row.event.signup_enabled, "duration": row.event.duration_hours})
     from services.signup import rsvp_counts  # imported here: signup imports event_engine, as this module does
     going = await rsvp_counts(db, [e["key"] for e in merged.values() if e["rsvp"] and not e["cancelled"]])
-    lines = [BoardLine(e["start"], e["name"], (), e["cancelled"], going.get(e["key"], 0), e["duration"], e["group"])
+    lines = [BoardLine(e["start"], e["name"], (), e["cancelled"], going.get(e["key"], 0), e["duration"], e["group"],
+                       e["key"][0], e["key"][1], e["signup"], e["rsvp"])
              for e in merged.values()]
     return title, lines
 
@@ -257,7 +278,8 @@ async def _refresh(session_factory, discord, destination_id: int, now: datetime,
 
     outcome = "edited"
     if message_id:
-        ok, err = await discord.edit_channel_message(token, channel, message_id, text, no_mentions=True)
+        ok, err = await discord.edit_channel_message(token, channel, message_id, text, no_mentions=True,
+                                                    components=board_buttons(destination_id))
         if ok:
             await _store(session_factory, destination_id, board_hash=new_hash, board_error=None, board_refreshed_at=now)
             return "edited"
@@ -267,7 +289,8 @@ async def _refresh(session_factory, discord, destination_id: int, now: datetime,
         outcome = "recreated"
     else:
         outcome = "posted"
-    new_id, err = await discord.post_channel_message(token, channel, text, no_mentions=True)
+    new_id, err = await discord.post_channel_message(token, channel, text, no_mentions=True,
+                                                      components=board_buttons(destination_id))
     if not new_id:
         await _store(session_factory, destination_id, board_message_id=None, board_hash=None, board_error=err[:255],
                      board_refreshed_at=now)

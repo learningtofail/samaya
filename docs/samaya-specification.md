@@ -3173,14 +3173,25 @@ Requested after the first production boards: links to the public pages, better f
 6. **Unchanged.** Scopes, the 7 day window, leadership-only exclusion, mention safety (`allowed_mentions: {parse: []}`), error retry every 10 minutes, and one stored message edited in place are as in 82.2. The first refresh after this ships edits each existing board once, because the text changed.
 7. **Tests.** Render: header and Last edit line, links for each scope (Kingdom lists only alliances with events, an alliance board lists one), no link or embed leaks (angle brackets), duration formats and absence, budget keeps the footer when truncating. Engine: heartbeat edits at 15 minutes and not before, hash ignores the Last edit line, an unchanged board makes no call inside 15 minutes, error retry unchanged.
 
-### 82.10 Event links and per-event buttons (proposal, not built)
+### 82.10 Private menus under the board (built); event links (not built)
 
 Asked for 2026-10-07: each board line links its Discord event, and each event offers Notify me and I'm in.
 
 1. **Rule from the owner: no event may be lost from the list to make room for links.** A Discord event link adds about 70 characters per line, which on today's 1900 character message would cut the list from about 15 events to about 10. So links are added only together with more room (decision 2), or not at all.
 2. **Room.** Move the event list into an embed description (4096 characters, about twice the room), keep the footer links in the message text, and make the event name the link (`[Name](<https://discord.com/events/{guild}/{event}>)`). The Discord event id comes from the posted `discord_event` delivery for the destination's server; leadership-only events and events without a calendar entry show a plain name. Not built.
-3. **Buttons.** Discord allows buttons only under a message (25 at most), and a select menu cannot show a per-player state or re-fire on the same choice. So the board carries two buttons, **Notify me** and **I'm in**, each opening a private multi-select menu that lists up to 25 events (Notify me) or occurrences (I'm in) with the player's current state ticked (`default` on each option). Changing the ticks adds and removes roles, or records and withdraws attendance, with the same rules as the reminder buttons (role safety, Switch, attendance windows, rate limit). Needs a select menu interaction handler (component type 3, `data.values`), and the `default` option flag must be verified against real Discord before it is relied on. Not built.
-4. **Status.** Waiting for the owner to confirm the private menu design (decision 3) before any code. Until then boards stay as in 82.9 with no links and no buttons.
+3. **Buttons.** Discord allows buttons only under a message (25 at most), and a select menu cannot show a per-player state or re-fire on the same choice. So the board carries two buttons, **Notify me** and **I'm in**, each opening a private multi-select menu that lists up to 25 events (Notify me) or occurrences (I'm in) with the player's current state ticked (`default` on each option). Changing the ticks adds and removes roles, or records and withdraws attendance, with the same rules as the reminder buttons (role safety, Switch, attendance windows, rate limit). Needs a select menu interaction handler (component type 3, `data.values`), and the `default` option flag must be verified against real Discord before it is relied on. **Approved 2026-10-07 and built** (see 82.10.1).
+4. **Status.** The owner approved decision 3 ("Yes, add the two private menus."). Decisions 1 and 2 (links, embed) are not built; boards still carry no event links.
+
+#### 82.10.1 As built
+
+- The board message carries one action row: **Notify me** (`bn:{destination}`) and **I'm in** (`bi:{destination}`). Every post and edit sends it, so an existing board gains the buttons at its next edit (at most 15 minutes, the heartbeat).
+- A click answers at once with a private reply holding one string select (`bm:n:{destination}` or `bm:i:{destination}`, `min_values` 0, `max_values` the option count, at most 25 options). Notify me offers the distinct, non-cancelled events on the board that have signup enabled and a Notify me role in the clicker's server, ticked when the role is in `member.roles`. I'm in offers upcoming, non-cancelled occurrences that take attendance and have a reminder in that server, value `{event}:{YYYYMMDD}`, ticked when the player has an RSVP.
+- A submit recomputes the offered list, ignores any value not in it, and applies the difference. The reply is replaced (callback type 7, components removed) and, for Notify me, edited again when the role calls finish.
+- Notify me: removals first, then additions in board order. An addition is skipped, and said so, when the player still holds another role of the same exclusive group; unticking the old one in the same submit makes it a switch. Role safety, the bot-position check and error storage are the reminder button's (`_apply_notify`).
+- I'm in: withdrawals first, then additions. An addition is skipped, and said so, when the attendance window of its group already holds another RSVP. Database only; no Discord call.
+- The menus share the 10 per minute click limit with the reminder buttons. A destination whose board is off, or a click from another server, answers "This button is no longer active."
+- Code: `services/board_menus.py`, dispatched from `discord_commands.handle_interaction_ex` before the reminder buttons. Tests: `tests/test_board_menus.py`.
+- Unverified against real Discord: select menus in a private reply, the `default` flag, and replacing the menu with type 7. Test with a throwaway event before relying on it.
 
 ### 82.7 Open questions
 

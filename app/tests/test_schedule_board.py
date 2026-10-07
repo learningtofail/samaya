@@ -429,7 +429,7 @@ class TestFailures:
             def __init__(self):
                 self.flags = []
 
-            async def post_channel_message(self, token, channel_id, content, *, no_mentions=False):
+            async def post_channel_message(self, token, channel_id, content, *, no_mentions=False, components=None):
                 self.flags.append(no_mentions)
                 return "m1", ""
         await _event(sf, configured, name="@everyone Hunt")
