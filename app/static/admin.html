@@ -24,6 +24,7 @@
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="events">Events</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="schedule">Schedule</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="delivery">Delivery log</button></li>
+      <li class="tabs__item"><button type="button" class="tabs__link" data-view="polls">Polls</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="insights">Insights</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="types">Event types</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="players">Players</button></li>
@@ -226,6 +227,37 @@
     <div class="about-page__body">
       <p>A type is a starting point for new events: a color and the duration, repeat interval, message, reminders and role mention a new event of that type begins with. Changing a type never changes events that already exist.</p>
       <p>Types belong to a kingdom and are shared by every alliance in it. A type that events still use cannot be deleted. Creating and editing types needs kingdom coordinator access.</p>
+    </div>
+  </details>
+</section>
+<section id="v-polls" class="view" aria-labelledby="h-polls">
+  <div class="view__head">
+    <h2 class="view__title" id="h-polls">Polls</h2>
+    <button type="button" class="pf-v6-c-button pf-m-primary" id="btnNewPoll">New poll</button>
+  </div>
+  <div class="filters filters--panel" role="group" aria-label="Filter polls">
+    <div class="filters__item">
+      <label class="filters__label" for="pollsAlliance">Alliance</label>
+      <select class="pf-v6-c-form-control" id="pollsAlliance"></select>
+    </div>
+    <div class="filters__item">
+      <label class="filters__label" for="pollsStatus">Status</label>
+      <select class="pf-v6-c-form-control" id="pollsStatus">
+        <option value="">All</option>
+        <option value="open" selected>Open</option>
+        <option value="closed">Closed</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+    </div>
+  </div>
+  <p class="count" id="pollsCount" role="status"></p>
+  <div id="pollsList"></div>
+  <details class="about-page">
+    <summary>About this tab</summary>
+    <div class="about-page__body">
+      <p>A poll proposes two to six UTC start times. Samaya posts it to the audiences you choose, with one button per time. Players tap every time that works for them and tap again to take a vote back. The counts in the Discord message update as people tap.</p>
+      <p>Samaya stores a one-way code for each voter, never their Discord ID, and shows counts only, never names. Counts are advisory: anyone who can see the channel can vote, and one person with several accounts can skew them. You decide the winner.</p>
+      <p>A poll closes by itself after the time you set (up to 14 days) or when you close it. Closing removes the buttons and writes the final tally. Nothing changes on the schedule on its own: after closing, use <strong>Move occurrence</strong> (for a poll linked to an occurrence) or <strong>New event</strong> to apply a time. At most three polls per alliance can be open at once. Polls are kept for 90 days. Use <strong>Suggest slots</strong> in the new poll form to fill in free times from the Insights tab's finder.</p>
     </div>
   </details>
 </section>
@@ -1339,6 +1371,55 @@
   </div>
 </div>
 
+<div class="pf-v6-c-backdrop" id="pollModal" data-close-fn="closePollModal">
+  <div class="pf-v6-l-bullseye">
+    <div class="pf-v6-c-modal-box pf-m-lg" role="dialog" aria-modal="true" aria-labelledby="pollModalTitle">
+      <header class="pf-v6-c-modal-box__header">
+        <h2 class="pf-v6-c-modal-box__title" id="pollModalTitle">New poll</h2>
+        <button type="button" class="samaya-modal-close" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="pf-v6-c-modal-box__body">
+        <form class="pf-v6-c-form" id="pollForm" novalidate>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="pollTitle"><span class="pf-v6-c-form__label-text">Question</span></label>
+            <input class="pf-v6-c-form-control" type="text" id="pollTitle" maxlength="80" placeholder="When should Bear Hunt run?">
+          </div>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="pollAlliance"><span class="pf-v6-c-form__label-text">Alliance</span></label>
+            <select class="pf-v6-c-form-control" id="pollAlliance"></select>
+          </div>
+          <fieldset class="pf-v6-c-form__group check-group" id="pollAudiences">
+            <legend class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Post to</span></legend>
+          </fieldset>
+          <fieldset class="pf-v6-c-form__group check-group">
+            <legend class="pf-v6-c-form__label"><span class="pf-v6-c-form__label-text">Times (UTC), 2 to 6</span></legend>
+            <div id="pollSlots" class="poll-slots"></div>
+            <div class="row-actions">
+              <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnAddPollSlot">Add a time</button>
+              <button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" id="btnSuggestSlots">Suggest slots</button>
+            </div>
+          </fieldset>
+          <div class="pf-v6-c-form__group">
+            <label class="pf-v6-c-form__label" for="pollCloses"><span class="pf-v6-c-form__label-text">Closes after</span></label>
+            <select class="pf-v6-c-form-control" id="pollCloses">
+              <option value="24">24 hours</option>
+              <option value="48" selected>48 hours</option>
+              <option value="72">3 days</option>
+              <option value="168">7 days</option>
+              <option value="336">14 days</option>
+            </select>
+          </div>
+          <p class="form-errors hidden" id="pollError" role="alert"></p>
+        </form>
+      </div>
+      <footer class="pf-v6-c-modal-box__footer">
+        <button type="button" class="pf-v6-c-button pf-m-primary" id="btnSavePoll">Post poll</button>
+        <button type="button" class="pf-v6-c-button pf-m-link" data-modal-dismiss>Cancel</button>
+      </footer>
+    </div>
+  </div>
+</div>
+
 <div class="pf-v6-c-backdrop" id="playerModal" data-close-fn="closePlayerModal">
   <div class="pf-v6-l-bullseye">
     <div class="pf-v6-c-modal-box pf-m-md" role="dialog" aria-modal="true" aria-labelledby="playerModalTitle">
@@ -1426,6 +1507,7 @@
 <script src="/static/js/setup.js"></script>
 <script src="/static/js/appearance.js"></script>
 <script src="/static/js/insights.js"></script>
+<script src="/static/js/polls.js"></script>
 <script src="/static/js/players.js"></script>
 <script src="/static/js/giftcodes.js"></script>
 <script src="/static/js/audit.js"></script>
