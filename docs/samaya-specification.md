@@ -3529,3 +3529,7 @@ Built as specified in 87.1 to 87.10, with these notes.
 - **Admin UI.** `static/js/signup.js` holds the shared role rows and the attendance groups panel. The Events form has a "Buttons on reminders" group (the three checkboxes, the group select, the role rows in edit mode only, disabled for leadership-only). The Event types tab has an Attendance groups table and a Notify me roles dialog per type. The Schedule tab shows a green "N in" label.
 - **Migration.** `a1f0c0de0020`, chained from 0019, additive; verified on Postgres (upgrade, `alembic check`, downgrade, upgrade).
 - Tests: `tests/test_signup.py`, `tests/test_signup_api.py`.
+
+### 87.12 Follow-ups
+
+- **Roles at event creation.** The Events form can set the Notify me role only after the event is saved, because the mapping endpoints are keyed by event id and the role is named after the saved event. A new event defaults to Notify me on with no role, so its first reminders go out without the button until someone edits the event and creates or links a role. Fix: let the create form (and `POST /api/events`) accept a role action per server (`create`, `role_id` or none) and apply it in the same request after the event row exists, falling back to the event type's role when none is given. Until then the form says "Save the event first, then edit it to choose its Notify me roles."
