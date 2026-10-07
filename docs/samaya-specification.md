@@ -3306,7 +3306,18 @@ Heatmap: counts by weekday and hour, cancelled and inactive excluded, moved occu
 
 Medium: about 1 day. All queries and rules are new, but no schema, no Discord calls and no writes.
 
-### 85.8 Open questions
+### 85.8 As built
+
+Built as specified, with these differences and findings.
+
+- **Visibility.** The panels use the same visibility as the Schedule tab: events the alliance owns, events with it in the audience, and kingdom-wide events of the caller's Kingdoms. A leadership-only kingdom-wide event therefore shows to every Kingdom member who can reach an alliance, which is narrower than the wording in 85.2 but identical to what the Schedule tab already shows. Nothing is public.
+- **Heatmap** counts occurrence starts by weekday and UTC hour (not busy hours). Moved occurrences count at their new time. Cancelled occurrences and inactive events are left out.
+- **Free slots** rank by clearance (minutes to the nearest event, larger first), then by start. An empty schedule therefore returns the earliest quarter-hours. Picks never overlap each other. Up to five are returned.
+- **Retention.** `deliveries` rows are never pruned, so the 60 day trend window is always complete.
+- **Coverage** counts per alliance and run only. No player ID or name is returned.
+- Tests: `tests/test_analytics.py` (pure rules) and `tests/test_analytics_api.py` (endpoints and permissions). No migration.
+
+### 85.9 Open questions
 
 O1. Is 30 minutes the right block for an event with no duration?
 O2. Should free-slot ranking prefer hours that past events or polls favoured? Left out: it would need attendance data (RSVP or interest counts, from the Discord feature list) and is worth revisiting after that exists.

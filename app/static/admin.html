@@ -24,6 +24,7 @@
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="events">Events</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="schedule">Schedule</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="delivery">Delivery log</button></li>
+      <li class="tabs__item"><button type="button" class="tabs__link" data-view="insights">Insights</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="types">Event types</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="players">Players</button></li>
       <li class="tabs__item"><button type="button" class="tabs__link" data-view="giftcodes">Gift codes</button></li>
@@ -225,6 +226,114 @@
     <div class="about-page__body">
       <p>A type is a starting point for new events: a color and the duration, repeat interval, message, reminders and role mention a new event of that type begins with. Changing a type never changes events that already exist.</p>
       <p>Types belong to a kingdom and are shared by every alliance in it. A type that events still use cannot be deleted. Creating and editing types needs kingdom coordinator access.</p>
+    </div>
+  </details>
+</section>
+<section id="v-insights" class="view" aria-labelledby="h-insights">
+  <div class="view__head"><h2 class="view__title" id="h-insights">Insights</h2></div>
+  <div class="filters filters--panel" role="group" aria-label="Scope of the insights">
+    <div class="filters__item">
+      <label class="filters__label" for="insightsAlliance">Alliance</label>
+      <select class="pf-v6-c-form-control" id="insightsAlliance"></select>
+    </div>
+    <div class="filters__item">
+      <label class="filters__label" for="insightsDays">Look ahead</label>
+      <select class="pf-v6-c-form-control" id="insightsDays">
+        <option value="14">14 days</option>
+        <option value="28" selected>28 days</option>
+        <option value="60">60 days</option>
+      </select>
+    </div>
+  </div>
+  <p class="count" id="insightsStatus" role="status"></p>
+
+  <section class="panel" aria-labelledby="h-insights-heat">
+    <h3 class="panel__title" id="h-insights-heat">When events happen</h3>
+    <p class="samaya-muted" id="heatSummary"></p>
+    <div class="heat-wrap" role="region" aria-label="Events by weekday and hour, scrollable" tabindex="0">
+      <table class="heat" id="heatTable">
+        <caption class="sr-only">Number of event occurrences by weekday and UTC hour</caption>
+        <thead id="heatHead"></thead>
+        <tbody id="heatBody"></tbody>
+      </table>
+    </div>
+    <p class="heat-legend samaya-muted">Hours are UTC. Darker cells have more events. <span class="heat-legend__swatches" aria-hidden="true"><span class="heat__swatch heat--1"></span><span class="heat__swatch heat--2"></span><span class="heat__swatch heat--3"></span><span class="heat__swatch heat--4"></span></span> few to many</p>
+  </section>
+
+  <section class="panel" aria-labelledby="h-insights-overlaps">
+    <h3 class="panel__title" id="h-insights-overlaps">Events that overlap</h3>
+    <p class="samaya-muted" id="overlapSummary"></p>
+    <div class="table-wrap">
+      <table class="pf-v6-c-table pf-m-grid-md responsive-table">
+        <caption class="sr-only">Pairs of events that run at the same time</caption>
+        <thead><tr class="pf-v6-c-table__tr"><th class="pf-v6-c-table__th" scope="col">Event</th><th class="pf-v6-c-table__th" scope="col">Overlaps with</th><th class="pf-v6-c-table__th" scope="col">When (UTC)</th><th class="pf-v6-c-table__th" scope="col">Minutes</th><th class="pf-v6-c-table__th" scope="col">Same channel</th></tr></thead>
+        <tbody id="overlapBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-insights-slots">
+    <h3 class="panel__title" id="h-insights-slots">Find a free slot</h3>
+    <form class="slot-form" id="slotForm">
+      <div class="filters__item">
+        <label class="filters__label" for="slotDuration">Length (minutes)</label>
+        <input class="pf-v6-c-form-control" id="slotDuration" type="number" min="15" max="480" step="15" value="60" required>
+      </div>
+      <div class="filters__item">
+        <label class="filters__label" for="slotDays">Within (days)</label>
+        <input class="pf-v6-c-form-control" id="slotDays" type="number" min="1" max="30" value="14" required>
+      </div>
+      <div class="filters__item">
+        <label class="filters__label" for="slotFrom">Earliest start (UTC hour)</label>
+        <input class="pf-v6-c-form-control" id="slotFrom" type="number" min="0" max="23" value="0" required>
+      </div>
+      <div class="filters__item">
+        <label class="filters__label" for="slotTo">Must end by (UTC hour)</label>
+        <input class="pf-v6-c-form-control" id="slotTo" type="number" min="1" max="24" value="24" required>
+      </div>
+      <fieldset class="pf-v6-c-form__group check-group slot-form__alliances" id="slotAlliances">
+        <legend class="filters__label">Keep clear of these alliances (none ticked means all)</legend>
+      </fieldset>
+      <div class="row-actions"><button type="submit" class="pf-v6-c-button pf-m-primary" id="btnFindSlots">Find slots</button></div>
+    </form>
+    <p class="samaya-muted" id="slotSummary" role="status"></p>
+    <ol class="slot-list" id="slotList"></ol>
+  </section>
+
+  <section class="panel" aria-labelledby="h-insights-trends">
+    <h3 class="panel__title" id="h-insights-trends">Reminder delivery</h3>
+    <div class="filters">
+      <div class="filters__item">
+        <label class="filters__label" for="trendWindow">Window</label>
+        <select class="pf-v6-c-form-control" id="trendWindow"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="60">Last 60 days</option></select>
+      </div>
+      <div class="filters__item">
+        <label class="filters__label" for="trendBy">Group by</label>
+        <select class="pf-v6-c-form-control" id="trendBy"><option value="day">Day</option><option value="destination">Destination</option></select>
+      </div>
+    </div>
+    <p class="samaya-muted" id="trendSummary"></p>
+    <div class="table-wrap">
+      <table class="pf-v6-c-table pf-m-grid-md responsive-table">
+        <caption class="sr-only">Reminders due, posted and failed, with how late they were</caption>
+        <thead id="trendHead"></thead>
+        <tbody id="trendBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-insights-coverage">
+    <h3 class="panel__title" id="h-insights-coverage">Gift code coverage</h3>
+    <p class="samaya-muted">Share of each alliance's listed players who redeemed or already had the code, for the latest runs. Counts only, never names or IDs.</p>
+    <div id="coverageBody"></div>
+  </section>
+
+  <details class="about-page">
+    <summary>About this tab</summary>
+    <div class="about-page__body">
+      <p>Insights reads what Samaya already stores and changes nothing. The heatmap counts occurrences of active, not cancelled events by weekday and UTC hour over the look-ahead window; a moved occurrence counts at its new time. Overlaps lists events whose times actually intersect. An event with no duration counts as 30 minutes. Events that merely touch do not overlap.</p>
+      <p>Find a free slot proposes up to five start times on a quarter-hour grid that do not collide with any event you can see (or only the alliances you tick; kingdom-wide events always count). It prefers the times furthest from the nearest event and never returns two slots that overlap each other.</p>
+      <p>Reminder delivery shows, per day or per destination, how many reminders were due, posted and failed, and how late the posted ones were (median and 95th percentile). Merged sends count once. Gift code coverage is a per-alliance percentage from the latest runs. You see the same alliances you can see everywhere else, and nothing here is public.</p>
     </div>
   </details>
 </section>
@@ -1316,6 +1425,7 @@
 <script src="/static/js/platform.js"></script>
 <script src="/static/js/setup.js"></script>
 <script src="/static/js/appearance.js"></script>
+<script src="/static/js/insights.js"></script>
 <script src="/static/js/players.js"></script>
 <script src="/static/js/giftcodes.js"></script>
 <script src="/static/js/audit.js"></script>

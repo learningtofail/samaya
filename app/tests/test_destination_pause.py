@@ -2,9 +2,9 @@
 without calling Discord, shown in the delivery health, and resumed by hand."""
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from models.db import AuditLog, AudienceDestination
+from models.db import AuditLog, AudienceDestination, EventOccurrence
 from services.event_engine import PAUSE_AFTER_FAILURES, run_delivery_tick
 from tests.unified_helpers import UTC, add_audience, deliveries, make_event, sync
 
@@ -143,6 +143,11 @@ class TestResumeAndHealth:
         after = await _destination(sf)
         assert after.paused_at is None and after.consecutive_failures == 0 and after.pause_reason is None
         fake.send_error = ""
+        # The retry endpoint reads the real clock, so keep the occurrence in the future whatever today is.
+        async with sf() as s:
+            await s.execute(update(EventOccurrence).where(EventOccurrence.id == skipped.occurrence_id).values(
+                start_datetime_utc=datetime.now(UTC) + timedelta(days=1), end_datetime_utc=None))
+            await s.commit()
         assert (await client.post(f"{A}/deliveries/{skipped.id}/retry")).status_code == 200
         await run_delivery_tick(sf, fake, DAY1 + timedelta(days=PAUSE_AFTER_FAILURES, minutes=1))
         retried = [d for d in await deliveries(sf, event_id, kind="reminder") if d.id == skipped.id][0]
