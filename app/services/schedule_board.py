@@ -8,6 +8,7 @@ text changed. Discord is injected like in `event_engine`.
 """
 import hashlib
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -26,6 +27,8 @@ WINDOW_DAYS = 7
 MAX_CHARS = 1900
 BATCH_SIZE = 20
 ERROR_RETRY_AFTER = timedelta(minutes=10)
+HEARTBEAT_AFTER = timedelta(minutes=15)  # spec §82.9: refresh the Last edit line even when nothing changed
+DEFAULT_PUBLIC_BASE_URL = "https://ks138.taraka.dev"
 MESSAGE_GONE = "MESSAGE_GONE"
 SCOPES = ("kingdom", "alliance")
 
@@ -41,32 +44,66 @@ class BoardLine:
     alliances: tuple[str, ...] = ()
     cancelled: bool = False
     going: int = 0  # spec §87.10: the "I'm in" count, shown only above zero
+    duration_hours: float | None = None  # spec §82.9: shown when the event has one
 
 
 def escape_markdown(text: str) -> str:
     return _MARKDOWN.sub(r"\\\1", text).replace("@", "@​")
 
 
+def public_base_url() -> str:
+    return (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL).rstrip("/")
+
+
+def format_duration(hours: float | None) -> str:
+    """`2 h`, `1.5 h` or `45 min`; empty for an event with no duration."""
+    if not hours or hours <= 0:
+        return ""
+    minutes = round(hours * 60)
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60} h" if minutes % 60 == 0 else f"{minutes / 60:g} h"
+
+
 def _line_text(line: BoardLine) -> str:
     clock = f"`{line.start:%H:%M}`"
     name = escape_markdown(line.name)
-    stamp = f"<t:{int(line.start.timestamp())}:R>"
     if line.cancelled:
         return f"{clock} ~~{name}~~ cancelled"
-    names = f" · {escape_markdown(', '.join(line.alliances))}" if line.alliances else ""
-    going = f" · {line.going} in" if line.going > 0 else ""
-    return f"{clock} {name}{names}{going} {stamp}"
+    stamp = int(line.start.timestamp())
+    parts = [
+        escape_markdown(", ".join(line.alliances)) if line.alliances else "",
+        f"{line.going} in" if line.going > 0 else "",
+        format_duration(line.duration_hours),
+        f"<t:{stamp}:t> your time",
+        f"<t:{stamp}:R>",
+    ]
+    return f"{clock} **{name}** · " + " · ".join(p for p in parts if p)
 
 
-def render_board(title: str, lines: list[BoardLine], today: date) -> str:
-    """The message text. Pure. `lines` need not be sorted."""
-    head = f"**{escape_markdown(title)}** · next {WINDOW_DAYS} days, times in UTC"
+def _footer(links: list[tuple[str, str]]) -> str:
+    if not links:
+        return ""
+    return "\n\n🔗 " + " · ".join(f"[{escape_markdown(label)}](<{url}>)" for label, url in links)
+
+
+def render_board(title: str, lines: list[BoardLine], today: date, links: list[tuple[str, str]] | None = None,
+                 updated: datetime | None = None) -> str:
+    """The message text. Pure. `lines` need not be sorted. `updated` adds the Last edit line (spec §82.9);
+    the hash that decides whether to edit is taken without it."""
+    head = f"📅 **{escape_markdown(title)}**"
+    if updated is not None:
+        stamp = int(updated.timestamp())
+        head += f"\nLast edit: <t:{stamp}:f> (<t:{stamp}:R>)"
+    head += f"\nNext {WINDOW_DAYS} days · times in UTC"
+    footer = _footer(links or [])
     if not lines:
-        return f"{head}\n\nNothing is scheduled."
+        return f"{head}\n\nNothing is scheduled.{footer}"
     out = [head]
     day: date | None = None
     shown = 0
     ordered = sorted(lines, key=lambda x: (x.start, x.name))
+    budget = MAX_CHARS - len(footer) - 60
     for line in ordered:
         block = []
         if line.start.date() != day:
@@ -74,12 +111,12 @@ def render_board(title: str, lines: list[BoardLine], today: date) -> str:
             marker = " (today)" if day == today else ""
             block.append(f"\n**{_DAYS[day.weekday()]} {day.day} {_MONTHS[day.month - 1]}**{marker}")
         block.append(_line_text(line))
-        if len("\n".join(out + block)) > MAX_CHARS - 60:
+        if len("\n".join(out + block)) > budget:
             out.append(f"\n…and {len(ordered) - shown} more. The website has the full schedule.")
-            return "\n".join(out)
+            break
         out.extend(block)
         shown += 1
-    return "\n".join(out)
+    return "\n".join(out) + footer
 
 
 def content_hash(text: str) -> str:
@@ -109,14 +146,32 @@ async def board_lines(db: AsyncSession, dest: AudienceDestination, now: datetime
             continue
         entry = merged.setdefault(row.occurrence.id, {
             "start": when, "name": row.event.name, "names": [], "cancelled": row.occurrence.status == "cancelled",
-            "key": (row.event.id, row.occurrence.occurrence_date), "rsvp": row.event.rsvp_enabled})
+            "key": (row.event.id, row.occurrence.occurrence_date), "rsvp": row.event.rsvp_enabled,
+            "duration": row.event.duration_hours})
         if dest.board_scope != "alliance" and row.event.scope != "kingdom-wide" and row.tenant.name not in entry["names"]:
             entry["names"].append(row.tenant.name)
     from services.signup import rsvp_counts  # imported here: signup imports event_engine, as this module does
     going = await rsvp_counts(db, [e["key"] for e in merged.values() if e["rsvp"] and not e["cancelled"]])
-    lines = [BoardLine(e["start"], e["name"], tuple(sorted(e["names"])), e["cancelled"], going.get(e["key"], 0))
+    lines = [BoardLine(e["start"], e["name"], tuple(sorted(e["names"])), e["cancelled"], going.get(e["key"], 0), e["duration"])
              for e in merged.values()]
     return title, lines
+
+
+async def board_links(db: AsyncSession, dest: AudienceDestination, lines: list[BoardLine]) -> list[tuple[str, str]]:
+    """Public page links for the footer (spec §82.9): an alliance board links its own page; a Kingdom board links
+    the combined page and each alliance that has an event in the window."""
+    base = public_base_url()
+    if dest.board_scope == "alliance":
+        tenant = await db.get(Tenant, dest.board_tenant_id) if dest.board_tenant_id else None
+        return [(f"{tenant.name} schedule", f"{base}/events/{tenant.slug}")] if tenant else []
+    links = [("Full schedule", f"{base}/events")]
+    names = {name for line in lines if not line.cancelled for name in line.alliances}
+    if names:
+        kingdom_id = dest.audience.kingdom_id
+        tenants = (await db.execute(select(Tenant).where(Tenant.kingdom_id == kingdom_id, Tenant.name.in_(names))
+                                    .order_by(Tenant.name))).scalars().all()
+        links += [(t.name, f"{base}/events/{t.slug}") for t in tenants]
+    return links
 
 
 async def _store(session_factory, destination_id: int, **values) -> None:
@@ -151,12 +206,15 @@ async def _refresh(session_factory, discord, destination_id: int, now: datetime,
         paused = dest.paused_at is not None
         last = ensure_utc(dest.board_refreshed_at) if dest.board_refreshed_at else None
         had_error = bool(dest.board_error)
-        text = None
+        text = body = None
         error = None
         if scope is not None and not paused:
             try:
                 title, lines = await board_lines(session, dest, now)
-                text = render_board(title, lines, now.astimezone(timezone.utc).date())
+                links = await board_links(session, dest, lines)
+                today = now.astimezone(timezone.utc).date()
+                body = render_board(title, lines, today, links)
+                text = render_board(title, lines, today, links, updated=now)
             except ValueError as exc:
                 error = str(exc)
 
@@ -181,9 +239,10 @@ async def _refresh(session_factory, discord, destination_id: int, now: datetime,
         return "error"
     if had_error and last is not None and now - last < ERROR_RETRY_AFTER and not force:
         return "skipped"
-    new_hash = content_hash(text)
+    new_hash = content_hash(body)
     if message_id and new_hash == stored_hash and not had_error and not force:
-        return "unchanged"
+        if last is None or now - last < HEARTBEAT_AFTER:
+            return "unchanged"
     if not token:
         await _store(session_factory, destination_id, board_error="No Discord bot token configured for this server",
                      board_refreshed_at=now)
