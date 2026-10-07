@@ -3207,3 +3207,168 @@ The id is stored; rule a (earlier deleted, latest kept, other channels untouched
 
 O1. Confirm on a real server that deleting the bot's own message needs no Manage Messages.
 O2. Should the last reminder also go when the event starts rather than ends? One constant if so.
+
+## 84. Time polls
+
+Status: design only. Not built. Written 2026-10-07 after the §80 roadmap items 1 to 4.
+
+### 84.1 Goal
+
+Choosing a time is where leaders lose the most time: a message asking "what works?", replies scattered over a channel, a hand count. A leader proposes 2 to 6 UTC time slots, players tap the ones that work in Discord, Samaya tallies, and the leader picks the winner and applies it to the schedule. Nothing is applied automatically.
+
+### 84.2 Decisions
+
+1. **Buttons and our own storage, not native Discord polls.** A native poll is per message and per server, cannot feed a result back into Samaya, and cannot give one Kingdom-wide count across several servers. Buttons use the signed interactions endpoint that already exists (§70), so no gateway connection is added. Native polls stay available to leaders by hand for one-offs.
+2. **Who creates:** anyone who may edit the alliance's events (`require_not_viewer`). A Kingdom-wide poll needs a Kingdom coordinator, as Kingdom-wide events do. Where it posts: one or more of the Audiences linked to the poll's alliance; one message per destination, posted through the same destination resolution as reminders (a shared channel is one message, §67.3). A poll in a leadership-only Audience is allowed.
+3. **Slots:** 2 to 6, distinct, in the future, in UTC, shown as `<t:unix:F>` plus the UTC clock time so every viewer sees their own time and the UTC time. Six buttons fit in two Discord action rows (5 per row, 5 rows is the limit). A voter may tap several slots; tapping a slot again removes the vote.
+4. **Counts are live in the message.** A click is answered with the interaction response that updates the message (callback type 7), recomputed from the database, so concurrent clicks converge and no extra Discord call is made. Other copies of the poll (other channels) are brought up to date by the per-minute poll pass, which edits a message only when its text hash changed and at most once every 2 minutes per message (the §82 pattern).
+5. **Voters are not stored as Discord IDs.** A vote row holds `HMAC-SHA256(SECRET_KEY, poll_id:discord_user_id)`, enough to toggle and to count each person once, not enough to list or contact voters. Leaders and the Discord message show counts per slot only, never names. Rotating `SECRET_KEY` loses the ability to untoggle old votes; counts stay.
+6. **Who may vote:** anyone who can see the channel and whose interaction comes from one of the guilds the poll was posted to. It is not tied to the roster, because Samaya cannot verify that a Discord user owns a game ID (§80.1). Counts are advisory and one person with several accounts can skew them; the leader decides.
+7. **Closing:** at `closes_at` (default 48 hours, at most 14 days) or by hand. Closing removes the buttons, edits each message to the final tally and marks the leading slot. A tie shows as a tie. The leader then chooses a winner in the console:
+   - a poll linked to an occurrence offers **Move occurrence to this slot**, which calls the existing occurrence move (audited there);
+   - any other poll offers **New event at this slot**, which opens the event form prefilled with the date and time. Neither runs on its own.
+8. **Limits:** 3 open polls per alliance, one click rate limit of 10 per minute per Discord user (`services/rate_limit.py`), poll titles up to 80 characters. Polls and votes older than 90 days are deleted by the daily job.
+9. **Never public.** No public route, no ICS entry, nothing in `public_rows`. The only public-facing text is the Discord message itself.
+10. **Failures do not lose votes.** Votes are stored before any Discord call. A failed message edit is stored on the message row (`error`), retried every 10 minutes, and shown in the console, as for boards.
+
+### 84.3 Data (one Alembic revision, additive, downgrade drops the tables)
+
+The id is the next free one after whatever has merged. §78 reserves `0017` and `0018`, so this is expected to be `a1f0c0de0019`.
+
+`time_polls`: `id`, `kingdom_id` (FK, `CASCADE`), `tenant_id` (FK, `CASCADE`, null for Kingdom-wide), `title` String(80), `occurrence_id` (FK `event_occurrences`, `SET NULL`), `status` (`open`, `closed`, `cancelled`; CHECK), `closes_at`, `closed_at`, `winner_slot_id` (FK, `SET NULL`), `created_by` (FK users, `SET NULL`), `created_at`.
+
+`time_poll_slots`: `id`, `poll_id` (FK, `CASCADE`), `starts_at` timestamptz, `position`. Unique `(poll_id, starts_at)`.
+
+`time_poll_votes`: `slot_id` (FK, `CASCADE`), `voter_hash` String(64). Primary key `(slot_id, voter_hash)`.
+
+`time_poll_messages`: `id`, `poll_id` (FK, `CASCADE`), `destination_id` (FK `audience_destinations`, `SET NULL`), `guild_id`, `channel_id`, `message_id`, `content_hash`, `error`, `refreshed_at`. Unique `(poll_id, channel_id)`.
+
+### 84.4 Engine and Discord
+
+`services/time_poll.py`: pure `render_poll(poll, slots, counts)` and `custom_id` build and parse (`tp:{poll_id}:{slot_id}`, integers only, anything else is ignored), `record_vote` (toggle, in one transaction), `post_poll`, `run_poll_tick` (edit changed messages, close expired polls), `close_poll`. `discord_api.post_channel_message` and `edit_channel_message` gain an optional `components` argument; `FakeDiscord` the same. `discord_commands.handle_interaction` gains component interactions (type 3). Every response carries `allowed_mentions: {parse: []}`. A click on a closed, cancelled or unknown poll gets an ephemeral "This poll is closed." Poll text is escaped like board text (§82).
+
+### 84.5 API and UI (admin, `X-Tenant-Slug`)
+
+`POST /api/time-polls` (title, slots, audience ids, `closes_in_hours`, optional `occurrence_id`), `GET /api/time-polls` and `GET /api/time-polls/{id}` (tallies, message status), `POST /api/time-polls/{id}/close` (optional `winner_slot_id`), `POST .../cancel`. All writes audited. A **Polls** tab: list with count bars (a number beside every bar, never colour alone), create modal with a **Suggest slots** button that fills candidates from §85 free slots, close and apply actions, and the collapsed about-page explainer.
+
+### 84.6 Tests
+
+Create validation (2 to 6 slots, past slots, duplicate slots, other alliance's Audience, open polls limit); vote toggle and counting; one voter once; no Discord ID anywhere in the database; the hash differs per poll; click on closed, cancelled, unknown poll; slot that belongs to another poll; hostile `custom_id`; guild mismatch; type 7 response content and components; concurrent clicks converge; tick edits only on a changed hash and throttles; expiry closes and removes buttons; tie handling; message edit failure keeps votes; apply paths call the existing endpoints; viewer 403; Kingdom-wide needs a coordinator; nothing in public routes; retention.
+
+### 84.7 Effort
+
+Large: about 2 days of build and review. The interaction, hashing and tick parts are new; rendering, escaping, destination posting and the refresh pattern reuse §70, §67 and §82.
+
+### 84.8 Open questions
+
+O1. Restrict voting to members of a Discord role or to the alliance's guild only? Default here: anyone in the channel.
+O2. Add a "none of these work" button? It would count as a vote against and help leaders see when to propose again.
+O3. Verify against the current Discord docs before building: callback type 7 for component interactions on an interactions-endpoint app, the 5-by-5 component limits, and that edits through the bot token keep the buttons when `components` is sent.
+O4. Per-poll voter hashes mean a person voting in two polls is not linkable. That is intended and stays.
+
+## 85. Schedule insights
+
+Status: design only. Not built. Written 2026-10-07.
+
+### 85.1 Goal
+
+Leaders can see the schedule one event at a time but not as a whole. They cannot easily answer "where do our events collide?", "which UTC hours are quiet?" or "are reminders going out on time?". This section adds a read-only Insights tab built only from data Samaya already stores. No new collection, no migration.
+
+### 85.2 Decisions
+
+1. **Scope follows access.** Every endpoint uses `get_current_tenants` (so `X-Tenant-Slug: *` means every alliance the caller can reach). Kingdom-wide events are always included, because they are public. Another alliance's events appear only when the caller can reach that alliance. Leadership-only events are included for callers who can reach their alliance, since this is an admin view, and are never exposed on a public route.
+2. **Read-only and open to viewers**, like the Schedule and Delivery tabs. Nothing here writes, so there are no audit rows.
+3. **Excluded from every count:** inactive events and cancelled occurrences. A moved occurrence counts at its effective start (`effective_start`, §66). Events with no duration count as a 30 minute block (`NO_DURATION_MINUTES`) for overlap and free-slot maths only.
+4. **Aggregates only.** No per-player data anywhere. The coverage panel shows counts per alliance, never names or IDs (§80.2).
+5. **Computed in process** from at most 60 days of occurrences. Pure functions in `services/analytics.py` take rows and a clock, so every rule is a unit test. No cache, no extra tables, no chart library: markup is a real `<table>` plus CSS, so it works without a build step.
+
+### 85.3 Panels
+
+1. **Heatmap.** Weekday by UTC hour (7 by 24), each cell the number of event starts over the window (default 28 days, 7 to 60). Every cell shows its number, so meaning never depends on colour; the colour ramp has a text contrast check per cell. A cell opens the list of events behind it. Answers "when do we already cluster?".
+2. **Overlaps.** Pairs of occurrences whose intervals intersect, with the alliances, the overlap in minutes and a note when both post to the same channel. Intervals that only touch (one ends when the next starts) do not overlap.
+3. **Free slots.** Inputs: duration in minutes (15 to 480, default 60), window in days (1 to 30, default 14), allowed UTC hours (default 0 to 24), and which alliances to keep clear (default all reachable). Output: the 5 best start times, quarter-hour grid, none overlapping a selected alliance's event, ranked by clearance (minutes to the nearest event, larger is better), then by earliest. The §84 poll form uses this to suggest candidate slots.
+4. **Delivery trends.** Per day for 30 days, from `deliveries`: reminders due, posted, errors, and lateness (`posted_at_utc` minus `due_at_utc`) at the median and 95th percentile. Merged deliveries (`merged_into_id` set) are not counted twice. Per destination on request. The window is limited by how long deliveries are kept; to confirm that nothing prunes them today before the numbers are called a trend.
+5. **Redemption coverage** (only when gift codes are configured). For the last 5 runs, per alliance: roster players, redeemed or already had it, other problems, wrong kingdom. Coverage is redeemed plus already had it, over players in the run.
+
+### 85.4 API (all `GET`, under `/admin/api/analytics/`)
+
+`/schedule-heatmap?days=`, `/schedule-overlaps?days=`, `/free-slots?duration=&days=&from_hour=&to_hour=&alliances=`, `/delivery-trends?days=&by=day|destination`, `/redemption-coverage?runs=`. Each rejects out-of-range parameters with a 422 naming the parameter. Datetimes are ISO UTC.
+
+### 85.5 UI
+
+A new **Insights** tab with the four or five panels as collapsible sections, an alliance filter like the other tabs, loading and empty states, the heatmap with a legend and a text summary above it ("Busiest: Saturday 19:00 UTC, 4 events"), and the collapsed about-page explainer. BEM classes, no inline styles or handlers, `classList` hiding, contrast checked for every colour pair, and a layout that works at phone width (the heatmap scrolls inside its own container).
+
+### 85.6 Tests
+
+Heatmap: counts by weekday and hour, cancelled and inactive excluded, moved occurrence at its new time, window bounds. Overlaps: nested, partial, touching (not overlapping), no-duration block, same-channel note. Free slots: duration fits, hour window, selected alliances only, ranking and tie order, empty result when nothing fits, bad parameters. Delivery trends: lateness percentiles on a fixed sample, merged deliveries once, destination split, empty days. Coverage: percentages on a fixed sample, alliance isolation. Permissions: viewer allowed, an alliance the caller cannot reach never appears, `*` equals the union of reachable alliances, nothing on a public route, the page works with no data.
+
+### 85.7 Effort
+
+Medium: about 1 day. All queries and rules are new, but no schema, no Discord calls and no writes.
+
+### 85.8 Open questions
+
+O1. Is 30 minutes the right block for an event with no duration?
+O2. Should free-slot ranking prefer hours that past events or polls favoured? Left out: it would need attendance data (RSVP or interest counts, from the Discord feature list) and is worth revisiting after that exists.
+O3. Add CSV export for any panel? Not in this version.
+O4. Attendance and interest trends wait for RSVP or interested-count syncing; RSVP records stated intent, and Discord cannot say who actually showed up in game.
+
+## 86. Discord integration ideas
+
+Status: idea list only. Nothing here is designed or built, except where a section is named. Written 2026-10-07. Every Discord API fact below is from memory and must be checked against the current Discord documentation before the idea gets its own section.
+
+### 86.1 What the list is for
+
+Scheduling is largely solved: events, reminders, boards, cleanup and pausing work. What Samaya lacks is a way to hear back from players. Most of the useful ideas below add a participation signal (who wants a ping, who plans to come, which time works) or reduce how much leaders do by hand. Each idea that gets built gets its own section first, as §79 to §83 did.
+
+### 86.2 Higher value
+
+1. **Subscribe and RSVP buttons on reminders.** Buttons use the signed interactions endpoint (§70), so no gateway connection is needed.
+   - A **Notify me** button grants a per event type role. It replaces blunt `@role` mentions with an opt-in, and the existing "mention the role" option then pings only people who asked.
+   - An **RSVP** button stores a count per occurrence. The schedule board (§82) can show "12 going". RSVP records stated intent only; Discord cannot say who attended in game.
+   - Reuses the component handling, `custom_id` parsing and `components` argument that §84 adds. Medium effort. Needs a small table for RSVPs (hashed voters, as in §84.2 decision 5) and the Manage Roles permission for the role button.
+2. **Sync "interested" counts from Scheduled Events.** Discord already collects interest on the events Samaya creates, and the API exposes the interested users of a scheduled event. Reading the count gives an attendance signal with no new UI. Low effort. Counts only, no user list stored.
+3. **Embeds for reminders and the board.** Alliance colour, the event cover, 4096 character descriptions and fields. It makes the board much easier to read. Low effort, but it changes the message format and the §82 hash input, so it needs an explicit decision and a per destination switch.
+4. **Threads under reminders.** Message IDs are stored (§83), so the bot can start a thread on a reminder for sign-ups or questions and let it archive itself. Low effort. Needs a thread permission.
+5. **Time polls** (§84) and **schedule insights** (§85) are written up in their own sections. They belong on this list as the poll and analysis ideas.
+
+### 86.3 Worth considering
+
+- **Announcement channel crossposting.** One post reaches every server that follows the channel, which suits a Kingdom with several servers. Check the permission needed for the bot's own messages.
+- **Native Discord polls through the API.** Fine for a quick one-off. §84 explains why it is not the base for poll features that feed back into Samaya.
+- **Role based admin access.** Use a member's Discord roles at login instead of invites. Fits the alliance suite direction but needs extra OAuth scopes and a privacy review (§80.2).
+- **User installed commands.** `/next` and `/schedule` usable in DMs and in any server, not only servers the bot has joined. Check current availability and the install flow.
+- **Server member counts over time.** The guild endpoint can return approximate member counts. A trend per server needs a small table and a daily job. Check that the counts need no privileged intent.
+- **Localised slash commands** and an **admin console translation** stay deferred (§72).
+
+### 86.4 Data analysis ideas
+
+Built from data Samaya already stores, so they need no new collection. §85 covers the first four.
+
+- Conflict and gap map: events per UTC hour and weekday, overlaps, free slots.
+- Delivery trends: success rate and lateness per day and per destination.
+- Redemption coverage per alliance from gift code runs (§79).
+- Roster size over time, counts only.
+- After RSVP or interest counts exist: interest per event type and per time slot, and trends over weeks.
+- Not available from Discord without privileged intents: per role member counts and channel activity. Skip them.
+
+### 86.5 Skipped on purpose
+
+- **A gateway connection** for reactions or message events. It breaks the webhook only, single worker design, and buttons cover the same need.
+- **DM reminders.** They need per user opt-in, hit rate limits, and fail silently when a user blocks DMs.
+- **Voice or stage channel automation.** Low value for this community.
+- **Per player attendance records or public participation lists.** They conflict with §80.2: counts and trends only, no naming and shaming.
+
+### 86.6 Suggested order
+
+1. §85 schedule insights: no schema, no Discord calls, useful on its own and feeds §84.
+2. §84 time polls: adds the component and interaction groundwork.
+3. Subscribe and RSVP buttons, then interested count sync, on top of that groundwork.
+4. Embeds and threads whenever a leader asks for a better looking board or a place to discuss.
+5. The rest only on request.
+
+### 86.7 Open questions
+
+O1. Which of the four higher value ideas does the alliance actually ask for first? Build in that order, not the order above, once someone asks.
+O2. Should "Notify me" create the role itself or only grant one a leader names? Creating roles needs more permission and can clutter a server.
+O3. Verify against the Discord documentation: scheduled event user endpoints, crossposting permissions, user install availability, guild approximate counts, role and thread permissions.
