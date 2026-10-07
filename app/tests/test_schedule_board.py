@@ -105,6 +105,33 @@ class TestFormat:
         assert len(text) <= MAX_CHARS and text.splitlines()[-1].startswith("🔗 [Full schedule]") and "…and " in text
 
 
+class TestGroupedRender:
+    def test_groups_are_ordered_and_lines_in_a_group_stay_in_time_order(self):
+        lines = [
+            BoardLine(_at(3), "Z last", group="NSR"), BoardLine(_at(2), "A first", group="NSR"),
+            BoardLine(_at(2), "Alliance one", group="MOD"), BoardLine(_at(5), "Wide", group="Kingdom-wide"),
+        ]
+        text = render_board("S", lines, TODAY)
+        assert [x for x in text.splitlines() if x.startswith("### ")] == ["### Kingdom-wide", "### MOD", "### NSR"]
+        assert text.index("A first") < text.index("Z last")
+
+    def test_ungrouped_lines_keep_the_flat_layout(self):
+        text = render_board("S", [BoardLine(_at(2), "B", ("MOD", "NSR"))], TODAY)
+        assert "###" not in text and "· MOD, NSR · " in text
+
+    def test_a_long_grouped_schedule_keeps_the_first_group_and_the_footer(self):
+        links = [("Full schedule", "https://x.example/events")]
+        lines = [BoardLine(_at(2 + i % 5, i % 24, i % 60), f"Event number {i} " + "x" * 40, group="Kingdom-wide" if i < 3 else "MOD")
+                 for i in range(80)]
+        text = render_board("S", lines, TODAY, links)
+        assert len(text) <= MAX_CHARS and "### Kingdom-wide" in text and "…and " in text
+        assert text.splitlines()[-1].startswith("🔗") and text.count("Event number") >= 3
+
+    def test_group_names_are_escaped(self):
+        text = render_board("S", [BoardLine(_at(2), "B", group="*Bold* [x]")], TODAY)
+        assert "### \\*Bold\\* \\[x\\]" in text
+
+
 class TestHeartbeatAndLinks:
     """Spec §82.9 through the engine."""
 
@@ -268,14 +295,48 @@ class TestScope:
         text = _board_messages(fake)[0]
         assert "MOD schedule" in text and "MOD Hunt" in text and "NSR Hunt" not in text and "· MOD" not in text
 
-    async def test_kingdom_board_lists_each_event_once_with_its_alliances(self, sf, fake, configured, second_tenant):
+    async def test_kingdom_board_groups_by_kingdom_wide_then_alliance_then_day(self, sf, fake, configured, second_tenant):
         await _event(sf, configured, name="Shared Hunt", audience=[configured["id"], second_tenant["id"]])
         await _event(sf, configured, name="Everyone Event", scope="kingdom-wide")
+        await _event(sf, second_tenant, name="NSR Only", start="20:00")
         await _board(sf)
         await run_board_refresh(sf, fake, NOW)
         text = _board_messages(fake)[0]
-        assert text.count("Shared Hunt") == 1 and "· MOD, NSR" in text
-        assert text.count("Everyone Event") == 1
+        headings = [line for line in text.splitlines() if line.startswith("### ")]
+        assert headings == ["### Kingdom-wide", "### MOD", "### NSR"]
+        kingdom, mod, nsr = (text.split("### ")[i] for i in (1, 2, 3))
+        assert "Everyone Event" in kingdom and "Shared Hunt" not in kingdom
+        assert "Shared Hunt" in mod and "Shared Hunt" in nsr and "NSR Only" in nsr and "NSR Only" not in mod
+        assert text.count("Everyone Event") == 1 and text.count("Shared Hunt") == 2
+        assert "· MOD ·" not in text and "· MOD, NSR" not in text  # the heading says it, not the line
+
+    async def test_days_sit_inside_each_group(self, sf, fake, configured):
+        await _event(sf, configured, name="Early", anchor=date(2026, 10, 2))
+        await _event(sf, configured, name="Late", anchor=date(2026, 10, 4))
+        await _event(sf, configured, name="Wide", scope="kingdom-wide", anchor=date(2026, 10, 3))
+        await _board(sf)
+        await run_board_refresh(sf, fake, NOW)
+        lines = _board_messages(fake)[0].splitlines()
+        marks = ("### Kingdom-wide", "Sat 3 Oct", "**Wide**", "### MOD", "Fri 2 Oct", "**Early**", "Sun 4 Oct", "**Late**")
+        positions = [next(i for i, line in enumerate(lines) if mark in line) for mark in marks]
+        assert positions == sorted(positions)
+
+    async def test_a_group_without_events_is_not_shown(self, sf, fake, configured, second_tenant):
+        await _event(sf, configured, name="MOD Hunt")
+        await _board(sf)
+        await run_board_refresh(sf, fake, NOW)
+        text = _board_messages(fake)[0]
+        assert "### MOD" in text and "### NSR" not in text and "Kingdom-wide" not in text
+
+    async def test_alliance_board_has_its_kingdom_wide_section_then_its_own(self, sf, fake, configured, second_tenant):
+        await _event(sf, configured, name="MOD Hunt")
+        await _event(sf, second_tenant, name="NSR Hunt")
+        await _event(sf, configured, name="Everyone Event", scope="kingdom-wide")
+        await _board(sf, scope="alliance", tenant_id=configured["id"])
+        await run_board_refresh(sf, fake, NOW)
+        text = _board_messages(fake)[0]
+        assert [line for line in text.splitlines() if line.startswith("### ")] == ["### Kingdom-wide", "### MOD"]
+        assert "NSR Hunt" not in text
 
     async def test_events_outside_the_seven_days_are_left_out(self, sf, fake, configured):
         await _event(sf, configured, name="Far Hunt", anchor=date(2026, 10, 20))

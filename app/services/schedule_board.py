@@ -31,6 +31,7 @@ HEARTBEAT_AFTER = timedelta(minutes=15)  # spec §82.9: refresh the Last edit li
 DEFAULT_PUBLIC_BASE_URL = "https://ks138.taraka.dev"
 MESSAGE_GONE = "MESSAGE_GONE"
 SCOPES = ("kingdom", "alliance")
+KINGDOM_GROUP = "Kingdom-wide"  # spec §82.9 item 5: the first section of a board
 
 _DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -45,6 +46,7 @@ class BoardLine:
     cancelled: bool = False
     going: int = 0  # spec §87.10: the "I'm in" count, shown only above zero
     duration_hours: float | None = None  # spec §82.9: shown when the event has one
+    group: str = ""  # spec §82.9 item 5: section heading ("Kingdom-wide" or an alliance name); empty means no sections
 
 
 def escape_markdown(text: str) -> str:
@@ -72,7 +74,7 @@ def _line_text(line: BoardLine) -> str:
         return f"{clock} ~~{name}~~ cancelled"
     stamp = int(line.start.timestamp())
     parts = [
-        escape_markdown(", ".join(line.alliances)) if line.alliances else "",
+        escape_markdown(", ".join(line.alliances)) if line.alliances and not line.group else "",
         f"{line.going} in" if line.going > 0 else "",
         format_duration(line.duration_hours),
         f"<t:{stamp}:t> your time",
@@ -100,22 +102,28 @@ def render_board(title: str, lines: list[BoardLine], today: date, links: list[tu
     if not lines:
         return f"{head}\n\nNothing is scheduled.{footer}"
     out = [head]
-    day: date | None = None
     shown = 0
-    ordered = sorted(lines, key=lambda x: (x.start, x.name))
+    total = len(lines)
     budget = MAX_CHARS - len(footer) - 60
-    for line in ordered:
-        block = []
-        if line.start.date() != day:
-            day = line.start.date()
-            marker = " (today)" if day == today else ""
-            block.append(f"\n**{_DAYS[day.weekday()]} {day.day} {_MONTHS[day.month - 1]}**{marker}")
-        block.append(_line_text(line))
-        if len("\n".join(out + block)) > budget:
-            out.append(f"\n…and {len(ordered) - shown} more. The website has the full schedule.")
-            break
-        out.extend(block)
-        shown += 1
+    groups = sorted({x.group for x in lines}, key=lambda g: (0 if g == "" else 1 if g == KINGDOM_GROUP else 2, g.lower()))
+    for group in groups:
+        day: date | None = None
+        first = True
+        for line in sorted((x for x in lines if x.group == group), key=lambda x: (x.start, x.name)):
+            block = []
+            if first and group:
+                block.append(f"\n### {escape_markdown(group)}")
+            if line.start.date() != day:
+                day = line.start.date()
+                marker = " (today)" if day == today else ""
+                block.append(f"\n**{_DAYS[day.weekday()]} {day.day} {_MONTHS[day.month - 1]}**{marker}")
+            block.append(_line_text(line))
+            if len("\n".join(out + block)) > budget:
+                out.append(f"\n…and {total - shown} more. The website has the full schedule.")
+                return "\n".join(out) + footer
+            out.extend(block)
+            shown += 1
+            first = False
     return "\n".join(out) + footer
 
 
@@ -139,20 +147,19 @@ async def board_lines(db: AsyncSession, dest: AudienceDestination, now: datetime
         kingdom = await db.get(Kingdom, dest.audience.kingdom_id)
         rows = [r for r in await public_rows(db, *wide, tenant=None) if r.tenant.kingdom_id == kingdom.id]
         title = f"{kingdom.name} schedule"
-    merged: dict[int, dict] = {}
+    merged: dict[tuple[int, str], dict] = {}
     for row in rows:
         when = ensure_utc(effective_start(row.occurrence))
         if not start <= when < end:
             continue
-        entry = merged.setdefault(row.occurrence.id, {
-            "start": when, "name": row.event.name, "names": [], "cancelled": row.occurrence.status == "cancelled",
+        group = KINGDOM_GROUP if row.event.scope == "kingdom-wide" else row.tenant.name
+        merged.setdefault((row.occurrence.id, group), {
+            "start": when, "name": row.event.name, "group": group, "cancelled": row.occurrence.status == "cancelled",
             "key": (row.event.id, row.occurrence.occurrence_date), "rsvp": row.event.rsvp_enabled,
             "duration": row.event.duration_hours})
-        if dest.board_scope != "alliance" and row.event.scope != "kingdom-wide" and row.tenant.name not in entry["names"]:
-            entry["names"].append(row.tenant.name)
     from services.signup import rsvp_counts  # imported here: signup imports event_engine, as this module does
     going = await rsvp_counts(db, [e["key"] for e in merged.values() if e["rsvp"] and not e["cancelled"]])
-    lines = [BoardLine(e["start"], e["name"], tuple(sorted(e["names"])), e["cancelled"], going.get(e["key"], 0), e["duration"])
+    lines = [BoardLine(e["start"], e["name"], (), e["cancelled"], going.get(e["key"], 0), e["duration"], e["group"])
              for e in merged.values()]
     return title, lines
 
@@ -165,7 +172,7 @@ async def board_links(db: AsyncSession, dest: AudienceDestination, lines: list[B
         tenant = await db.get(Tenant, dest.board_tenant_id) if dest.board_tenant_id else None
         return [(f"{tenant.name} schedule", f"{base}/events/{tenant.slug}")] if tenant else []
     links = [("Full schedule", f"{base}/events")]
-    names = {name for line in lines if not line.cancelled for name in line.alliances}
+    names = {line.group for line in lines if line.group and line.group != KINGDOM_GROUP}
     if names:
         kingdom_id = dest.audience.kingdom_id
         tenants = (await db.execute(select(Tenant).where(Tenant.kingdom_id == kingdom_id, Tenant.name.in_(names))
