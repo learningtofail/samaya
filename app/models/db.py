@@ -903,3 +903,75 @@ class RedemptionResult(Base):
         UniqueConstraint("run_id", "fid", name="uq_redemption_result_fid"),
         Index("ix_redemption_results_run_status", "run_id", "status"),
     )
+
+
+class TimePoll(Base):
+    """Spec §84: a leader proposes 2 to 6 UTC time slots, players tap the ones
+    that work in Discord, Samaya tallies. Nothing is applied automatically.
+    tenant_id is null for a Kingdom-wide poll."""
+    __tablename__ = "time_polls"
+
+    id             = Column(Integer, primary_key=True)
+    kingdom_id     = Column(Integer, ForeignKey("kingdoms.id", ondelete="CASCADE"), nullable=False)
+    tenant_id      = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True)
+    title          = Column(String(80), nullable=False)
+    occurrence_id  = Column(Integer, ForeignKey("event_occurrences.id", ondelete="SET NULL"), nullable=True)
+    status         = Column(Text, nullable=False, default="open")
+    closes_at      = Column(DateTime(timezone=True), nullable=False)
+    closed_at      = Column(DateTime(timezone=True), nullable=True)
+    winner_slot_id = Column(Integer, ForeignKey("time_poll_slots.id", ondelete="SET NULL", use_alter=True,
+                                                name="fk_time_polls_winner_slot"), nullable=True)
+    created_by     = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at     = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    slots = relationship("TimePollSlot", lazy="selectin", order_by="TimePollSlot.position",
+                         primaryjoin="TimePoll.id == TimePollSlot.poll_id", cascade="all, delete-orphan",
+                         foreign_keys="TimePollSlot.poll_id", back_populates="poll")
+    messages = relationship("TimePollMessage", lazy="selectin", order_by="TimePollMessage.id",
+                            cascade="all, delete-orphan", back_populates="poll")
+
+    __table_args__ = (
+        CheckConstraint("status IN ('open', 'closed', 'cancelled')", name="ck_time_poll_status"),
+        Index("ix_time_polls_status_closes", "status", "closes_at"),
+    )
+
+
+class TimePollSlot(Base):
+    __tablename__ = "time_poll_slots"
+
+    id        = Column(Integer, primary_key=True)
+    poll_id   = Column(Integer, ForeignKey("time_polls.id", ondelete="CASCADE"), nullable=False)
+    starts_at = Column(DateTime(timezone=True), nullable=False)
+    position  = Column(Integer, nullable=False, default=0)
+
+    poll = relationship("TimePoll", back_populates="slots", foreign_keys=[poll_id])
+
+    __table_args__ = (UniqueConstraint("poll_id", "starts_at", name="uq_time_poll_slot"),)
+
+
+class TimePollVote(Base):
+    """One vote. voter_hash is HMAC-SHA256(SECRET_KEY, "poll_id:discord_user_id"):
+    enough to toggle and count a person once, not enough to list or contact them."""
+    __tablename__ = "time_poll_votes"
+
+    slot_id    = Column(Integer, ForeignKey("time_poll_slots.id", ondelete="CASCADE"), primary_key=True)
+    voter_hash = Column(String(64), primary_key=True)
+
+
+class TimePollMessage(Base):
+    """One posted Discord message of a poll (one per channel)."""
+    __tablename__ = "time_poll_messages"
+
+    id             = Column(Integer, primary_key=True)
+    poll_id        = Column(Integer, ForeignKey("time_polls.id", ondelete="CASCADE"), nullable=False)
+    destination_id = Column(Integer, ForeignKey("audience_destinations.id", ondelete="SET NULL"), nullable=True)
+    guild_id       = Column(Text, nullable=False)
+    channel_id     = Column(Text, nullable=False)
+    message_id     = Column(Text, nullable=False)
+    content_hash   = Column(String(64), nullable=True)
+    error          = Column(Text, nullable=True)
+    refreshed_at   = Column(DateTime(timezone=True), nullable=True)
+
+    poll = relationship("TimePoll", back_populates="messages")
+
+    __table_args__ = (UniqueConstraint("poll_id", "channel_id", name="uq_time_poll_message_channel"),)

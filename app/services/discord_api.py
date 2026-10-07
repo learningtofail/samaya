@@ -512,11 +512,15 @@ def _message_error(response, label: str) -> str:
     return f"HTTP {code}"
 
 
-async def post_channel_message(token: str, channel_id: str, content: str, *, no_mentions: bool = False) -> tuple[str, str]:
-    """Posts a message. Returns (message_id, error_message); the id is empty on failure."""
+async def post_channel_message(token: str, channel_id: str, content: str, *, no_mentions: bool = False,
+                               components: list | None = None) -> tuple[str, str]:
+    """Posts a message. Returns (message_id, error_message); the id is empty on failure.
+    `components` (spec §84) are message components such as button rows."""
     body: dict = {"content": content}
     if no_mentions:
         body["allowed_mentions"] = _NO_MENTIONS
+    if components is not None:
+        body["components"] = components
     label = f"post_channel_message {channel_id}"
     response, error = await _message_request(
         "POST", f"{DISCORD_API_BASE}/channels/{channel_id}/messages", token, body, label)
@@ -531,11 +535,14 @@ async def post_channel_message(token: str, channel_id: str, content: str, *, no_
 
 
 async def edit_channel_message(token: str, channel_id: str, message_id: str, content: str,
-                               *, no_mentions: bool = False) -> tuple[bool, str]:
-    """Edits a message the bot posted. A deleted message answers (False, MESSAGE_GONE)."""
+                               *, no_mentions: bool = False, components: list | None = None) -> tuple[bool, str]:
+    """Edits a message the bot posted. A deleted message answers (False, MESSAGE_GONE).
+    `components` replaces the message's components; an empty list removes them (spec §84)."""
     body: dict = {"content": content}
     if no_mentions:
         body["allowed_mentions"] = _NO_MENTIONS
+    if components is not None:
+        body["components"] = components
     label = f"edit_channel_message {channel_id}/{message_id}"
     response, error = await _message_request(
         "PATCH", f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}", token, body, label)

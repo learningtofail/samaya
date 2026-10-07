@@ -10,6 +10,7 @@ from services import discord_api, giftcode_client
 from services.event_engine import run_delivery_tick, run_generation
 from services.giftcode_engine import prune_redemptions, run_tick
 from services.schedule_board import run_board_refresh
+from services.time_poll import prune_polls, run_poll_tick
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,17 @@ async def board_tick_job() -> None:
         logger.exception("schedule board tick failed")
 
 
+async def poll_tick_job() -> None:
+    """Spec §84: closes expired polls and edits poll messages whose tally changed. Separate from the delivery
+    tick so a poll problem can never delay a reminder."""
+    try:
+        counts = await run_poll_tick(AsyncSessionLocal, discord_api, datetime.now(timezone.utc))
+        if any(counts.values()):
+            logger.info("time polls: %s", counts)
+    except Exception:
+        logger.exception("time poll tick failed")
+
+
 async def generation_job() -> None:
     try:
         logger.info("generation: synced %s events", await run_generation(AsyncSessionLocal))
@@ -46,6 +58,12 @@ async def generation_job() -> None:
             logger.info("retention: removed %s old gift code runs", pruned)
     except Exception:
         logger.exception("gift code retention failed")
+    try:
+        pruned = await prune_polls(AsyncSessionLocal, datetime.now(timezone.utc))
+        if pruned:
+            logger.info("retention: removed %s old time polls", pruned)
+    except Exception:
+        logger.exception("time poll retention failed")
 
 
 async def giftcode_tick_job() -> None:

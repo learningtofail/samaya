@@ -29,6 +29,7 @@ class FakeDiscord:
         self.post_error = ""
         self.edit_error = ""
         self.delete_error = ""
+        self.components: dict[tuple[str, str], list] = {}  # spec §84: the latest components per message
         self._next = 0
 
     def count(self, name: str) -> int:
@@ -65,7 +66,7 @@ class FakeDiscord:
             raise RuntimeError("boom")
         return (False, self.send_error) if self.send_error else (True, "")
 
-    async def post_channel_message(self, token, channel_id, content, *, no_mentions=False):
+    async def post_channel_message(self, token, channel_id, content, *, no_mentions=False, components=None):
         self.calls.append(("send", channel_id, content))
         if channel_id in self.raise_on_send_to:
             raise RuntimeError("boom")
@@ -75,15 +76,18 @@ class FakeDiscord:
         self._next += 1
         message_id = f"m{self._next}"
         self.messages[(channel_id, message_id)] = content
+        self.components[(channel_id, message_id)] = components or []
         return message_id, ""
 
-    async def edit_channel_message(self, token, channel_id, message_id, content, *, no_mentions=False):
+    async def edit_channel_message(self, token, channel_id, message_id, content, *, no_mentions=False, components=None):
         self.calls.append(("edit", channel_id, message_id, content))
         if self.edit_error:
             return False, self.edit_error
         if (channel_id, message_id) not in self.messages:
             return False, "MESSAGE_GONE"
         self.messages[(channel_id, message_id)] = content
+        if components is not None:
+            self.components[(channel_id, message_id)] = components
         return True, ""
 
     async def delete_channel_message(self, token, channel_id, message_id):
