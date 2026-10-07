@@ -3312,3 +3312,63 @@ O1. Is 30 minutes the right block for an event with no duration?
 O2. Should free-slot ranking prefer hours that past events or polls favoured? Left out: it would need attendance data (RSVP or interest counts, from the Discord feature list) and is worth revisiting after that exists.
 O3. Add CSV export for any panel? Not in this version.
 O4. Attendance and interest trends wait for RSVP or interested-count syncing; RSVP records stated intent, and Discord cannot say who actually showed up in game.
+
+## 86. Discord integration ideas
+
+Status: idea list only. Nothing here is designed or built, except where a section is named. Written 2026-10-07. Every Discord API fact below is from memory and must be checked against the current Discord documentation before the idea gets its own section.
+
+### 86.1 What the list is for
+
+Scheduling is largely solved: events, reminders, boards, cleanup and pausing work. What Samaya lacks is a way to hear back from players. Most of the useful ideas below add a participation signal (who wants a ping, who plans to come, which time works) or reduce how much leaders do by hand. Each idea that gets built gets its own section first, as §79 to §83 did.
+
+### 86.2 Higher value
+
+1. **Subscribe and RSVP buttons on reminders.** Buttons use the signed interactions endpoint (§70), so no gateway connection is needed.
+   - A **Notify me** button grants a per event type role. It replaces blunt `@role` mentions with an opt-in, and the existing "mention the role" option then pings only people who asked.
+   - An **RSVP** button stores a count per occurrence. The schedule board (§82) can show "12 going". RSVP records stated intent only; Discord cannot say who attended in game.
+   - Reuses the component handling, `custom_id` parsing and `components` argument that §84 adds. Medium effort. Needs a small table for RSVPs (hashed voters, as in §84.2 decision 5) and the Manage Roles permission for the role button.
+2. **Sync "interested" counts from Scheduled Events.** Discord already collects interest on the events Samaya creates, and the API exposes the interested users of a scheduled event. Reading the count gives an attendance signal with no new UI. Low effort. Counts only, no user list stored.
+3. **Embeds for reminders and the board.** Alliance colour, the event cover, 4096 character descriptions and fields. It makes the board much easier to read. Low effort, but it changes the message format and the §82 hash input, so it needs an explicit decision and a per destination switch.
+4. **Threads under reminders.** Message IDs are stored (§83), so the bot can start a thread on a reminder for sign-ups or questions and let it archive itself. Low effort. Needs a thread permission.
+5. **Time polls** (§84) and **schedule insights** (§85) are written up in their own sections. They belong on this list as the poll and analysis ideas.
+
+### 86.3 Worth considering
+
+- **Announcement channel crossposting.** One post reaches every server that follows the channel, which suits a Kingdom with several servers. Check the permission needed for the bot's own messages.
+- **Native Discord polls through the API.** Fine for a quick one-off. §84 explains why it is not the base for poll features that feed back into Samaya.
+- **Role based admin access.** Use a member's Discord roles at login instead of invites. Fits the alliance suite direction but needs extra OAuth scopes and a privacy review (§80.2).
+- **User installed commands.** `/next` and `/schedule` usable in DMs and in any server, not only servers the bot has joined. Check current availability and the install flow.
+- **Server member counts over time.** The guild endpoint can return approximate member counts. A trend per server needs a small table and a daily job. Check that the counts need no privileged intent.
+- **Localised slash commands** and an **admin console translation** stay deferred (§72).
+
+### 86.4 Data analysis ideas
+
+Built from data Samaya already stores, so they need no new collection. §85 covers the first four.
+
+- Conflict and gap map: events per UTC hour and weekday, overlaps, free slots.
+- Delivery trends: success rate and lateness per day and per destination.
+- Redemption coverage per alliance from gift code runs (§79).
+- Roster size over time, counts only.
+- After RSVP or interest counts exist: interest per event type and per time slot, and trends over weeks.
+- Not available from Discord without privileged intents: per role member counts and channel activity. Skip them.
+
+### 86.5 Skipped on purpose
+
+- **A gateway connection** for reactions or message events. It breaks the webhook only, single worker design, and buttons cover the same need.
+- **DM reminders.** They need per user opt-in, hit rate limits, and fail silently when a user blocks DMs.
+- **Voice or stage channel automation.** Low value for this community.
+- **Per player attendance records or public participation lists.** They conflict with §80.2: counts and trends only, no naming and shaming.
+
+### 86.6 Suggested order
+
+1. §85 schedule insights: no schema, no Discord calls, useful on its own and feeds §84.
+2. §84 time polls: adds the component and interaction groundwork.
+3. Subscribe and RSVP buttons, then interested count sync, on top of that groundwork.
+4. Embeds and threads whenever a leader asks for a better looking board or a place to discuss.
+5. The rest only on request.
+
+### 86.7 Open questions
+
+O1. Which of the four higher value ideas does the alliance actually ask for first? Build in that order, not the order above, once someone asks.
+O2. Should "Notify me" create the role itself or only grant one a leader names? Creating roles needs more permission and can clutter a server.
+O3. Verify against the Discord documentation: scheduled event user endpoints, crossposting permissions, user install availability, guild approximate counts, role and thread permissions.
