@@ -662,7 +662,10 @@ function syncSignupLeadership() {
   if (leadership) ['evSignupEnabled', 'evSignupMention', 'evRsvpEnabled'].forEach((id) => { byId(id).checked = false; });
 }
 
+let signupSetupSeq = 0;
+
 async function setupSignupFields(event, duplicate, mode) {
+  const seq = ++signupSetupSeq;
   const source = event || null;
   byId('evSignupEnabled').checked = source ? !!source.signup_enabled : true;
   byId('evSignupMention').checked = source ? !!source.signup_mention : false;
@@ -671,6 +674,7 @@ async function setupSignupFields(event, duplicate, mode) {
   byId('evSignupGroup').innerHTML = groupSelectHtml(wanted);
   syncSignupLeadership();
   const host = byId('evSignupRoles');
+  if (host._signupControl) host._signupControl.abort();  // the previous form's rows must not answer clicks
   host.innerHTML = '';
   const showRoles = mode === 'edit' && !duplicate && !!event;
   byId('evSignupRolesNew').classList.toggle('hidden', showRoles || mode === 'split');
@@ -682,6 +686,7 @@ async function setupSignupFields(event, duplicate, mode) {
   } catch (e) {
     toast(e.message, true);
   }
+  if (seq !== signupSetupSeq) return;  // another form was opened while the groups loaded
   if (showRoles) createEventSignupRoles(host, event, canWriteEvent(event));
 }
 
