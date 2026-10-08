@@ -633,6 +633,11 @@ async def remove_member_role(token: str, guild_id: str, user_id: str, role_id: s
     return (True, "") if response.status_code in (200, 204) else (False, _role_error(response, label))
 
 
+def _forget_roles(guild_id: str) -> None:
+    for key in [k for k in _role_cache if k[1] == guild_id]:
+        _role_cache.pop(key, None)
+
+
 async def create_role(token: str, guild_id: str, name: str, reason: str = "") -> tuple[dict | None, str]:
     """Creates a mentionable role with no permissions. Returns ({"id", "name"}, "") or (None, error)."""
     label = f"create_role {guild_id}"
@@ -642,6 +647,7 @@ async def create_role(token: str, guild_id: str, name: str, reason: str = "") ->
     if error:
         return None, error
     if response.status_code in (200, 201):
+        _forget_roles(guild_id)  # the cached list no longer matches the server
         try:
             data = response.json()
             return {"id": str(data["id"]), "name": data.get("name", name)}, ""
@@ -657,7 +663,10 @@ async def rename_role(token: str, guild_id: str, role_id: str, name: str, reason
         _reason_header(reason))
     if error:
         return False, error
-    return (True, "") if response.status_code == 200 else (False, _role_error(response, label))
+    if response.status_code == 200:
+        _forget_roles(guild_id)
+        return True, ""
+    return False, _role_error(response, label)
 
 
 async def edit_interaction_response(application_id: str, interaction_token: str, content: str) -> tuple[bool, str]:
@@ -671,12 +680,12 @@ async def edit_interaction_response(application_id: str, interaction_token: str,
     return (True, "") if response.status_code == 200 else (False, _message_error(response, label))
 
 
-async def get_role_context(token: str, guild_id: str) -> tuple[dict, int | None, str]:
+async def get_role_context(token: str, guild_id: str, fresh: bool = False) -> tuple[dict, int | None, str]:
     """({role_id: role}, the bot's highest role position or None, error), cached 5 minutes per server.
     The position is None when it cannot be read; Discord then enforces the hierarchy itself (error 50013)."""
     import time
     key = (token[-8:], guild_id)
-    hit = _role_cache.get(key)
+    hit = None if fresh else _role_cache.get(key)
     if hit is not None and time.monotonic() - hit[0] < ROLE_CACHE_SECONDS:
         return hit[1], hit[2], ""
     roles, error = await get_guild_roles(token, guild_id)

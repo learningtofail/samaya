@@ -6,6 +6,7 @@ event is written by whoever can edit the event; one on an event type needs a
 Kingdom coordinator. Counts only: no Discord IDs of players ever leave this
 module, and nothing here is public.
 """
+import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -196,11 +197,11 @@ async def _existing(db: AsyncSession, *, event: Event | None, etype: EventType |
     return (await db.execute(select(SignupRole).where(scope, SignupRole.server_id == server_id))).scalar_one_or_none()
 
 
-async def _role_context(discord, server: DiscordServer) -> tuple[str, dict, int | None]:
+async def _role_context(discord, server: DiscordServer, fresh: bool = False) -> tuple[str, dict, int | None]:
     token = server.bot_token or platform_bot_token()
     if not token:
         raise HTTPException(status_code=502, detail="No Discord bot token is configured for this server")
-    roles, bot_top, error = await discord.get_role_context(token, server.guild_id)
+    roles, bot_top, error = await discord.get_role_context(token, server.guild_id, fresh=fresh)
     if error:
         raise HTTPException(status_code=502, detail=f"Discord: {error}")
     return token, roles, bot_top
@@ -214,7 +215,25 @@ async def _check_group_clash(db: AsyncSession, event: Event, server: DiscordServ
                 f"{peer.name} is in the same attendance group and already uses that role. Give each event its own role."))
 
 
+_create_locks: dict[int, asyncio.Lock] = {}  # one per Discord server; valid because there is one worker
+
+
 async def _apply_mapping(
+    db: AsyncSession, discord, user: User, tenant: Tenant, *, event: Event | None, etype: EventType | None,
+    kingdom_id: int, body: SignupRoleIn,
+) -> dict:
+    """Creating a role is serialised per server and checks Discord's live role list, so a double click or two
+    people creating at once cannot make two roles with one name."""
+    if not body.create:
+        return await _apply_mapping_unlocked(db, discord, user, tenant, event=event, etype=etype,
+                                             kingdom_id=kingdom_id, body=body)
+    lock = _create_locks.setdefault(body.server_id, asyncio.Lock())
+    async with lock:
+        return await _apply_mapping_unlocked(db, discord, user, tenant, event=event, etype=etype,
+                                             kingdom_id=kingdom_id, body=body)
+
+
+async def _apply_mapping_unlocked(
     db: AsyncSession, discord, user: User, tenant: Tenant, *, event: Event | None, etype: EventType | None,
     kingdom_id: int, body: SignupRoleIn,
 ) -> dict:
@@ -232,9 +251,12 @@ async def _apply_mapping(
         await db.commit()
         return {"removed": True}
 
-    token, roles, bot_top = await _role_context(discord, server)
+    token, roles, bot_top = await _role_context(discord, server, fresh=body.create)
     created = False
     if body.create:
+        if existing is not None:
+            raise HTTPException(status_code=409, detail=(
+                f'This already uses the role "{existing.role_name}" in {server.name}. Remove it first to create a new one.'))
         name = event.name if event is not None else etype.name
         if len(name) > ROLE_NAME_MAX:
             raise HTTPException(status_code=422, detail=(
