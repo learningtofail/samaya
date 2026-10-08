@@ -219,6 +219,28 @@ class TestEventRoles:
         assert response.status_code == 409 and "already exists" in response.json()["detail"]
         assert not [c for c in discord.calls if c[0] == "create_role"]
 
+    async def test_a_second_create_for_the_same_event_makes_no_second_role(self, client, sf, configured, discord):
+        event_id = await an_event(sf, configured, name="Bear Hunt #3")
+        body = {"server_id": configured["server_id"], "create": True}
+        first = await client.put(f"{A}/events/{event_id}/signup-roles", json=body, headers=H)
+        second = await client.put(f"{A}/events/{event_id}/signup-roles", json=body, headers=H)
+        assert first.status_code == 200 and second.status_code == 409
+        assert len([c for c in discord.calls if c[0] == "create_role"]) == 1
+
+    async def test_two_simultaneous_creates_make_one_role(self, client, sf, configured, discord):
+        import asyncio
+        event_id = await an_event(sf, configured, name="Bear Hunt #4")
+        body = {"server_id": configured["server_id"], "create": True}
+        results = await asyncio.gather(*[client.put(f"{A}/events/{event_id}/signup-roles", json=body, headers=H) for _ in range(2)])
+        assert sorted(r.status_code for r in results) == [200, 409]
+        assert len([c for c in discord.calls if c[0] == "create_role"]) == 1
+
+    async def test_the_duplicate_check_reads_the_live_role_list(self, client, sf, configured, discord):
+        event_id = await an_event(sf, configured, name="Bear Hunt #5")
+        await client.put(f"{A}/events/{event_id}/signup-roles", json={"server_id": configured["server_id"], "create": True}, headers=H)
+        assert ("role_context", GUILD) in discord.calls
+        assert discord.fresh_reads and discord.fresh_reads[-1] is True
+
     async def test_a_name_over_the_discord_limit_is_refused(self, client, sf, configured, discord):
         event_id = await an_event(sf, configured, name="x" * 101)
         response = await client.put(f"{A}/events/{event_id}/signup-roles", json={"server_id": configured["server_id"], "create": True}, headers=H)

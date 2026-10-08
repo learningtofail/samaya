@@ -46,12 +46,13 @@ def _board_messages(fake, channel="chan-mod"):
 class TestRender:
     def test_days_utc_and_relative_time(self):
         text = render_board("Kingdom 138 schedule", [BoardLine(_at(2), "Bear Hunt", ("MOD",))], TODAY)
-        assert text.startswith("**Kingdom 138 schedule** · next 7 days, times in UTC")
-        assert "**Fri 2 Oct**" in text and "`19:00` Bear Hunt · MOD <t:" in text and ":R>" in text
+        assert text.startswith("📅 **Kingdom 138 schedule**\nNext 7 days · times in UTC")
+        assert "**Fri 2 Oct**" in text and "`19:00` **Bear Hunt** · MOD · <t:" in text and ":R>" in text
+        assert " your time · <t:" in text
 
     def test_today_is_marked_and_days_are_sorted(self):
         text = render_board("S", [BoardLine(_at(3), "B"), BoardLine(_at(1, 8), "A")], TODAY)
-        assert text.index("A <t:") < text.index("B <t:") and "**Thu 1 Oct** (today)" in text
+        assert text.index("**A**") < text.index("**B**") and "**Thu 1 Oct** (today)" in text
 
     def test_cancelled_is_struck_through_without_a_time_stamp(self):
         text = render_board("S", [BoardLine(_at(2), "Bear Hunt", cancelled=True)], TODAY)
@@ -67,9 +68,129 @@ class TestRender:
     def test_a_long_schedule_is_cut_with_a_count_and_stays_under_the_limit(self):
         lines = [BoardLine(_at(2 + i % 5, i % 24, i % 60), f"Event number {i} " + "x" * 40) for i in range(80)]
         text = render_board("S", lines, TODAY)
-        assert len(text) <= MAX_CHARS and "…and " in text and "more" in text.splitlines()[-1]
-        shown = text.count("<t:")
+        assert len(text) <= MAX_CHARS and "…and " in text and "more" in text
+        shown = text.count("your time")
         assert f"…and {80 - shown} more" in text
+
+
+class TestFormat:
+    """Spec §82.9: duration, links, the Last edit line."""
+
+    def test_duration_formats(self):
+        from services.schedule_board import format_duration
+        assert [format_duration(h) for h in (None, 0, 0.75, 1, 1.5, 2, 0.5)] == ["", "", "45 min", "1 h", "1.5 h", "2 h", "30 min"]
+
+    def test_a_line_shows_duration_only_when_the_event_has_one(self):
+        with_duration = render_board("S", [BoardLine(_at(2), "Bear Hunt", ("MOD",), going=4, duration_hours=2)], TODAY)
+        assert "`19:00` **Bear Hunt** · MOD · 4 in · 2 h · <t:" in with_duration
+        without = render_board("S", [BoardLine(_at(2), "Announcement")], TODAY)
+        assert " h · " not in without and " min · " not in without
+
+    def test_last_edit_line_is_second_and_uses_discord_timestamps(self):
+        text = render_board("S", [], TODAY, updated=NOW)
+        stamp = int(NOW.timestamp())
+        assert text.splitlines()[1] == f"Last edit: <t:{stamp}:f> (<t:{stamp}:R>)"
+        assert "Last edit" not in render_board("S", [], TODAY)
+
+    def test_links_are_a_footer_without_embeds(self):
+        links = [("Full schedule", "https://x.example/events"), ("MOD", "https://x.example/events/mod")]
+        text = render_board("S", [BoardLine(_at(2), "B")], TODAY, links)
+        assert text.splitlines()[-1] == "🔗 [Full schedule](<https://x.example/events>) · [MOD](<https://x.example/events/mod>)"
+        assert render_board("S", [], TODAY, links).endswith("(<https://x.example/events/mod>)")
+
+    def test_a_long_schedule_keeps_the_footer(self):
+        links = [("Full schedule", "https://x.example/events")]
+        lines = [BoardLine(_at(2 + i % 5, i % 24, i % 60), f"Event number {i} " + "x" * 40) for i in range(80)]
+        text = render_board("S", lines, TODAY, links, updated=NOW)
+        assert len(text) <= MAX_CHARS and text.splitlines()[-1].startswith("🔗 [Full schedule]") and "…and " in text
+
+
+class TestGroupedRender:
+    def test_groups_are_ordered_and_lines_in_a_group_stay_in_time_order(self):
+        lines = [
+            BoardLine(_at(3), "Z last", group="NSR"), BoardLine(_at(2), "A first", group="NSR"),
+            BoardLine(_at(2), "Alliance one", group="MOD"), BoardLine(_at(5), "Wide", group="Kingdom-wide"),
+        ]
+        text = render_board("S", lines, TODAY)
+        assert [x for x in text.splitlines() if x.startswith("### ")] == ["### Kingdom-wide", "### MOD", "### NSR"]
+        assert text.index("A first") < text.index("Z last")
+
+    def test_ungrouped_lines_keep_the_flat_layout(self):
+        text = render_board("S", [BoardLine(_at(2), "B", ("MOD", "NSR"))], TODAY)
+        assert "###" not in text and "· MOD, NSR · " in text
+
+    def test_a_long_grouped_schedule_keeps_the_first_group_and_the_footer(self):
+        links = [("Full schedule", "https://x.example/events")]
+        lines = [BoardLine(_at(2 + i % 5, i % 24, i % 60), f"Event number {i} " + "x" * 40, group="Kingdom-wide" if i < 3 else "MOD")
+                 for i in range(80)]
+        text = render_board("S", lines, TODAY, links)
+        assert len(text) <= MAX_CHARS and "### Kingdom-wide" in text and "…and " in text
+        assert text.splitlines()[-1].startswith("🔗") and text.count("Event number") >= 3
+
+    def test_group_names_are_escaped(self):
+        text = render_board("S", [BoardLine(_at(2), "B", group="*Bold* [x]")], TODAY)
+        assert "### \\*Bold\\* \\[x\\]" in text
+
+
+class TestHeartbeatAndLinks:
+    """Spec §82.9 through the engine."""
+
+    async def test_unchanged_board_is_edited_only_after_the_heartbeat(self, sf, fake, configured):
+        from services.schedule_board import HEARTBEAT_AFTER
+        await _event(sf, configured, name="Bear Hunt")
+        await _board(sf)
+        await run_board_refresh(sf, fake, NOW)
+        calls = len(fake.calls)
+        assert await run_board_refresh(sf, fake, NOW + HEARTBEAT_AFTER - timedelta(seconds=1)) == {"unchanged": 1}
+        assert len(fake.calls) == calls
+        later = NOW + HEARTBEAT_AFTER
+        assert await run_board_refresh(sf, fake, later) == {"edited": 1}
+        assert f"<t:{int(later.timestamp())}:f>" in _board_messages(fake)[0]
+        assert fake.count("send") == 1  # edited in place, never reposted
+        assert await run_board_refresh(sf, fake, later + timedelta(minutes=1)) == {"unchanged": 1}
+
+    async def test_the_last_edit_line_does_not_count_as_a_change(self, sf, fake, configured):
+        await _event(sf, configured, name="Bear Hunt")
+        await _board(sf)
+        await run_board_refresh(sf, fake, NOW)
+        first_hash = (await _dest(sf)).board_hash
+        await run_board_refresh(sf, fake, NOW + timedelta(minutes=20))
+        assert (await _dest(sf)).board_hash == first_hash
+
+    async def test_a_real_change_still_shows_within_the_minute(self, sf, fake, configured):
+        event_id = await _event(sf, configured, name="Bear Hunt")
+        await _board(sf)
+        await run_board_refresh(sf, fake, NOW)
+        async with sf() as s:
+            (await s.get(Event, event_id)).name = "Renamed"
+            await s.commit()
+        assert await run_board_refresh(sf, fake, NOW + timedelta(minutes=1)) == {"edited": 1}
+
+    async def test_kingdom_board_links_the_combined_page_and_alliances_with_events(self, sf, fake, configured, second_tenant, monkeypatch):
+        monkeypatch.setenv("PUBLIC_BASE_URL", "https://example.test/")
+        await _event(sf, configured, name="MOD Hunt")
+        await _board(sf)
+        await run_board_refresh(sf, fake, NOW)
+        footer = _board_messages(fake)[0].splitlines()[-1]
+        assert "[Full schedule](<https://example.test/events>)" in footer
+        assert "[MOD](<https://example.test/events/mod>)" in footer and "nsr" not in footer
+
+    async def test_alliance_board_links_its_own_page_and_default_base_is_production(self, sf, fake, configured, second_tenant, monkeypatch):
+        monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+        await _event(sf, configured, name="MOD Hunt")
+        await _board(sf, scope="alliance", tenant_id=configured["id"])
+        await run_board_refresh(sf, fake, NOW)
+        assert _board_messages(fake)[0].splitlines()[-1] == "🔗 [MOD schedule](<https://ks138.taraka.dev/events/mod>)"
+
+    async def test_duration_comes_from_the_event(self, sf, fake, configured):
+        await _event(sf, configured, name="Bear Hunt", duration=1.5)
+        await _event(sf, configured, name="Notice", duration=None, start="20:00")
+        await _board(sf)
+        await run_board_refresh(sf, fake, NOW)
+        text = _board_messages(fake)[0]
+        bear = next(line for line in text.splitlines() if "**Bear Hunt**" in line)
+        notice = next(line for line in text.splitlines() if "**Notice**" in line)
+        assert " · 1.5 h · " in bear and " h · " not in notice and " min · " not in notice
 
 
 class TestRefresh:
@@ -174,14 +295,48 @@ class TestScope:
         text = _board_messages(fake)[0]
         assert "MOD schedule" in text and "MOD Hunt" in text and "NSR Hunt" not in text and "· MOD" not in text
 
-    async def test_kingdom_board_lists_each_event_once_with_its_alliances(self, sf, fake, configured, second_tenant):
+    async def test_kingdom_board_groups_by_kingdom_wide_then_alliance_then_day(self, sf, fake, configured, second_tenant):
         await _event(sf, configured, name="Shared Hunt", audience=[configured["id"], second_tenant["id"]])
         await _event(sf, configured, name="Everyone Event", scope="kingdom-wide")
+        await _event(sf, second_tenant, name="NSR Only", start="20:00")
         await _board(sf)
         await run_board_refresh(sf, fake, NOW)
         text = _board_messages(fake)[0]
-        assert text.count("Shared Hunt") == 1 and "· MOD, NSR" in text
-        assert text.count("Everyone Event") == 1
+        headings = [line for line in text.splitlines() if line.startswith("### ")]
+        assert headings == ["### Kingdom-wide", "### MOD", "### NSR"]
+        kingdom, mod, nsr = (text.split("### ")[i] for i in (1, 2, 3))
+        assert "Everyone Event" in kingdom and "Shared Hunt" not in kingdom
+        assert "Shared Hunt" in mod and "Shared Hunt" in nsr and "NSR Only" in nsr and "NSR Only" not in mod
+        assert text.count("Everyone Event") == 1 and text.count("Shared Hunt") == 2
+        assert "· MOD ·" not in text and "· MOD, NSR" not in text  # the heading says it, not the line
+
+    async def test_days_sit_inside_each_group(self, sf, fake, configured):
+        await _event(sf, configured, name="Early", anchor=date(2026, 10, 2))
+        await _event(sf, configured, name="Late", anchor=date(2026, 10, 4))
+        await _event(sf, configured, name="Wide", scope="kingdom-wide", anchor=date(2026, 10, 3))
+        await _board(sf)
+        await run_board_refresh(sf, fake, NOW)
+        lines = _board_messages(fake)[0].splitlines()
+        marks = ("### Kingdom-wide", "Sat 3 Oct", "**Wide**", "### MOD", "Fri 2 Oct", "**Early**", "Sun 4 Oct", "**Late**")
+        positions = [next(i for i, line in enumerate(lines) if mark in line) for mark in marks]
+        assert positions == sorted(positions)
+
+    async def test_a_group_without_events_is_not_shown(self, sf, fake, configured, second_tenant):
+        await _event(sf, configured, name="MOD Hunt")
+        await _board(sf)
+        await run_board_refresh(sf, fake, NOW)
+        text = _board_messages(fake)[0]
+        assert "### MOD" in text and "### NSR" not in text and "Kingdom-wide" not in text
+
+    async def test_alliance_board_has_its_kingdom_wide_section_then_its_own(self, sf, fake, configured, second_tenant):
+        await _event(sf, configured, name="MOD Hunt")
+        await _event(sf, second_tenant, name="NSR Hunt")
+        await _event(sf, configured, name="Everyone Event", scope="kingdom-wide")
+        await _board(sf, scope="alliance", tenant_id=configured["id"])
+        await run_board_refresh(sf, fake, NOW)
+        text = _board_messages(fake)[0]
+        assert [line for line in text.splitlines() if line.startswith("### ")] == ["### Kingdom-wide", "### MOD"]
+        assert "NSR Hunt" not in text
 
     async def test_events_outside_the_seven_days_are_left_out(self, sf, fake, configured):
         await _event(sf, configured, name="Far Hunt", anchor=date(2026, 10, 20))
@@ -274,7 +429,7 @@ class TestFailures:
             def __init__(self):
                 self.flags = []
 
-            async def post_channel_message(self, token, channel_id, content, *, no_mentions=False):
+            async def post_channel_message(self, token, channel_id, content, *, no_mentions=False, components=None):
                 self.flags.append(no_mentions)
                 return "m1", ""
         await _event(sf, configured, name="@everyone Hunt")

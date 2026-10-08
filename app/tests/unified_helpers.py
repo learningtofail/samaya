@@ -29,6 +29,7 @@ class FakeDiscord:
         self.post_error = ""
         self.edit_error = ""
         self.delete_error = ""
+        self.fresh_reads: list[bool] = []
         self.components: dict[tuple[str, str], list] = {}  # spec §84: the latest components per message
         # Spec §87: roles and role membership.
         self.guild_roles: dict[str, dict[str, dict]] = {}   # guild_id -> role_id -> role
@@ -112,7 +113,8 @@ class FakeDiscord:
             "id": role_id, "name": name, "color": 0, "permissions": str(permissions),
             "managed": managed, "position": position}
 
-    async def get_role_context(self, token, guild_id):
+    async def get_role_context(self, token, guild_id, fresh=False):
+        self.fresh_reads.append(fresh)
         self.calls.append(("role_context", guild_id))
         if self.role_context_error:
             return {}, None, self.role_context_error

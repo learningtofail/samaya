@@ -82,14 +82,15 @@ function closeModalById(id) {
 // ── Delegated row actions ────────────────────────────────────
 // Per-row buttons built in template strings carry data-action="name" and a
 // data-* payload; one listener on the container maps the name to a handler.
-function bindActions(root, handlers) {
+// `signal` (optional AbortSignal) removes the listener, for a host that is re-bound each time a form opens.
+function bindActions(root, handlers, signal) {
   if (!root) return;
   root.addEventListener('click', (e) => {
     const el = e.target.closest('[data-action]');
     if (!el || !root.contains(el) || el.disabled) return;
     const fn = handlers[el.dataset.action];
     if (fn) fn(el, e);
-  });
+  }, signal ? { signal } : undefined);
 }
 
 // ── API ──────────────────────────────────────────────────────

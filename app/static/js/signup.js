@@ -31,6 +31,12 @@ function signupGroupRule(g) {
 // rows are mapping views from the API: one per server, role_id null when unset.
 function createSignupRoles(host, opts) {
   const state = { rows: [], warnings: [], servers: [], picking: null, busy: false, message: '' };
+  // The host element is reused every time a form opens. Without this, each open stacked another click
+  // handler on it, and one click on Create role also ran the handlers of every event opened before.
+  if (host._signupControl) host._signupControl.abort();
+  const control = new AbortController();
+  host._signupControl = control;
+  const alive = () => !control.signal.aborted;
   const base = opts.scope === 'event' ? `/api/events/${opts.id}/signup-roles` : `/api/event-types/${opts.id}/signup-roles`;
 
   function rowHtml(srv) {
@@ -77,6 +83,7 @@ function createSignupRoles(host, opts) {
   }
 
   function render() {
+    if (!alive()) return;
     const warnings = state.warnings.length
       ? `<ul class="form-errors" role="status">${state.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul>` : '';
     const msg = state.message ? `<p class="samaya-muted" role="status">${escapeHtml(state.message)}</p>` : '';
@@ -88,10 +95,12 @@ function createSignupRoles(host, opts) {
   async function refresh() {
     try {
       const data = await opts.load();
+      if (!alive()) return;
       state.rows = data.rows;
       state.warnings = data.warnings || [];
       state.servers = data.servers;
     } catch (e) {
+      if (!alive()) return;
       state.message = e.message;
       toast(e.message, true);
     }
@@ -163,7 +172,7 @@ function createSignupRoles(host, opts) {
       put({ server_id: serverId, remove: true }, 'Role removed from Samaya. The Discord role still exists.');
     },
     'cancel-pick'() { state.picking = null; render(); },
-  });
+  }, control.signal);
 
   refresh();
   return { refresh };

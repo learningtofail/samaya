@@ -278,6 +278,10 @@ async def handle_interaction_ex(db: AsyncSession, interaction: dict, now: dateti
             if session_factory is None:
                 from models import AsyncSessionLocal
                 session_factory = AsyncSessionLocal
+            from services.board_menus import handle_board_component  # spec §82.10: the board's private menus
+            board = await handle_board_component(db, interaction, discord, session_factory, now)
+            if board is not None:
+                return board
             signup = await handle_signup_component(db, interaction, discord, session_factory, now)  # spec §87
             if signup is not None:
                 return signup
