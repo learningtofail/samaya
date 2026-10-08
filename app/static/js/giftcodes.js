@@ -82,7 +82,7 @@ function giftRunRowHtml(r) {
   const why = r.stop_reason && GIFT_STOP_TEXT[r.stop_reason] ? `<div class="samaya-muted">${escapeHtml(GIFT_STOP_TEXT[r.stop_reason])}</div>` : '';
   return `<tr class="pf-v6-c-table__tr">
     <td class="pf-v6-c-table__td" data-label="Code"><code>${escapeHtml(r.code)}</code></td>
-    <td class="pf-v6-c-table__td samaya-muted" data-label="Started">${escapeHtml(fmtDateTime(r.started_at || r.created_at))}</td>
+    <td class="pf-v6-c-table__td samaya-muted" data-label="Started" data-sort="${escapeHtml(r.started_at || r.created_at)}">${escapeHtml(fmtDateTime(r.started_at || r.created_at))}</td>
     <td class="pf-v6-c-table__td" data-label="Status">${pfLabel(label, color)}${why}</td>
     <td class="pf-v6-c-table__td" data-label="Result">${escapeHtml(giftCountsText(r.counts))}</td>
     <td class="pf-v6-c-table__td" data-label="Actions"><button type="button" class="pf-v6-c-button pf-m-secondary pf-m-small" data-action="details" data-id="${r.id}">Details</button></td>

@@ -3561,3 +3561,14 @@ Built as specified in 87.1 to 87.10, with these notes.
 - **Admin UI.** `static/js/signup.js` holds the shared role rows and the attendance groups panel. The Events form has a "Buttons on reminders" group (the three checkboxes, the group select, the role rows in edit mode only, disabled for leadership-only). The Event types tab has an Attendance groups table and a Notify me roles dialog per type. The Schedule tab shows a green "N in" label.
 - **Migration.** `a1f0c0de0020`, chained from 0019, additive; verified on Postgres (upgrade, `alembic check`, downgrade, upgrade).
 - Tests: `tests/test_signup.py`, `tests/test_signup_api.py`.
+
+## 88. Sortable and collapsible tables (admin)
+
+Status: built (requested 2026-10-08).
+
+1. **Scope.** Every `table.pf-v6-c-table` in the admin console, including tables other scripts draw later. The Insights heatmap (`table.heat`) is excluded: its row and column order carry meaning.
+2. **Sorting.** A text header becomes a button. Click sorts ascending, click again descending, and the header carries `aria-sort`. Numbers sort by value, text with embedded numbers sorts naturally (`Bear #2` before `Bear #10`), empty cells stay last in both directions. A cell may carry `data-sort` (an ISO time, say) to sort by that instead of its text; the Schedule "When", Delivery log "Due" and Gift codes "Started" cells do. Headers named Actions or empty are not sortable. A table that other code redraws keeps its sort: a MutationObserver re-applies it, and a one-cell placeholder row ("No events") is left alone. Sorting is client side over the rows on screen, so it never changes what a filter or the server returns. The responsive card layout hides headers on narrow screens, where sorting is not offered.
+3. **Collapsing.** A "Hide table" / "Show table" button above each table (`aria-expanded`, `aria-controls`). It hides only the table, never the filters or the counts above it.
+4. **Memory.** The collapsed state and the chosen sort column and direction are kept per table in `localStorage` (`samaya_table_<table>_collapsed` and `_sort`). A blocked store is harmless: the choice lasts until reload.
+5. **Opt out.** `data-nosort` on a table or th, `data-nocollapse` on a table, `data-no-table-tools` on an ancestor.
+6. **Code.** `app/static/js/tables.js`, loaded after the other admin scripts; CSS at the end of `admin.css`. Tests: `tests/frontend/tables.test.js`. Not built: multi-column sort, sort on the server, remembering a sort across different filters.

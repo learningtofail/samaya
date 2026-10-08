@@ -600,3 +600,13 @@ textarea.pf-v6-c-form-control { min-height: 5rem; resize: vertical; }
 /* Notify me role rows (spec §87) */
 .audience__item .row-actions { flex-wrap: wrap; margin-top: var(--space-2); }
 .signup-picker { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
+
+/* Sortable and collapsible tables (spec §88) */
+.table-toggle { display: inline-flex; margin: 0 0 6px; padding: 2px 0; background: none; border: 0; color: var(--muted); font: inherit; font-size: var(--fs-xs); text-decoration: underline; cursor: pointer; }
+.table-toggle:hover { color: var(--ink); }
+.table-toggle:focus-visible, .sort-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.table--collapsed { display: none; }
+.sort-btn { display: inline-flex; align-items: center; gap: 6px; padding: 0; background: none; border: 0; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.sort-btn::after { content: "\2195"; opacity: .35; font-size: 1.1em; }
+.sort-btn[data-direction="asc"]::after { content: "\2191"; opacity: 1; }
+.sort-btn[data-direction="desc"]::after { content: "\2193"; opacity: 1; }
