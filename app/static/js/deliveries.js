@@ -124,7 +124,7 @@ function buildDeliveryRow(d) {
   const names = (d.alliance_names && d.alliance_names.length ? d.alliance_names : [d.tenant_name]).join(', ');
   const target = d.destination_label ? `<div class="samaya-muted">${escapeHtml(d.destination_label)}</div>` : '';
   return `<tr class="pf-v6-c-table__tr">
-    <td class="pf-v6-c-table__td" data-label="Due">${escapeHtml(fmtDateTime(d.due_at_utc))}</td>
+    <td class="pf-v6-c-table__td" data-label="Due" data-sort="${escapeHtml(d.due_at_utc)}">${escapeHtml(fmtDateTime(d.due_at_utc))}</td>
     <td class="pf-v6-c-table__td" data-label="Event"><strong>${escapeHtml(d.event_name)}</strong><div class="samaya-muted">${escapeHtml(d.occurrence_date)}</div></td>
     <td class="pf-v6-c-table__td" data-label="Alliance and kind">${escapeHtml(names)}${merged ? ` ${pfLabel('Merged', 'pf-m-blue')}` : ''}${target}<div class="samaya-muted">${escapeHtml(deliveryKindText(d))}</div></td>
     <td class="pf-v6-c-table__td" data-label="Status">${deliveryStatusLabel(d.status)}</td>

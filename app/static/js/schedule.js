@@ -119,7 +119,7 @@ function buildScheduleRow(occ) {
     </div>`;
   }
   return `<tr class="pf-v6-c-table__tr${cancelled ? ' is-cancelled' : ''}">
-    <td class="pf-v6-c-table__td" data-label="When">${whenHtml(occ.start_datetime_utc)}</td>
+    <td class="pf-v6-c-table__td" data-label="When" data-sort="${escapeHtml(occ.start_datetime_utc)}">${whenHtml(occ.start_datetime_utc)}</td>
     <td class="pf-v6-c-table__td" data-label="Event"><strong>${escapeHtml(occ.event_name)}</strong><div>${typeChip(occ.type)}</div></td>
     <td class="pf-v6-c-table__td" data-label="Alliance">${occAudienceHtml(occ)}</td>
     <td class="pf-v6-c-table__td" data-label="Status">${occStatusHtml(occ)}</td>
